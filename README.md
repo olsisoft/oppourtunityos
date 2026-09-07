@@ -62,7 +62,17 @@ A modular monolith on **Next.js 16 (App Router)**, **TypeScript**, **Tailwind CS
 
 ## Installation
 
-Requirements: Node.js 22+, npm 10+, PostgreSQL 14+.
+Requirements: Node.js 22+, npm 10+, and PostgreSQL 14+ (or Docker for the bundled `docker-compose.yml`).
+
+Quick start (five commands):
+
+```bash
+npm install
+cp .env.example .env            # generate AUTH_SECRET with: openssl rand -base64 32
+docker compose up -d            # or point DATABASE_URL at your own PostgreSQL
+npm run db:migrate && npm run db:seed
+npm run dev                     # http://localhost:3000 — demo@opportunityos.dev / demo1234
+```
 
 ```bash
 git clone <this repository>
@@ -89,7 +99,9 @@ See [`.env.example`](.env.example). Never commit real credentials.
 ## Database setup, migrations and seed
 
 ```bash
-# create the database (example)
+# create the database — either with Docker…
+docker compose up -d          # PostgreSQL 16 on localhost:5432, matches .env.example
+# …or with a local PostgreSQL
 createdb opportunityos
 
 # apply migrations (development: creates migrations from schema changes)
