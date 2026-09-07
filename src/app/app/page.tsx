@@ -128,7 +128,9 @@ export default async function DashboardPage({
                             </TableCell>
                             <TableCell className="text-muted-foreground">
                               {o.workspace.name}
-                              {o.workspace.isDemo ? " (demo)" : ""}
+                              {o.workspace.isDemo && !/demo/i.test(o.workspace.name)
+                                ? " (demo)"
+                                : ""}
                             </TableCell>
                             <TableCell
                               className={cn(
