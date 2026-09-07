@@ -97,7 +97,12 @@ export function OpportunityRadar({
                 const insights = deriveOpportunityInsights(o, graph.mechanisms.length);
                 return (
                   <TableRow key={o.id}>
-                    <TableCell className={cn("max-w-[14rem] font-medium", compact && "text-xs")}>
+                    <TableCell
+                      className={cn(
+                        "max-w-[14rem] font-medium",
+                        compact && "max-w-[11rem] text-xs",
+                      )}
+                    >
                       <Link
                         href={`/app/w/${graph.id}/opportunities/${o.id}`}
                         className="block truncate hover:underline"
