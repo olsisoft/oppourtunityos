@@ -1,0 +1,518 @@
+// OpportunityOS domain model.
+// Every discovery entity carries a `provenance` so hypotheses (AI reasoning)
+// are never confused with evidence (external / interview data).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum WorkspaceStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum EntryMode {
+  NO_IDEA
+  HAS_IDEA
+}
+
+enum DiscoveryStage {
+  START
+  USER_CONTEXT
+  MARKET_SELECTION
+  ICP_DISCOVERY
+  VARIABLE_DISCOVERY
+  PAIN_DISCOVERY
+  TRIGGER_DISCOVERY
+  ALTERNATIVE_DISCOVERY
+  EVIDENCE_DISCOVERY
+  MECHANISM_DISCOVERY
+  OPPORTUNITY_FORMATION
+  SCORING
+  RECOMMENDATION
+}
+
+enum Provenance {
+  USER
+  AI_HYPOTHESIS
+  EXTERNAL_EVIDENCE
+  INTERVIEW
+  COMPUTED
+}
+
+enum VariableCategory {
+  REVENUE
+  COST
+  TIME
+  RISK
+  CAPACITY
+  QUALITY
+  RETENTION
+  CONVERSION
+  PRODUCTIVITY
+  AVAILABILITY
+  COMPLIANCE
+  FRAUD
+  DOWNTIME
+  INVENTORY
+  MARGIN
+  OTHER
+}
+
+enum DesiredDirection {
+  INCREASE
+  DECREASE
+  ACCELERATE
+  IMPROVE
+  SIMPLIFY
+  PREVENT
+  AUTOMATE
+  OPTIMIZE
+  DETECT
+}
+
+enum AlternativeCategory {
+  SPREADSHEET
+  MANUAL_PROCESS
+  INTERNAL_EMPLOYEE
+  OUTSOURCING
+  COMPETITOR_SOFTWARE
+  MESSAGING
+  EMAIL
+  PHONE
+  CUSTOM_SOFTWARE
+  NO_SOLUTION
+  OTHER
+}
+
+enum EvidenceType {
+  FORUM_POST
+  REDDIT
+  REVIEW
+  COMPETITOR_REVIEW
+  INTERVIEW
+  SURVEY
+  JOB_POSTING
+  SEARCH_SIGNAL
+  CUSTOMER_QUOTE
+  MARKET_REPORT
+  MANUAL_NOTE
+  OTHER
+}
+
+/// POSITIVE = supports the pain / opportunity hypothesis.
+/// NEGATIVE = contradicts it. NEUTRAL = context only.
+enum EvidenceSentiment {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+}
+
+enum EvidenceOrigin {
+  USER_CAPTURED
+  INTERVIEW
+  RESEARCH_PROVIDER
+  DEMO
+}
+
+enum MechanismCategory {
+  AUTOMATION
+  AI_AGENT
+  PREDICTION
+  MONITORING
+  MARKETPLACE
+  WORKFLOW
+  FINTECH
+  COMPUTER_VISION
+  HARDWARE
+  ROBOTICS
+  OPTIMIZATION
+  API
+  DATA_AGGREGATION
+  VERTICAL_SAAS
+  INFRASTRUCTURE
+  OTHER
+}
+
+enum Verdict {
+  IGNORE
+  KILL
+  RESEARCH
+  INVESTIGATE
+  INTERVIEW
+  TEST
+}
+
+enum Confidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AssumptionStatus {
+  UNKNOWN
+  SUPPORTED
+  CONTRADICTED
+}
+
+enum EvidenceLinkDirection {
+  SUPPORTS
+  CONTRADICTS
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String?
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspaces Workspace[]
+}
+
+// ---------------------------------------------------------------------------
+// Workspace = one opportunity discovery project
+// ---------------------------------------------------------------------------
+
+model Workspace {
+  id            String          @id @default(cuid())
+  userId        String
+  name          String
+  description   String?
+  status        WorkspaceStatus @default(ACTIVE)
+  entryMode     EntryMode?
+  ideaStatement String?
+  isDemo        Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  markets       Market[]
+  evidence      Evidence[]
+  mechanisms    ProductMechanism[]
+  opportunities Opportunity[]
+  assumptions   Assumption[]
+  conversations Conversation[]
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Discovery pipeline entities
+// ---------------------------------------------------------------------------
+
+model Market {
+  id                  String     @id @default(cuid())
+  workspaceId         String
+  name                String
+  description         String?
+  attractivenessNotes String?
+  provenance          Provenance @default(AI_HYPOTHESIS)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  icps      ICP[]
+
+  @@index([workspaceId])
+}
+
+model ICP {
+  id               String     @id @default(cuid())
+  marketId         String
+  name             String
+  role             String?
+  companyType      String?
+  companySize      String?
+  responsibilities String?
+  economicBuyer    String?
+  userRole         String?
+  reachability     String?
+  notes            String?
+  provenance       Provenance @default(AI_HYPOTHESIS)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  market        Market        @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  variables     Variable[]
+  opportunities Opportunity[]
+
+  @@index([marketId])
+}
+
+model Variable {
+  id               String           @id @default(cuid())
+  icpId            String
+  name             String
+  description      String?
+  category         VariableCategory @default(OTHER)
+  desiredDirection DesiredDirection @default(IMPROVE)
+  importanceScore  Int              @default(5)
+  notes            String?
+  provenance       Provenance       @default(AI_HYPOTHESIS)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  icp           ICP           @relation(fields: [icpId], references: [id], onDelete: Cascade)
+  pains         Pain[]
+  opportunities Opportunity[]
+
+  @@index([icpId])
+}
+
+model Pain {
+  id             String     @id @default(cuid())
+  variableId     String
+  description    String
+  severityScore  Int        @default(5)
+  frequencyScore Int        @default(5)
+  currentState   String?
+  desiredState   String?
+  gapDescription String?
+  notes          String?
+  provenance     Provenance @default(AI_HYPOTHESIS)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  variable      Variable           @relation(fields: [variableId], references: [id], onDelete: Cascade)
+  triggers      Trigger[]
+  alternatives  Alternative[]
+  evidence      Evidence[]
+  mechanisms    ProductMechanism[]
+  opportunities Opportunity[]
+
+  @@index([variableId])
+}
+
+model Trigger {
+  id           String     @id @default(cuid())
+  painId       String
+  description  String
+  urgencyScore Int        @default(5)
+  frequency    String?
+  notes        String?
+  provenance   Provenance @default(AI_HYPOTHESIS)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  pain Pain @relation(fields: [painId], references: [id], onDelete: Cascade)
+
+  @@index([painId])
+}
+
+model Alternative {
+  id                  String              @id @default(cuid())
+  painId              String
+  name                String
+  category            AlternativeCategory @default(OTHER)
+  description         String?
+  costEstimate        String?
+  weaknessDescription String?
+  weaknessScore       Int                 @default(5)
+  notes               String?
+  provenance          Provenance          @default(AI_HYPOTHESIS)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  pain Pain @relation(fields: [painId], references: [id], onDelete: Cascade)
+
+  @@index([painId])
+}
+
+/// Evidence is always EXTERNAL to the AI: captured by the user, from an
+/// interview, or from a research provider. It is never generated by the LLM.
+model Evidence {
+  id                String            @id @default(cuid())
+  workspaceId       String
+  painId            String?
+  opportunityId     String?
+  type              EvidenceType
+  origin            EvidenceOrigin    @default(USER_CAPTURED)
+  sourceTitle       String
+  sourceUrl         String?
+  sourceExcerpt     String
+  sourceDate        DateTime?
+  sourceAuthor      String?
+  relevanceScore    Int               @default(5)
+  strengthScore     Int               @default(5)
+  sentiment         EvidenceSentiment @default(NEUTRAL)
+  /// Signals used by the evidence engine. Set by the user (or a validated
+  /// AI summary confirmed by the user).
+  isDirectCustomer  Boolean           @default(false)
+  hasExplicitPain   Boolean           @default(false)
+  hasEconomicImpact Boolean           @default(false)
+  hasWorkaround     Boolean           @default(false)
+  hasPurchaseIntent Boolean           @default(false)
+  isDemo            Boolean           @default(false)
+  isMocked          Boolean           @default(false)
+  providerName      String?
+  capturedAt        DateTime          @default(now())
+
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pain            Pain?                @relation(fields: [painId], references: [id], onDelete: SetNull)
+  opportunity     Opportunity?         @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  assumptionLinks AssumptionEvidence[]
+
+  @@index([workspaceId])
+  @@index([painId])
+  @@index([opportunityId])
+}
+
+model ProductMechanism {
+  id          String            @id @default(cuid())
+  workspaceId String
+  painId      String?
+  name        String
+  description String?
+  category    MechanismCategory @default(OTHER)
+  provenance  Provenance        @default(AI_HYPOTHESIS)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pain      Pain?     @relation(fields: [painId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Opportunity = ICP x Variable x Movement, scored deterministically
+// ---------------------------------------------------------------------------
+
+model Opportunity {
+  id                String     @id @default(cuid())
+  workspaceId       String
+  icpId             String?
+  variableId        String?
+  painId            String?
+  title             String
+  problemStatement  String?
+  mechanism         String?
+  productHypothesis String?
+  valueProposition  String?
+  metric            String?
+
+  // Scoring inputs (0-10), proposed by AI or user, editable by the user.
+  importance          Int @default(5)
+  painIntensity       Int @default(5)
+  frequency           Int @default(5)
+  gap                 Int @default(5)
+  willingnessToPay    Int @default(5)
+  alternativeWeakness Int @default(5)
+
+  // Computed outputs (never written by the LLM).
+  opportunityScore  Int        @default(0)
+  evidenceScore     Int        @default(0)
+  verdict           Verdict    @default(IGNORE)
+  confidence        Confidence @default(LOW)
+  scoreBreakdown    Json?
+  evidenceBreakdown Json?
+  verdictReasons    Json?
+  killWarnings      Json?
+
+  risks          String[]   @default([])
+  nextSteps      String[]   @default([])
+  interviewGuide Json?
+  provenance     Provenance @default(AI_HYPOTHESIS)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  icp         ICP?         @relation(fields: [icpId], references: [id], onDelete: SetNull)
+  variable    Variable?    @relation(fields: [variableId], references: [id], onDelete: SetNull)
+  pain        Pain?        @relation(fields: [painId], references: [id], onDelete: SetNull)
+  evidence    Evidence[]
+  assumptions Assumption[]
+
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Assumption ledger
+// ---------------------------------------------------------------------------
+
+model Assumption {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  opportunityId String?
+  statement     String
+  status        AssumptionStatus @default(UNKNOWN)
+  importance    Int              @default(5)
+  confidence    Int              @default(0)
+  notes         String?
+  provenance    Provenance       @default(AI_HYPOTHESIS)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  opportunity Opportunity?         @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  links       AssumptionEvidence[]
+
+  @@index([workspaceId])
+  @@index([opportunityId])
+}
+
+model AssumptionEvidence {
+  assumptionId String
+  evidenceId   String
+  direction    EvidenceLinkDirection
+  createdAt    DateTime              @default(now())
+
+  assumption Assumption @relation(fields: [assumptionId], references: [id], onDelete: Cascade)
+  evidence   Evidence   @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@id([assumptionId, evidenceId])
+}
+
+// ---------------------------------------------------------------------------
+// Conversation (the chat is an interface, not the database)
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id          String         @id @default(cuid())
+  workspaceId String
+  stage       DiscoveryStage @default(START)
+  userContext Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([workspaceId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  /// Structured payload attached to assistant turns (extraction summary,
+  /// question card, suggested replies). Validated before persistence.
+  payload        Json?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}

@@ -1,0 +1,136 @@
+import Link from "next/link";
+
+import { KillCriteria } from "@/components/opportunity/kill-criteria";
+import { ProvenanceBadge } from "@/components/shared/provenance-badge";
+import { ScorePill } from "@/components/shared/score-pill";
+import { VerdictBadge } from "@/components/shared/verdict-badge";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import type { OpportunityWithRelations } from "@/db/workspaces";
+import { ASSUMPTION_STATUS_LABELS, DIRECTION_LABELS } from "@/domain/enums";
+import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
+
+export function OpportunityCard({
+  opportunity: o,
+  insights,
+  workspaceId,
+  mechanisms,
+}: {
+  opportunity: OpportunityWithRelations;
+  insights: OpportunityInsights;
+  workspaceId: string;
+  mechanisms: string[];
+}) {
+  const trigger = o.pain?.triggers[0];
+  const alternative = o.pain?.alternatives[0];
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <VerdictBadge verdict={o.verdict} />
+              <ProvenanceBadge provenance={o.provenance} />
+            </div>
+            <h3 className="mt-2 text-base font-semibold">
+              <Link
+                href={`/app/w/${workspaceId}/opportunities/${o.id}`}
+                className="hover:underline"
+              >
+                {o.title}
+              </Link>
+            </h3>
+          </div>
+          <div className="flex gap-4">
+            <ScorePill value={o.opportunityScore} label="Potential" />
+            <ScorePill value={o.evidenceScore} label="Evidence" />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
+        <Row label="ICP" value={o.icp?.name} />
+        <Row
+          label="Variable"
+          value={
+            o.variable
+              ? `${DIRECTION_LABELS[o.variable.desiredDirection]} × ${o.variable.name}`
+              : null
+          }
+        />
+        <Row label="Pain" value={o.pain?.description} />
+        <Row label="Trigger" value={trigger?.description} />
+        <Row
+          label="Alternative"
+          value={
+            alternative
+              ? `${alternative.name} — ${alternative.weaknessDescription ?? "failure UNKNOWN"}`
+              : null
+          }
+        />
+        <Row
+          label="Mechanism"
+          value={o.mechanism ?? (mechanisms.length ? mechanisms.join(", ") : null)}
+        />
+        <Row label="Value proposition" value={o.valueProposition} className="sm:col-span-2" />
+        <div className="sm:col-span-2">
+          <p className="text-muted-foreground text-xs font-medium">Kill criteria</p>
+          <KillCriteria warnings={insights.killWarnings} className="mt-1" />
+        </div>
+        <div className="sm:col-span-2">
+          <p className="text-muted-foreground text-xs font-medium">
+            Assumptions ({o.assumptions.length})
+          </p>
+          {o.assumptions.length === 0 ? (
+            <p className="text-muted-foreground mt-1 text-xs">No assumptions recorded.</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {o.assumptions.slice(0, 4).map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span>{a.statement}</span>
+                  <Badge
+                    variant={
+                      a.status === "SUPPORTED"
+                        ? "positive"
+                        : a.status === "CONTRADICTED"
+                          ? "negative"
+                          : "muted"
+                    }
+                  >
+                    {ASSUMPTION_STATUS_LABELS[a.status]}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {insights.primaryAction && (
+          <div className="bg-muted/60 rounded-md p-3 sm:col-span-2">
+            <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+              Next step
+            </p>
+            <p className="mt-0.5 text-sm font-medium">{insights.primaryAction.title}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Row({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string | null | undefined;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <p className="text-muted-foreground text-xs font-medium">{label}</p>
+      <p className="mt-0.5">
+        {value?.trim() ? value : <span className="text-muted-foreground">UNKNOWN</span>}
+      </p>
+    </div>
+  );
+}
