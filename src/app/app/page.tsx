@@ -16,8 +16,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getDashboardData } from "@/db/dashboard";
-import { STAGE_LABELS, VERDICT_ORDER, VERDICT_TONE } from "@/domain/enums";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
+import { EVIDENCE_GAP_LABELS, getDashboardData } from "@/db/dashboard";
+import {
+  ASSUMPTION_KIND_LABELS,
+  STAGE_LABELS,
+  VALUE_CHAIN_LEVEL_LABELS,
+  VERDICT_ORDER,
+  VERDICT_TONE,
+} from "@/domain/enums";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +50,7 @@ export default async function DashboardPage({
             {data.totals.workspaces} active workspace{data.totals.workspaces === 1 ? "" : "s"} ·{" "}
             {data.totals.opportunities} opportunit{data.totals.opportunities === 1 ? "y" : "ies"} ·{" "}
             {data.totals.evidence} evidence item{data.totals.evidence === 1 ? "" : "s"} ·{" "}
-            {data.totals.untestedAssumptions} untested critical assumption
+            {data.totals.untestedAssumptions} untested assumption
             {data.totals.untestedAssumptions === 1 ? "" : "s"}
           </p>
         </div>
@@ -65,16 +73,29 @@ export default async function DashboardPage({
             {data.nextAction ? (
               <div className="bg-foreground text-background rounded-lg p-5">
                 <p className="text-background/70 text-[10px] font-medium tracking-wider uppercase">
-                  Next recommended research action
+                  Next best action
                 </p>
                 <p className="mt-1 flex items-start gap-2 text-base font-medium">
-                  <ArrowRight className="mt-1 size-4 shrink-0" /> {data.nextAction.title}
+                  <ArrowRight className="mt-1 size-4 shrink-0" />{" "}
+                  {data.nextValueAction?.what ?? data.nextAction.title}
                 </p>
-                <p className="text-background/80 mt-1 text-sm">{data.nextAction.rationale}</p>
+                <p className="text-background/80 mt-1 text-sm">
+                  {data.nextValueAction?.why ?? data.nextAction.rationale}
+                </p>
+                {data.nextValueAction && (
+                  <p className="text-background/70 mt-1 text-xs">
+                    If false: {data.nextValueAction.ifFalse}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Badge variant="outline" className="border-background/30 text-background">
                     {data.nextAction.opportunityTitle}
                   </Badge>
+                  {data.nextValueAction && (
+                    <Badge variant="outline" className="border-background/30 text-background">
+                      Proof frontier: {frontierText(data.nextValueAction.frontier)}
+                    </Badge>
+                  )}
                   <Button size="sm" variant="secondary" asChild>
                     <Link
                       href={`/app/w/${data.nextAction.workspaceId}/opportunities/${data.nextAction.opportunityId}`}
@@ -97,64 +118,64 @@ export default async function DashboardPage({
                 <CardHeader>
                   <CardTitle>Strongest opportunities</CardTitle>
                   <CardDescription>
-                    Ranked by Opportunity Potential. Evidence Confidence decides whether the
-                    potential is real.
+                    Ranked by Opportunity Potential. Evidence says whether the problem is real,
+                    Value how much moving the variable is worth, Causal whether the mechanism can
+                    move it. Hover the title for the Proof Frontier.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.strongest.length === 0 ? (
                     <p className="text-muted-foreground text-sm">Nothing scored yet.</p>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Opportunity</TableHead>
-                          <TableHead>Workspace</TableHead>
-                          <TableHead className="text-right">Potential</TableHead>
-                          <TableHead className="text-right">Evidence</TableHead>
-                          <TableHead>Verdict</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {data.strongest.map(({ opportunity: o }) => (
-                          <TableRow key={o.id}>
-                            <TableCell className="max-w-[16rem] font-medium">
-                              <Link
-                                href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
-                                className="block truncate hover:underline"
-                              >
-                                {o.title}
-                              </Link>
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {o.workspace.name}
-                              {o.workspace.isDemo && !/demo/i.test(o.workspace.name)
-                                ? " (demo)"
-                                : ""}
-                            </TableCell>
-                            <TableCell
-                              className={cn(
-                                "text-right font-mono tabular-nums",
-                                scoreTone(o.opportunityScore),
-                              )}
-                            >
-                              {o.opportunityScore}
-                            </TableCell>
-                            <TableCell
-                              className={cn(
-                                "text-right font-mono tabular-nums",
-                                scoreTone(o.evidenceScore),
-                              )}
-                            >
-                              {o.evidenceScore}
-                            </TableCell>
-                            <TableCell>
-                              <VerdictBadge verdict={o.verdict} />
-                            </TableCell>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Opportunity</TableHead>
+                            <TableHead>Workspace</TableHead>
+                            <Head label="Potential" question={SCORE_QUESTIONS.potential} />
+                            <Head label="Evidence" question={SCORE_QUESTIONS.evidence} />
+                            <Head label="Value" question={SCORE_QUESTIONS.value} />
+                            <Head label="Causal" question={SCORE_QUESTIONS.causal} />
+                            <TableHead>Verdict</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {data.strongest.map(({ opportunity: o }) => (
+                            <TableRow key={o.id}>
+                              <TableCell className="max-w-[16rem] font-medium">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Link
+                                      href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
+                                      className="block truncate hover:underline"
+                                    >
+                                      {o.title}
+                                    </Link>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Proof frontier: {frontierText(o.proofFrontierRung)}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {o.workspace.name}
+                                {o.workspace.isDemo && !/demo/i.test(o.workspace.name)
+                                  ? " (demo)"
+                                  : ""}
+                              </TableCell>
+                              <Score value={o.opportunityScore} />
+                              <Score value={o.evidenceScore} />
+                              <Score value={o.valueStrength} />
+                              <Score value={o.causalConfidence} />
+                              <TableCell>
+                                <VerdictBadge verdict={o.verdict} />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -190,7 +211,8 @@ export default async function DashboardPage({
                 <CardHeader>
                   <CardTitle>Weakest assumptions</CardTitle>
                   <CardDescription>
-                    Untested, high importance. Each one can collapse an opportunity.
+                    Untested, high importance. Causal and value assumptions rank first: if one is
+                    false, the opportunity collapses.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -204,7 +226,25 @@ export default async function DashboardPage({
                       {data.weakestAssumptions.map((a) => (
                         <li key={a.id} className="flex items-start justify-between gap-3 text-sm">
                           <div className="min-w-0">
-                            <p>{a.statement}</p>
+                            <div className="flex items-center gap-1.5">
+                              <Badge
+                                variant={a.kind === "GENERIC" ? "muted" : "outline"}
+                                className="text-[10px]"
+                              >
+                                {ASSUMPTION_KIND_LABELS[a.kind]}
+                              </Badge>
+                              {a.valueChainNode && (
+                                <span className="text-muted-foreground text-[11px]">
+                                  on {VALUE_CHAIN_LEVEL_LABELS[a.valueChainNode.level]}
+                                </span>
+                              )}
+                              {a.causalLink && (
+                                <span className="text-muted-foreground text-[11px]">
+                                  on a causal link
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-0.5">{a.statement}</p>
                             <p className="text-muted-foreground text-xs">
                               {a.workspace.name}
                               {a.opportunity ? ` · ${a.opportunity.title}` : ""} · {a.links.length}{" "}
@@ -225,29 +265,31 @@ export default async function DashboardPage({
                 <CardHeader>
                   <CardTitle>Evidence gaps</CardTitle>
                   <CardDescription>
-                    High potential (≥ 60) with low evidence (&lt; 40). Research before anything
-                    else.
+                    What kind of evidence is missing: the problem itself, its economic magnitude,
+                    the causal chain, willingness to pay or mechanism feasibility.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.evidenceGaps.length === 0 ? (
                     <p className="text-muted-foreground text-sm">
-                      No high-potential opportunity is starved of evidence.
+                      No open evidence gap on a live opportunity.
                     </p>
                   ) : (
                     <ul className="space-y-2">
-                      {data.evidenceGaps.map(({ opportunity: o, insights }) => (
-                        <li key={o.id} className="text-sm">
-                          <Link
-                            href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
-                            className="font-medium hover:underline"
-                          >
-                            {o.title}
-                          </Link>
-                          <p className="text-muted-foreground text-xs">
-                            potential {o.opportunityScore} · evidence {o.evidenceScore} ·{" "}
-                            {insights.evidenceBreakdown?.gaps[0] ?? "no evidence captured"}
-                          </p>
+                      {data.evidenceGaps.map(({ opportunity: o, kind, detail }) => (
+                        <li key={`${o.id}-${kind}`} className="text-sm">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px]">
+                              {EVIDENCE_GAP_LABELS[kind]}
+                            </Badge>
+                            <Link
+                              href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
+                              className="font-medium hover:underline"
+                            >
+                              {o.title}
+                            </Link>
+                          </div>
+                          <p className="text-muted-foreground text-xs">{detail}</p>
                         </li>
                       ))}
                     </ul>
@@ -291,5 +333,34 @@ export default async function DashboardPage({
         )}
       </div>
     </div>
+  );
+}
+
+function Head({ label, question }: { label: string; question: string }) {
+  return (
+    <TableHead className="text-right">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="cursor-help underline decoration-dotted underline-offset-2">
+            {label}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{question}</TooltipContent>
+      </Tooltip>
+    </TableHead>
+  );
+}
+
+function Score({ value }: { value: number | null }) {
+  return (
+    <TableCell className="text-right font-mono tabular-nums">
+      {value === null ? (
+        <span className="text-tone-warning text-[10px] font-semibold tracking-wide">
+          INCOMPLETE
+        </span>
+      ) : (
+        <span className={cn(scoreTone(value))}>{value}</span>
+      )}
+    </TableCell>
   );
 }

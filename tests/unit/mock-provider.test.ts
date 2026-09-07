@@ -25,7 +25,14 @@ function hints(overrides: Partial<TurnHints> = {}): TurnHints {
       scoredOpportunities: 0,
     },
     userContext: null,
-    existing: { markets: [], icps: [], variables: [], pains: [], mechanisms: [] },
+    existing: {
+      markets: [],
+      icps: [],
+      variables: [],
+      pains: [],
+      mechanisms: [],
+      opportunities: [],
+    },
     ...overrides,
   };
 }
@@ -91,13 +98,14 @@ describe("mock provider", () => {
           variables: ["Missed calls"],
           pains: ["Missed calls are worse than they should be"],
           mechanisms: ["Risk prediction"],
+          opportunities: [],
         },
       }),
     );
     expect(extraction.opportunities).toHaveLength(1);
     expect(extraction.opportunities[0].inputs.importance).toBeGreaterThanOrEqual(0);
     expect(reply).toMatch(
-      /computes Opportunity Potential, Evidence Confidence and the verdict deterministically/,
+      /computes Opportunity Potential, Evidence Confidence, Value Strength, Causal Confidence, the Proof Frontier and the verdict deterministically/,
     );
     expect(reply).not.toMatch(/\b\d{2}\/100\b/);
   });

@@ -7,9 +7,12 @@
 import { z } from "zod";
 import {
   AlternativeCategory,
+  AssumptionKind,
+  Criticality,
   DesiredDirection,
   DiscoveryStage,
   MechanismCategory,
+  ValueChainLevel,
   VariableCategory,
 } from "@/generated/prisma/enums";
 
@@ -27,10 +30,23 @@ const mechanismCategory = z.enum(
   Object.values(MechanismCategory) as [MechanismCategory, ...MechanismCategory[]],
 );
 
+const assumptionKind = z.enum(
+  Object.values(AssumptionKind) as [AssumptionKind, ...AssumptionKind[]],
+);
+const valueLevel = z.enum(
+  Object.values(ValueChainLevel) as [ValueChainLevel, ...ValueChainLevel[]],
+);
+const criticality = z.enum(Object.values(Criticality) as [Criticality, ...Criticality[]]);
+
 const source = z
   .enum(["USER", "AI_HYPOTHESIS"])
   .describe("USER only if the user stated it; otherwise AI_HYPOTHESIS");
 const score = z.number().describe("Integer 0-10. Use 5 when unknown.");
+/** Value dimensions and measured states are never guessed: null means UNKNOWN. */
+const nullableScore = z
+  .number()
+  .nullable()
+  .describe("Integer 0-10, or null when UNKNOWN. Never guess; null is the honest answer.");
 const text = z.string();
 const optText = z.string().nullable();
 
@@ -69,8 +85,28 @@ export const VariableDraftSchema = z.object({
   name: text,
   description: optText,
   category: variableCategory,
-  desiredDirection: direction,
+  desiredDirection: direction.describe(
+    "The action verb: what movement the ICP wants (Reduce, Increase, Protect, ...).",
+  ),
   importanceScore: score,
+  target: optText.describe(
+    "What exactly is moved, e.g. 'booked appointments that become unused capacity'. null if UNKNOWN.",
+  ),
+  currentState: optText.describe(
+    "Only what the user or evidence stated, e.g. 'Estimated 12–20%'. null if UNKNOWN. Never invent a number.",
+  ),
+  desiredState: optText.describe("Only what was stated. null if UNKNOWN."),
+  unit: optText.describe("Unit of measure, e.g. '% of appointments'. null if UNKNOWN."),
+  whoValuesIt: optText,
+  whyItMatters: optText,
+  parentVariableName: optText.describe(
+    "The higher-order economic variable this one feeds, e.g. 'Revenue per available chair-hour'. null if UNKNOWN.",
+  ),
+  userStatedFields: z
+    .array(z.string())
+    .describe(
+      "Names of the fields above whose values the USER actually stated (e.g. ['currentState']). Everything else is AI_HYPOTHESIS.",
+    ),
   source,
 });
 
@@ -111,10 +147,67 @@ export const MechanismDraftSchema = z.object({
   category: mechanismCategory,
 });
 
+export const CausalLinkRefSchema = z.object({ fromLevel: valueLevel, toLevel: valueLevel });
+
 export const AssumptionDraftSchema = z.object({
   statement: text,
   importance: score,
+  kind: assumptionKind.describe(
+    "CAUSAL: 'if mechanism X then variable moves'. VALUE: 'the movement is worth enough'. FEASIBILITY: 'the mechanism can be built / data exists'. WTP: willingness to pay. ACCESS: buyers can be reached. GENERIC otherwise.",
+  ),
   opportunityTitle: optText.describe("Title of the opportunity this assumption belongs to, if any"),
+  linkedLevel: valueLevel
+    .nullable()
+    .describe("Value chain level this assumption is about, or null"),
+  linkedCausalLink: CausalLinkRefSchema.nullable().describe(
+    "Causal link this assumption is the load-bearing belief of, or null",
+  ),
+});
+
+export const ValueChainNodeDraftSchema = z.object({
+  level: valueLevel,
+  statement: text.describe(
+    "One sentence stating what happens at this level. A hypothesis unless evidence is linked.",
+  ),
+});
+
+export const CausalLinkDraftSchema = z.object({
+  fromLevel: valueLevel,
+  toLevel: valueLevel,
+  statement: text.describe("The causal assumption that connects the two levels; must be testable."),
+  criticality: criticality,
+});
+
+export const ValueChainDraftSchema = z.object({
+  opportunityTitle: text,
+  nodes: z
+    .array(ValueChainNodeDraftSchema)
+    .describe(
+      "One node per level: MECHANISM, CAPABILITY, TRANSFORMATION, OPERATIONAL_VALUE, ECONOMIC_VALUE, STRATEGIC_OUTCOME (BUSINESS_OUTCOME optional).",
+    ),
+  links: z.array(CausalLinkDraftSchema),
+});
+
+export const ValueDimensionsDraftSchema = z.object({
+  opportunityTitle: text,
+  importance: nullableScore,
+  magnitude: nullableScore,
+  frequency: nullableScore,
+  population: nullableScore,
+  attributability: nullableScore,
+  justification: optText,
+  userStatedDimensions: z
+    .array(z.string())
+    .describe("Dimensions whose value the USER stated; others are AI_HYPOTHESIS."),
+});
+
+export const ExperimentDraftSchema = z.object({
+  opportunityTitle: text,
+  title: text,
+  hypothesis: text.describe("The falsifiable statement the experiment tests."),
+  design: optText,
+  successMetric: optText,
+  causalLink: CausalLinkRefSchema.nullable(),
 });
 
 export const OpportunityInputsDraftSchema = z.object({
@@ -164,11 +257,17 @@ export const DiscoveryExtractionSchema = z.object({
   mechanisms: z.array(MechanismDraftSchema),
   assumptions: z.array(AssumptionDraftSchema),
   opportunities: z.array(OpportunityDraftSchema),
+  valueChains: z.array(ValueChainDraftSchema),
+  valueDimensions: z.array(ValueDimensionsDraftSchema),
+  experiments: z.array(ExperimentDraftSchema),
   suggestedReplies: z.array(text),
   questionCard: QuestionCardSchema.nullable(),
 });
 
 export type DiscoveryExtraction = z.infer<typeof DiscoveryExtractionSchema>;
+export type ValueChainDraft = z.infer<typeof ValueChainDraftSchema>;
+export type ValueDimensionsDraft = z.infer<typeof ValueDimensionsDraftSchema>;
+export type ExperimentDraft = z.infer<typeof ExperimentDraftSchema>;
 export type OpportunityDraft = z.infer<typeof OpportunityDraftSchema>;
 export type QuestionCard = z.infer<typeof QuestionCardSchema>;
 

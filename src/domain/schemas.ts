@@ -5,8 +5,13 @@
 import { z } from "zod";
 import {
   AlternativeCategory,
+  AssumptionKind,
   AssumptionStatus,
+  ClaimType,
+  Criticality,
   DesiredDirection,
+  ExperimentStatus,
+  ValueChainLevel,
   EntryMode,
   EvidenceSentiment,
   EvidenceType,
@@ -56,6 +61,15 @@ export const updateWorkspaceSchema = z.object({
   ideaStatement: optionalLong,
 });
 
+export const evidenceClaimInputSchema = z.object({
+  claimType: z.nativeEnum(ClaimType),
+  opportunityId: optionalId,
+  valueChainNodeId: optionalId,
+  causalLinkId: optionalId,
+  direction: z.enum(["SUPPORTS", "CONTRADICTS", "NEUTRAL"]).default("SUPPORTS"),
+});
+export type EvidenceClaimInput = z.infer<typeof evidenceClaimInputSchema>;
+
 export const createEvidenceSchema = z.object({
   workspaceId: z.string().min(1),
   painId: optionalId,
@@ -91,6 +105,8 @@ export const createEvidenceSchema = z.object({
   hasWorkaround: z.coerce.boolean().default(false),
   hasPurchaseIntent: z.coerce.boolean().default(false),
   isInterview: z.coerce.boolean().default(false),
+  /** "What claim does this evidence affect?" — one item may affect several claims. */
+  claims: z.array(evidenceClaimInputSchema).max(40).default([]),
 });
 
 export const opportunityInputsSchema = z.object({
@@ -135,6 +151,9 @@ export const updateOpportunitySchema = z.object({
 export const createAssumptionSchema = z.object({
   workspaceId: z.string().min(1),
   opportunityId: optionalId,
+  valueChainNodeId: optionalId,
+  causalLinkId: optionalId,
+  kind: z.nativeEnum(AssumptionKind).default(AssumptionKind.GENERIC),
   statement: z.string().trim().min(3).max(500),
   importance: score10,
   status: z.nativeEnum(AssumptionStatus).default(AssumptionStatus.UNKNOWN),
@@ -146,13 +165,90 @@ export const updateAssumptionSchema = z.object({
   statement: z.string().trim().min(3).max(500).optional(),
   importance: score10.optional(),
   status: z.nativeEnum(AssumptionStatus).optional(),
+  kind: z.nativeEnum(AssumptionKind).optional(),
+  valueChainNodeId: optionalId,
+  causalLinkId: optionalId,
   notes: optionalLong,
 });
 
 export const linkAssumptionEvidenceSchema = z.object({
   assumptionId: z.string().min(1),
   evidenceId: z.string().min(1),
-  direction: z.enum(["SUPPORTS", "CONTRADICTS"]),
+  direction: z.enum(["SUPPORTS", "CONTRADICTS", "NEUTRAL"]),
+});
+
+// ---- Value engineering -------------------------------------------------------
+
+export const upsertValueChainNodeSchema = z.object({
+  opportunityId: z.string().min(1),
+  level: z.nativeEnum(ValueChainLevel),
+  statement: z.string().trim().min(3).max(500),
+  notes: optionalLong,
+});
+
+export const upsertCausalLinkSchema = z.object({
+  opportunityId: z.string().min(1),
+  fromLevel: z.nativeEnum(ValueChainLevel),
+  toLevel: z.nativeEnum(ValueChainLevel),
+  statement: z.string().trim().min(3).max(500),
+  criticality: z.nativeEnum(Criticality).default(Criticality.CRITICAL),
+  notes: optionalLong,
+});
+
+export const linkEvidenceClaimSchema = z.object({
+  evidenceId: z.string().min(1),
+  opportunityId: optionalId,
+  claimType: z.nativeEnum(ClaimType),
+  claimId: optionalId,
+  valueChainNodeId: optionalId,
+  causalLinkId: optionalId,
+  direction: z.enum(["SUPPORTS", "CONTRADICTS", "NEUTRAL"]).default("SUPPORTS"),
+  note: optionalLong,
+});
+
+const nullableScore10 = z.union([z.coerce.number().int().min(0).max(10), z.null()]).optional();
+
+export const updateValueDimensionsSchema = z.object({
+  opportunityId: z.string().min(1),
+  importance: nullableScore10,
+  magnitude: nullableScore10,
+  frequency: nullableScore10,
+  population: nullableScore10,
+  attributability: nullableScore10,
+});
+
+export const updateVariableValueFieldsSchema = z.object({
+  variableId: z.string().min(1),
+  name: shortText.optional(),
+  category: z.nativeEnum(VariableCategory).optional(),
+  desiredDirection: z.nativeEnum(DesiredDirection).optional(),
+  importanceScore: score10.optional(),
+  target: optionalLong,
+  currentState: optionalLong,
+  desiredState: optionalLong,
+  unit: optionalLong,
+  whoValuesIt: optionalLong,
+  whyItMatters: optionalLong,
+  parentVariableId: optionalId,
+  description: optionalLong,
+});
+
+export const createExperimentSchema = z.object({
+  opportunityId: z.string().min(1),
+  causalLinkId: optionalId,
+  assumptionId: optionalId,
+  title: shortText,
+  hypothesis: z.string().trim().min(3).max(1000),
+  design: optionalLong,
+  successMetric: optionalLong,
+});
+
+export const updateExperimentSchema = z.object({
+  experimentId: z.string().min(1),
+  status: z.nativeEnum(ExperimentStatus).optional(),
+  result: optionalLong,
+  design: optionalLong,
+  successMetric: optionalLong,
 });
 
 export const updateVariableSchema = z.object({

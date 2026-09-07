@@ -16,6 +16,9 @@ export interface AppliedCounts {
   mechanisms?: number;
   assumptions?: number;
   opportunities?: number;
+  valueChainNodes?: number;
+  causalLinks?: number;
+  experiments?: number;
 }
 
 const APPLIED_LABELS: Array<[keyof AppliedCounts, string]> = [
@@ -27,6 +30,9 @@ const APPLIED_LABELS: Array<[keyof AppliedCounts, string]> = [
   ["alternatives", "alternative"],
   ["mechanisms", "mechanism"],
   ["opportunities", "opportunity"],
+  ["valueChainNodes", "value chain level"],
+  ["causalLinks", "causal link"],
+  ["experiments", "experiment"],
   ["assumptions", "assumption"],
 ];
 

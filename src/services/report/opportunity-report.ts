@@ -2,13 +2,29 @@
  * Opportunity Report — the artifact produced at the end of discovery.
  * Pure transformation of the persisted state into a report object plus a
  * Markdown rendering. Provenance is preserved so hypotheses are never shown
- * as facts.
+ * as facts. Sections follow the value-engineering order A–N:
+ * ICP · Valuable variable · Pain · Trigger · Alternatives · Mechanisms ·
+ * Product hypothesis · Value proposition · Value causality ladder ·
+ * Proof frontier · Scorecard · Riskiest assumption · Next best action ·
+ * Kill criteria.
  */
 import type { OpportunityWithRelations } from "@/db/workspaces";
-import { DIRECTION_LABELS, PROVENANCE_LABELS, VERDICT_LABELS } from "@/domain/enums";
+import {
+  ASSUMPTION_KIND_LABELS,
+  CRITICALITY_LABELS,
+  DIRECTION_LABELS,
+  EPISTEMIC_LABELS,
+  PROVENANCE_LABELS,
+  VALUE_CHAIN_LEVEL_LABELS,
+  VERDICT_LABELS,
+} from "@/domain/enums";
 import type { KillWarning } from "@/services/scoring/kill-criteria";
 import type { NextAction } from "@/services/scoring/next-action";
 import type { VerdictResult } from "@/services/scoring/verdict";
+import { CAUSAL_DISTANCE_LABELS } from "@/services/value/epistemic";
+import type { ValueAction } from "@/services/value/next-value-action";
+import { PROOF_RUNG_LABELS, type FrontierPosition } from "@/services/value/proof-frontier";
+import { FIELD_STATUS_LABELS, fieldStatus } from "@/services/value/variable-semantics";
 
 export interface ReportEvidenceItem {
   title: string;
@@ -20,11 +36,45 @@ export interface ReportEvidenceItem {
   isMocked: boolean;
 }
 
+export interface ReportField {
+  value: string;
+  status: string;
+}
+
+export interface ReportLadderNode {
+  level: string;
+  statement: string;
+  status: string;
+  confidence: number;
+  causalDistance: string;
+  evidenceCount: number;
+  assumptionCount: number;
+}
+
+export interface ReportCausalLink {
+  from: string;
+  to: string;
+  statement: string;
+  status: string;
+  criticality: string;
+}
+
 export interface OpportunityReport {
   title: string;
   generatedAt: string;
   icp: { name: string; description: string; provenance: string } | null;
   variable: { name: string; direction: string; category: string; provenance: string } | null;
+  /** B. Valuable variable, field by field with its own status. */
+  variableDetail: {
+    target: ReportField;
+    currentState: ReportField;
+    desiredState: ReportField;
+    unit: ReportField;
+    importance: ReportField;
+    parentVariable: ReportField;
+    whoValuesIt: ReportField;
+    whyItMatters: ReportField;
+  } | null;
   currentState: string;
   desiredState: string;
   economicPain: string;
@@ -34,6 +84,18 @@ export interface OpportunityReport {
   productHypothesis: string;
   valueProposition: string;
   metric: string;
+  /** I. Value causality ladder. */
+  ladder: ReportLadderNode[];
+  causalLinks: ReportCausalLink[];
+  /** J. Proof frontier. */
+  frontier: { position: FrontierPosition; label: string; text: string };
+  /** K. Scorecard. null = INCOMPLETE. */
+  scorecard: {
+    opportunityPotential: number;
+    evidenceConfidence: number;
+    valueStrength: number | null;
+    causalConfidence: number | null;
+  };
   opportunityScore: number;
   evidenceScore: number;
   verdict: string;
@@ -41,19 +103,57 @@ export interface OpportunityReport {
   verdictReasons: string[];
   confidence: string;
   killWarnings: KillWarning[];
-  assumptions: Array<{ statement: string; status: string; importance: number }>;
+  assumptions: Array<{ statement: string; kind: string; status: string; importance: number }>;
+  /** L. Riskiest assumption. */
+  riskiestAssumption: { statement: string; kind: string; importance: number } | null;
   evidence: ReportEvidenceItem[];
   risks: string[];
   nextAction: NextAction | null;
+  /** M. Next best action in value-engineering form. */
+  valueAction: ValueAction | null;
+}
+
+export function frontierSentence(position: FrontierPosition): string {
+  const label = PROOF_RUNG_LABELS[position];
+  if (position === "NONE") {
+    return "Current Proof Frontier: nothing is supported yet. Every claim, including the problem itself, remains a hypothesis.";
+  }
+  return `Current Proof Frontier: ${label}. Everything beyond this line remains a product or causal hypothesis.`;
+}
+
+function field(
+  v: NonNullable<OpportunityWithRelations["variable"]>,
+  key: Parameters<typeof fieldStatus>[1],
+  value: string | number | null | undefined,
+): ReportField {
+  const text =
+    value === null || value === undefined || String(value).trim() === ""
+      ? "UNKNOWN"
+      : String(value);
+  return { value: text, status: FIELD_STATUS_LABELS[fieldStatus(v, key)] };
 }
 
 export function buildOpportunityReport(
   o: OpportunityWithRelations,
   mechanisms: string[],
   nextAction: NextAction | null,
+  valueAction: ValueAction | null = null,
 ): OpportunityReport {
   const verdictResult = (o.verdictReasons as unknown as VerdictResult | null) ?? null;
   const killWarnings = (o.killWarnings as unknown as KillWarning[] | null) ?? [];
+  const v = o.variable;
+  const frontierPosition = (o.proofFrontierRung as FrontierPosition | null) ?? "NONE";
+  const riskiest =
+    [...o.assumptions]
+      .filter((a) => a.status !== "SUPPORTED")
+      .sort((a, b) => {
+        const rank = (x: typeof a) =>
+          (x.status === "UNKNOWN" ? 0 : 1) * 1000 -
+          x.importance * 10 +
+          (x.kind === "CAUSAL" ? 0 : x.kind === "VALUE" ? 1 : 2);
+        return rank(a) - rank(b);
+      })[0] ?? null;
+
   return {
     title: o.title,
     generatedAt: new Date().toISOString(),
@@ -66,16 +166,28 @@ export function buildOpportunityReport(
           provenance: PROVENANCE_LABELS[o.icp.provenance],
         }
       : null,
-    variable: o.variable
+    variable: v
       ? {
-          name: o.variable.name,
-          direction: DIRECTION_LABELS[o.variable.desiredDirection],
-          category: o.variable.category,
-          provenance: PROVENANCE_LABELS[o.variable.provenance],
+          name: v.name,
+          direction: DIRECTION_LABELS[v.desiredDirection],
+          category: v.category,
+          provenance: PROVENANCE_LABELS[v.provenance],
         }
       : null,
-    currentState: o.pain?.currentState ?? "UNKNOWN",
-    desiredState: o.pain?.desiredState ?? "UNKNOWN",
+    variableDetail: v
+      ? {
+          target: field(v, "target", v.target),
+          currentState: field(v, "currentState", v.currentState ?? o.pain?.currentState),
+          desiredState: field(v, "desiredState", v.desiredState ?? o.pain?.desiredState),
+          unit: field(v, "unit", v.unit),
+          importance: field(v, "importanceScore", `${v.importanceScore}/10`),
+          parentVariable: field(v, "parentVariableId", v.parent?.name),
+          whoValuesIt: field(v, "whoValuesIt", v.whoValuesIt),
+          whyItMatters: field(v, "whyItMatters", v.whyItMatters),
+        }
+      : null,
+    currentState: v?.currentState ?? o.pain?.currentState ?? "UNKNOWN",
+    desiredState: v?.desiredState ?? o.pain?.desiredState ?? "UNKNOWN",
     economicPain: o.problemStatement ?? o.pain?.description ?? "UNKNOWN",
     trigger: o.pain?.triggers[0]?.description ?? "UNKNOWN — no trigger identified",
     alternatives: (o.pain?.alternatives ?? []).map((a) => ({
@@ -87,6 +199,33 @@ export function buildOpportunityReport(
     productHypothesis: o.productHypothesis ?? "Not yet formed",
     valueProposition: o.valueProposition ?? "Not yet formed",
     metric: o.metric ?? "UNKNOWN — no measurable outcome defined",
+    ladder: o.valueChainNodes.map((n) => ({
+      level: VALUE_CHAIN_LEVEL_LABELS[n.level],
+      statement: n.statement,
+      status: EPISTEMIC_LABELS[n.status],
+      confidence: n.confidence,
+      causalDistance: CAUSAL_DISTANCE_LABELS[n.causalDistance]?.code ?? `CD${n.causalDistance}`,
+      evidenceCount: n.evidenceLinks.length,
+      assumptionCount: n.assumptions.length,
+    })),
+    causalLinks: o.causalLinks.map((l) => ({
+      from: VALUE_CHAIN_LEVEL_LABELS[l.fromNode.level],
+      to: VALUE_CHAIN_LEVEL_LABELS[l.toNode.level],
+      statement: l.statement,
+      status: EPISTEMIC_LABELS[l.status],
+      criticality: CRITICALITY_LABELS[l.criticality],
+    })),
+    frontier: {
+      position: frontierPosition,
+      label: PROOF_RUNG_LABELS[frontierPosition],
+      text: frontierSentence(frontierPosition),
+    },
+    scorecard: {
+      opportunityPotential: o.opportunityScore,
+      evidenceConfidence: o.evidenceScore,
+      valueStrength: o.valueStrength,
+      causalConfidence: o.causalConfidence,
+    },
     opportunityScore: o.opportunityScore,
     evidenceScore: o.evidenceScore,
     verdict: o.verdict,
@@ -96,9 +235,17 @@ export function buildOpportunityReport(
     killWarnings,
     assumptions: o.assumptions.map((a) => ({
       statement: a.statement,
+      kind: ASSUMPTION_KIND_LABELS[a.kind],
       status: a.status,
       importance: a.importance,
     })),
+    riskiestAssumption: riskiest
+      ? {
+          statement: riskiest.statement,
+          kind: ASSUMPTION_KIND_LABELS[riskiest.kind],
+          importance: riskiest.importance,
+        }
+      : null,
     evidence: o.evidence.map((e) => ({
       title: e.sourceTitle,
       type: e.type,
@@ -110,54 +257,103 @@ export function buildOpportunityReport(
     })),
     risks: o.risks,
     nextAction,
+    valueAction,
   };
 }
+
+const score = (n: number | null) => (n === null ? "INCOMPLETE" : `${n}/100`);
 
 export function reportToMarkdown(r: OpportunityReport): string {
   const lines: string[] = [];
   lines.push(`# Opportunity Report — ${r.title}`);
   lines.push("");
   lines.push(
-    `Generated ${r.generatedAt.slice(0, 10)} by OpportunityOS. Hypotheses are labelled; nothing below is validated unless backed by evidence.`,
+    `Generated ${r.generatedAt.slice(0, 10)} by OpportunityOS. Hypotheses are labelled; nothing below is validated unless backed by evidence. Scores, statuses and the Proof Frontier are computed deterministically.`,
   );
   lines.push("");
   lines.push(
-    `## ICP\n${r.icp ? `${r.icp.name} — ${r.icp.description || "details UNKNOWN"} _(${r.icp.provenance})_` : "UNKNOWN"}`,
+    `## A. ICP\n${r.icp ? `${r.icp.name} — ${r.icp.description || "details UNKNOWN"} _(${r.icp.provenance})_` : "UNKNOWN"}`,
+  );
+  const vd = r.variableDetail;
+  lines.push(
+    `## B. Valuable variable\n${
+      r.variable
+        ? [
+            `- Variable: ${r.variable.name} _(${r.variable.provenance})_`,
+            `- Direction: ${r.variable.direction}`,
+            vd ? `- Target: ${vd.target.value} _(${vd.target.status})_` : null,
+            vd ? `- Current state: ${vd.currentState.value} _(${vd.currentState.status})_` : null,
+            vd ? `- Desired state: ${vd.desiredState.value} _(${vd.desiredState.status})_` : null,
+            vd ? `- Unit: ${vd.unit.value} _(${vd.unit.status})_` : null,
+            vd ? `- Importance: ${vd.importance.value} _(${vd.importance.status})_` : null,
+            vd
+              ? `- Parent economic variable: ${vd.parentVariable.value} _(${vd.parentVariable.status})_`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : "UNKNOWN"
+    }`,
+  );
+  lines.push(`## C. Pain / economic consequence\n${r.economicPain}`);
+  lines.push(`## D. Trigger\n${r.trigger}`);
+  lines.push(
+    `## E. Current alternatives\n${r.alternatives.length ? r.alternatives.map((a) => `- ${a.name} (weakness ${a.weakness}/10): ${a.failure}`).join("\n") : "UNKNOWN"}`,
   );
   lines.push(
-    `## Valuable variable\n${r.variable ? `${r.variable.name} — desired direction: ${r.variable.direction} _(${r.variable.provenance})_` : "UNKNOWN"}`,
+    `## F. Mechanisms explored\n${r.mechanisms.length ? r.mechanisms.map((m) => `- ${m}`).join("\n") : "None explored yet"}`,
   );
-  lines.push(`## Current state\n${r.currentState}`);
-  lines.push(`## Desired state\n${r.desiredState}`);
-  lines.push(`## Economic pain\n${r.economicPain}`);
-  lines.push(`## Trigger\n${r.trigger}`);
+  lines.push(`## G. Product hypothesis\n${r.productHypothesis}`);
   lines.push(
-    `## Current alternatives\n${r.alternatives.length ? r.alternatives.map((a) => `- ${a.name} (weakness ${a.weakness}/10): ${a.failure}`).join("\n") : "UNKNOWN"}`,
+    `## H. Value proposition\n${r.valueProposition}\n\nMetric that proves value: ${r.metric}`,
   );
   lines.push(
-    `## Mechanisms explored\n${r.mechanisms.length ? r.mechanisms.map((m) => `- ${m}`).join("\n") : "None explored yet"}`,
+    `## I. Value causality ladder\n${
+      r.ladder.length
+        ? r.ladder
+            .map(
+              (n, i) =>
+                `${i === 0 ? "" : "↓\n"}**${n.level}** [${n.status}${n.confidence ? ` ${n.confidence}` : ""} · ${n.causalDistance}] — ${n.statement}` +
+                (n.evidenceCount || n.assumptionCount
+                  ? ` _(${n.evidenceCount} evidence, ${n.assumptionCount} assumptions)_`
+                  : ""),
+            )
+            .join("\n")
+        : "No value chain stated yet."
+    }${
+      r.causalLinks.length
+        ? `\n\nCausal links (testable assumptions):\n${r.causalLinks.map((l) => `- ${l.from} → ${l.to} [${l.status}, ${l.criticality}]: ${l.statement}`).join("\n")}`
+        : ""
+    }`,
   );
-  lines.push(`## Product hypothesis\n${r.productHypothesis}`);
-  lines.push(`## Value proposition\n${r.valueProposition}`);
-  lines.push(`## Metric\n${r.metric}`);
+  lines.push(`## J. Proof frontier\n${r.frontier.text}`);
   lines.push(
-    `## Scores\n- Opportunity Potential: **${r.opportunityScore}/100**\n- Evidence Confidence: **${r.evidenceScore}/100** (${r.confidence.toLowerCase()} confidence)\n- Verdict: **${r.verdictLabel.toUpperCase()}**`,
+    `## K. Scorecard\n- Opportunity Potential: **${score(r.scorecard.opportunityPotential)}** — is the problem structurally attractive?\n- Evidence Confidence: **${score(r.scorecard.evidenceConfidence)}** (${r.confidence.toLowerCase()} confidence) — is the problem real?\n- Value Strength: **${score(r.scorecard.valueStrength)}** — if the variable moves, how much value?\n- Causal Confidence: **${score(r.scorecard.causalConfidence)}** — can the mechanism move it?\n- Verdict: **${r.verdictLabel.toUpperCase()}**`,
   );
   if (r.verdictReasons.length) lines.push(r.verdictReasons.map((x) => `  - ${x}`).join("\n"));
   lines.push(
-    `## Kill criteria\n${r.killWarnings.length ? r.killWarnings.map((w) => `- [${w.severity}] ${w.message}`).join("\n") : "No warnings triggered."}`,
+    `## L. Riskiest assumption\n${r.riskiestAssumption ? `[${r.riskiestAssumption.kind}, importance ${r.riskiestAssumption.importance}/10] ${r.riskiestAssumption.statement}\n\nIf this assumption is false, the opportunity collapses.` : "No untested assumption recorded."}`,
   );
   lines.push(
-    `## Critical assumptions\n${r.assumptions.length ? r.assumptions.map((a, i) => `${i + 1}. [${a.status}] ${a.statement} (importance ${a.importance}/10)`).join("\n") : "No assumptions recorded."}`,
+    `## M. Next best action\n${
+      r.valueAction
+        ? `**${r.valueAction.what}**\n- Why: ${r.valueAction.why}\n- Affects: ${r.valueAction.affects}\n- If false: ${r.valueAction.ifFalse}\n- Evidence that would move the frontier: ${r.valueAction.evidenceToMove}${r.valueAction.experiment ? `\n- Experiment: ${r.valueAction.experiment}` : ""}`
+        : r.nextAction
+          ? `**${r.nextAction.title}**\n${r.nextAction.rationale}`
+          : "UNKNOWN"
+    }`,
+  );
+  lines.push(
+    `## N. Kill criteria\n${r.killWarnings.length ? r.killWarnings.map((w) => `- [${w.severity}] ${w.message}`).join("\n") : "No warnings triggered."}`,
+  );
+  lines.push(
+    `## Assumptions\n${r.assumptions.length ? r.assumptions.map((a, i) => `${i + 1}. [${a.kind} · ${a.status}] ${a.statement} (importance ${a.importance}/10)`).join("\n") : "No assumptions recorded."}`,
   );
   lines.push(
     `## Evidence (${r.evidence.length})\n${r.evidence.length ? r.evidence.map((e) => `- ${e.title} — ${e.type}, ${e.sentiment}, strength ${e.strength}, relevance ${e.relevance}${e.isDemo ? " [DEMO DATA]" : ""}${e.isMocked ? " [MOCKED]" : ""}`).join("\n") : "No evidence captured. Everything above is a hypothesis."}`,
   );
   lines.push(
     `## Risks\n${r.risks.length ? r.risks.map((x) => `- ${x}`).join("\n") : "None recorded."}`,
-  );
-  lines.push(
-    `## Next action\n${r.nextAction ? `**${r.nextAction.title}**\n${r.nextAction.rationale}` : "UNKNOWN"}`,
   );
   return lines.join("\n\n");
 }

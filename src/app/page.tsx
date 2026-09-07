@@ -48,10 +48,13 @@ export default async function LandingPage() {
           <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
             Stop asking AI for startup ideas.
           </h1>
-          <p className="mt-4 max-w-2xl text-xl text-balance">Discover problems worth solving.</p>
+          <p className="mt-4 max-w-2xl text-xl text-balance">
+            Find what is worth building — and know what still needs proving.
+          </p>
           <p className="text-muted-foreground mt-4 max-w-2xl text-base leading-relaxed">
             OpportunityOS maps markets, identifies valuable variables, analyzes pain and evidence,
-            and helps you decide what is actually worth building.
+            traces the causal chain from mechanism to value, and shows where the proof currently
+            ends.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button size="lg" asChild>
@@ -64,7 +67,8 @@ export default async function LandingPage() {
             </Button>
           </div>
           <p className="text-muted-foreground mt-6 text-xs">
-            Hypothesis ≠ Evidence. Every opportunity carries two independent scores.
+            Hypothesis ≠ Evidence. Every opportunity carries four independent scores and a Proof
+            Frontier. The AI doesn&apos;t decide what&apos;s true. Evidence does.
           </p>
         </section>
 

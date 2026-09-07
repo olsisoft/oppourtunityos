@@ -8,6 +8,7 @@ import { VariableMap } from "@/components/discovery/variable-map";
 import { AssumptionLedger } from "@/components/assumptions/assumption-ledger";
 import { EvidencePanel } from "@/components/evidence/evidence-panel";
 import { OpportunityRadar } from "@/components/opportunity/opportunity-radar";
+import { ValuePanel } from "@/components/value/value-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { WorkspaceGraph } from "@/db/workspaces";
 
@@ -24,6 +25,7 @@ export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
           <TabsList className="w-full">
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="variables">Variables</TabsTrigger>
+            <TabsTrigger value="value">Value</TabsTrigger>
             <TabsTrigger value="radar">Radar{oppCount ? ` ${oppCount}` : ""}</TabsTrigger>
             <TabsTrigger value="evidence">
               Evidence{evidenceCount ? ` ${evidenceCount}` : ""}
@@ -36,7 +38,8 @@ export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
         <div className="min-h-0 flex-1 scrollbar-thin overflow-y-auto p-3">
           <TabsContent value="map">
             <p className="text-muted-foreground mb-3 text-xs">
-              Market → ICP → Variable → Pain → Opportunity. Click a node to inspect or edit it.
+              Market → ICP → Variable → Pain → Opportunity → Mechanism → Value chain. Click a node
+              to inspect or edit it; expand an opportunity to see its ladder and Proof Frontier.
               Badges show where each fact came from.
             </p>
             <OpportunityMap graph={graph} onSelect={setSelection} />
@@ -50,6 +53,9 @@ export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
               graph={graph}
               onSelect={(v) => setSelection({ kind: "variable", item: v })}
             />
+          </TabsContent>
+          <TabsContent value="value">
+            <ValuePanel graph={graph} />
           </TabsContent>
           <TabsContent value="radar">
             <OpportunityRadar graph={graph} compact />
@@ -65,6 +71,7 @@ export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
       <NodeDetailSheet
         selection={selection}
         workspaceId={graph.id}
+        graph={graph}
         onClose={() => setSelection(null)}
       />
     </div>

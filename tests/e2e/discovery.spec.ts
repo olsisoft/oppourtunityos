@@ -22,7 +22,12 @@ test("landing page states the product philosophy", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Stop asking AI for startup ideas." }),
   ).toBeVisible();
-  await expect(page.getByText("Discover problems worth solving.")).toBeVisible();
+  await expect(
+    page.getByText("Find what is worth building — and know what still needs proving."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "The AI doesn't decide what's true. Evidence does." }),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: /Find an opportunity/ }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Validate an idea" }).first()).toBeVisible();
 });
@@ -43,7 +48,12 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   await expect(
     page.getByRole("heading", { name: "What should I investigate next?" }),
   ).toBeVisible();
-  await expect(page.getByText("Next recommended research action")).toBeVisible();
+  await expect(page.getByText("Next best action").first()).toBeVisible();
+  // Four independent scores on the dashboard table.
+  await expect(page.getByRole("columnheader", { name: "Value" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Causal" })).toBeVisible();
+  // INCOMPLETE is shown when a Value / Causal input is UNKNOWN — never a fabricated number.
+  await expect(page.getByText("INCOMPLETE").first()).toBeVisible();
 
   await page
     .getByRole("link", { name: /Beauty Salons \(demo\)/ })
@@ -59,6 +69,10 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   ).toBeVisible();
   await expect(page.getByText("TEST", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("KILL", { exact: true }).first()).toBeVisible();
+  // Value tab: valuable variable, ladder and proof frontier.
+  await page.getByRole("tab", { name: "Value" }).click();
+  await expect(page.getByText("Valuable variable").first()).toBeVisible();
+  await expect(page.getByText(/Proof frontier/).first()).toBeVisible();
 
   // Evidence tab labels demo data.
   await page.getByRole("tab", { name: /Evidence/ }).click();
@@ -72,8 +86,12 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   await expect(page.getByText("Why this verdict")).toBeVisible();
   await expect(page.getByText("Why this Opportunity Potential")).toBeVisible();
   await expect(page.getByText("Why this Evidence Confidence")).toBeVisible();
-  await expect(page.getByText("Next best action")).toBeVisible();
-  await expect(page.getByText("Critical assumptions")).toBeVisible();
+  await expect(page.getByText("Next best action").first()).toBeVisible();
+  await expect(page.getByText("Value causality ladder")).toBeVisible();
+  await expect(page.getByText(/Current Proof Frontier/).first()).toBeVisible();
+  await expect(page.getByText("Riskiest assumption")).toBeVisible();
+  await expect(page.getByText("Why this Value Strength")).toBeVisible();
+  await expect(page.getByText("Why this Causal Confidence")).toBeVisible();
 });
 
 test("a new workspace runs the 'I already have an idea' flow and updates the map", async ({

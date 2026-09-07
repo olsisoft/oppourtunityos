@@ -11,6 +11,7 @@ import {
 } from "@/domain/schemas";
 import { requireUserId } from "@/lib/session";
 import { deriveAssumptionStatus } from "@/services/scoring/assumption-status";
+import { recomputeOpportunity } from "@/services/scoring/recompute";
 import { signalWeight } from "@/services/scoring/evidence-score";
 import { toEvidenceSignal } from "@/services/scoring/recompute";
 import { safeAction, zodFieldErrors, type ActionResult } from "./shared";
@@ -26,10 +27,11 @@ async function refreshAssumption(assumptionId: string) {
       weight: signalWeight(toEvidenceSignal(l.evidence)),
     })),
   );
-  await prisma.assumption.update({
+  const updated = await prisma.assumption.update({
     where: { id: assumptionId },
     data: { status: derived.status, confidence: derived.confidence },
   });
+  if (updated.opportunityId) await recomputeOpportunity(updated.opportunityId);
 }
 
 export async function createAssumptionAction(
@@ -51,6 +53,9 @@ export async function createAssumptionAction(
       data: {
         workspaceId: d.workspaceId,
         opportunityId: d.opportunityId ?? null,
+        valueChainNodeId: d.valueChainNodeId ?? null,
+        causalLinkId: d.causalLinkId ?? null,
+        kind: d.kind,
         statement: d.statement,
         importance: d.importance,
         status: d.status,
@@ -58,6 +63,7 @@ export async function createAssumptionAction(
         provenance: "USER",
       },
     });
+    if (a.opportunityId) await recomputeOpportunity(a.opportunityId);
     revalidatePath(`/app/w/${d.workspaceId}`, "layout");
     return { id: a.id };
   });
@@ -78,12 +84,16 @@ export async function updateAssumptionAction(input: unknown): Promise<ActionResu
         statement: d.statement,
         importance: d.importance,
         status: d.status,
+        kind: d.kind,
+        valueChainNodeId: d.valueChainNodeId,
+        causalLinkId: d.causalLinkId,
         notes: d.notes,
         // A manual status override is the user's judgement.
         confidence:
           d.status && d.status !== "UNKNOWN" ? Math.max(existing.confidence, 50) : undefined,
       },
     });
+    if (existing.opportunityId) await recomputeOpportunity(existing.opportunityId);
     revalidatePath(`/app/w/${existing.workspaceId}`, "layout");
     return undefined;
   });
@@ -96,6 +106,7 @@ export async function deleteAssumptionAction(assumptionId: string): Promise<Acti
     if (!existing) throw new Error("Assumption not found");
     await assertWorkspaceAccess(userId, existing.workspaceId);
     await prisma.assumption.delete({ where: { id: assumptionId } });
+    if (existing.opportunityId) await recomputeOpportunity(existing.opportunityId);
     revalidatePath(`/app/w/${existing.workspaceId}`, "layout");
     return undefined;
   });

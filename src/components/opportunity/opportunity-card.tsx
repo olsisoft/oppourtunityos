@@ -2,12 +2,12 @@ import Link from "next/link";
 
 import { KillCriteria } from "@/components/opportunity/kill-criteria";
 import { ProvenanceBadge } from "@/components/shared/provenance-badge";
-import { ScorePill } from "@/components/shared/score-pill";
 import { VerdictBadge } from "@/components/shared/verdict-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Scorecard, frontierText } from "@/components/value/scorecard";
 import type { OpportunityWithRelations } from "@/db/workspaces";
-import { ASSUMPTION_STATUS_LABELS, DIRECTION_LABELS } from "@/domain/enums";
+import { ASSUMPTION_KIND_LABELS, ASSUMPTION_STATUS_LABELS, DIRECTION_LABELS } from "@/domain/enums";
 import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
 
 export function OpportunityCard({
@@ -23,10 +23,11 @@ export function OpportunityCard({
 }) {
   const trigger = o.pain?.triggers[0];
   const alternative = o.pain?.alternatives[0];
+  const nextStep = insights.primaryValueAction?.what ?? insights.primaryAction?.title ?? null;
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <VerdictBadge verdict={o.verdict} />
@@ -41,19 +42,16 @@ export function OpportunityCard({
               </Link>
             </h3>
           </div>
-          <div className="flex gap-4">
-            <ScorePill value={o.opportunityScore} label="Potential" />
-            <ScorePill value={o.evidenceScore} label="Evidence" />
-          </div>
+          <Scorecard opportunity={o} insights={insights} size="sm" className="gap-3" />
         </div>
       </CardHeader>
       <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
         <Row label="ICP" value={o.icp?.name} />
         <Row
-          label="Variable"
+          label="Valuable variable"
           value={
             o.variable
-              ? `${DIRECTION_LABELS[o.variable.desiredDirection]} × ${o.variable.name}`
+              ? `${DIRECTION_LABELS[o.variable.desiredDirection]} × ${o.variable.name}${o.variable.target ? ` × ${o.variable.target}` : ""}`
               : null
           }
         />
@@ -72,6 +70,11 @@ export function OpportunityCard({
           value={o.mechanism ?? (mechanisms.length ? mechanisms.join(", ") : null)}
         />
         <Row label="Value proposition" value={o.valueProposition} className="sm:col-span-2" />
+        <Row
+          label="Proof frontier"
+          value={`${frontierText(o.proofFrontierRung)} — everything beyond it remains a hypothesis`}
+          className="sm:col-span-2"
+        />
         <div className="sm:col-span-2">
           <p className="text-muted-foreground text-xs font-medium">Kill criteria</p>
           <KillCriteria warnings={insights.killWarnings} className="mt-1" />
@@ -86,7 +89,12 @@ export function OpportunityCard({
             <ul className="mt-1 space-y-1">
               {o.assumptions.slice(0, 4).map((a) => (
                 <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span>{a.statement}</span>
+                  <span>
+                    <span className="text-muted-foreground">
+                      {ASSUMPTION_KIND_LABELS[a.kind]} ·{" "}
+                    </span>
+                    {a.statement}
+                  </span>
                   <Badge
                     variant={
                       a.status === "SUPPORTED"
@@ -103,12 +111,12 @@ export function OpportunityCard({
             </ul>
           )}
         </div>
-        {insights.primaryAction && (
+        {nextStep && (
           <div className="bg-muted/60 rounded-md p-3 sm:col-span-2">
             <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
               Next step
             </p>
-            <p className="mt-0.5 text-sm font-medium">{insights.primaryAction.title}</p>
+            <p className="mt-0.5 text-sm font-medium">{nextStep}</p>
           </div>
         )}
       </CardContent>

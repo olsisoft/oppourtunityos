@@ -23,9 +23,12 @@ export function painOptions(graph: WorkspaceGraph) {
 export function EvidencePanel({
   graph,
   compact = true,
+  defaultOpportunityId,
 }: {
   graph: WorkspaceGraph;
   compact?: boolean;
+  /** Pre-selects the opportunity in the add dialog (used on the report page). */
+  defaultOpportunityId?: string;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
@@ -80,6 +83,8 @@ export function EvidencePanel({
         workspaceId={graph.id}
         pains={pains}
         opportunities={opportunities}
+        graph={graph}
+        defaultOpportunityId={defaultOpportunityId}
         hypothesis={strongest?.problemStatement ?? pains[0]?.label}
       />
       <ResearchDialog

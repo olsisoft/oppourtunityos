@@ -10,12 +10,16 @@ Market → ICP → Valuable Variable → Desired Movement → Pain → Trigger
 → Product Hypothesis → Value Proposition → Opportunity Score → Evidence Score → Decision
 ```
 
-while every meaningful statement is captured as structured, provenance-tagged workspace state. The chat is the interface; the opportunity model is the database. Two independent, deterministic scores decide the verdict:
+while every meaningful statement is captured as structured, provenance-tagged workspace state. The chat is the interface; the opportunity model is the database.
 
-- **Opportunity Potential** — how attractive the opportunity is structurally.
-- **Evidence Confidence** — how much external evidence supports the assumptions.
+The intellectual core is the chain **ICP → Valuable Variable → Pain → Desired Movement → Opportunity → Mechanism → Causal Chain → Proof Frontier → Experiment**. Four independent, deterministic scores and one deterministic verdict answer four different questions:
 
-High potential with low evidence yields **RESEARCH**, never BUILD. Hypothesis ≠ Evidence, everywhere in the product.
+- **Opportunity Potential** — is the problem structurally attractive?
+- **Evidence Confidence** — do we have credible evidence that the problem is real?
+- **Value Strength** — if we move the variable, how much value could be created?
+- **Causal Confidence** — do we know that the proposed mechanism can actually move it?
+
+High potential with low evidence yields **RESEARCH**, never BUILD. The **Proof Frontier** marks where supported knowledge ends; everything beyond it is a product or causal hypothesis. The AI doesn't decide what's true. Evidence does. UNKNOWN stays UNKNOWN.
 
 ---
 
@@ -29,9 +33,10 @@ High potential with low evidence yields **RESEARCH**, never BUILD. Hypothesis �
 6. [Testing](#testing)
 7. [AI provider configuration](#ai-provider-configuration)
 8. [Scoring](#scoring)
-9. [Security](#security)
-10. [Project structure](#project-structure)
-11. [Known limitations](#known-limitations)
+9. [Value engineering](#value-engineering)
+10. [Security](#security)
+11. [Project structure](#project-structure)
+12. [Known limitations](#known-limitations)
 
 ---
 
@@ -42,7 +47,8 @@ A modular monolith on **Next.js 16 (App Router)**, **TypeScript**, **Tailwind CS
 | Layer              | Location                                        | Responsibility                                                                                                                                                                                                                                                                                                                                    |
 | ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Domain             | `src/domain`                                    | Enums, labels, Zod schemas for every client/server boundary. No I/O.                                                                                                                                                                                                                                                                              |
-| Scoring            | `src/services/scoring`                          | Pure, deterministic functions: opportunity score, evidence score, verdict, kill criteria, next-best-action, discovery progress, assumption status. Unit-tested. `recompute.ts` is the only writer of scores.                                                                                                                                      |
+| Scoring            | `src/services/scoring`                          | Pure, deterministic functions: opportunity score, evidence score, verdict, kill criteria, next-best-action, discovery progress, assumption status. Unit-tested. `recompute.ts` is the only writer of scores, statuses and the Proof Frontier.                                                                                                     |
+| Value              | `src/services/value`                            | Pure epistemic engine: claim assessment (PROVEN / SUPPORTED / HYPOTHESIS / UNPROVEN / CONTRADICTED / UNKNOWN), Proof Frontier, Value Strength, Causal Confidence, verdict extension rules, value-oriented next best action, variable semantics (verb × category checks, per-field provenance).                                                    |
 | AI                 | `src/services/ai`                               | `AIProvider` interface (`chat` streaming + `structuredOutput`), `BaseAIProvider` domain helpers (extraction, market/ICP/variable maps, pain analysis, mechanisms, evidence summary, interview guide), adapters for **Anthropic** (default), **OpenAI** (optional) and a clearly labelled **mock**. All outputs are validated with Zod before use. |
 | Discovery          | `src/services/discovery`                        | Stage state machine, workspace context builder, extraction → state application (sanitized, provenance-tagged), the per-turn orchestrator.                                                                                                                                                                                                         |
 | Research           | `src/services/research`                         | `ResearchProvider` interface; V1 ships manual capture plus a mocked provider whose results are flagged `isMocked`.                                                                                                                                                                                                                                |
@@ -143,7 +149,11 @@ Flows to try:
 
 ```bash
 npm test               # Vitest: scoring engine, verdict grid (exhaustive), kill criteria,
-                       # next-best-action, state machine, mock provider, sanitizer, rate limiter, components
+                       # next-best-action, state machine, mock provider, sanitizer, rate limiter, components,
+                       # epistemic engine, proof frontier, value strength, causal confidence, verdict extension,
+                       # epistemic guards (the AI can never emit evidence, statuses, scores or a frontier).
+                       # tests/integration runs against DATABASE_URL when set: existing workspaces load,
+                       # demo scores/frontier are reproducible, evidence keeps its provenance.
 npm run test:e2e       # Playwright (requires a migrated + seeded database; builds and starts the app on :3100)
                        # Set PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chromium to reuse a system browser
 ```
@@ -171,7 +181,31 @@ score = Σ input × weight × 10, clamped to 0–100
 
 **Kill criteria** (`kill-criteria.ts`) — low pain, low WTP, no trigger, rare problem, adequate alternative, non-economic variable, no metric, unreachable ICP, unknown buyer, personal curiosity, oversized solution, evidence without economic impact.
 
-**Next best action** (`next-action.ts`) — ranked from verdict, critical warnings, riskiest untested assumption and evidence gaps. It never defaults to "build software".
+**Next best action** (`next-action.ts`) — ranked from verdict, critical warnings, riskiest untested assumption and evidence gaps. It never defaults to "build software". Once an opportunity has a value chain, the value-engineering action (`src/services/value/next-value-action.ts`) leads.
+
+## Value engineering
+
+OpportunityOS is also a rigorous value-engineering instrument. Everything below is deterministic; the analyst can propose statements but never statuses, scores or the frontier.
+
+**Valuable Variable** — a first-class entity: action verb × variable × target, current state, desired state, unit, importance, who values it, why it matters, parent economic variable. Every field carries its own provenance (USER / INTERVIEW / EVIDENCE / HYPOTHESIS / UNKNOWN); empty fields stay UNKNOWN. Verb × category contradictions (e.g. _Increase_ × _Cost_) are flagged.
+
+**Value Causality Ladder** — `Mechanism → Capability → Transformation → Operational Value → Economic Value → Strategic Outcome (→ Business Outcome)`. Each node is a claim with an epistemic status; each arrow is a `CausalLink`, a testable assumption with a criticality. Causal distance CD0–CD5 makes attribution difficulty explicit.
+
+**Epistemic status** (`epistemic.ts`) — reuses the Evidence Confidence engine on the evidence linked to a claim: PROVEN ≥ 75, SUPPORTED ≥ 40, otherwise UNPROVEN; CONTRADICTED when contradicting weight ≥ ½ supporting weight or a critical assumption is contradicted; HYPOTHESIS when an AI statement has no evidence; UNKNOWN when nothing is stated. PROVEN is only ever evidence-driven.
+
+**Proof Frontier** (`proof-frontier.ts`) — the last contiguous rung (variable importance → pain → economic pain → mechanism → … → strategic outcome) whose claim is supported, whose critical links before it are supported, with no unresolved contradiction and no completely untested critical assumption on the path. It can never jump over an unsupported link.
+
+**Value Strength** (`value-strength.ts`) — geometric mean of importance, magnitude, frequency, population and attributability (0–10 each) × 100. Any missing dimension → `INCOMPLETE`, never an estimate.
+
+**Causal Confidence** (`causal-confidence.ts`) — the weakest critical link of `Mechanism → Capability → Transformation → Operational → Economic`. A missing link or a critical link with zero evidence → `INCOMPLETE`. Contradicted links are capped.
+
+**Verdict extension** (`verdict-extension.ts`) — the original rules are unchanged; documented extra rules apply only when the extra scores exist: strong evidence with low value strength → KILL; contradicted critical link → INVESTIGATE; strong problem evidence with low causal confidence → TEST the mechanism (an experiment on the first unproven link).
+
+**Evidence → claims** — one evidence item may support, contradict or be neutral about several claims (ICP, variable, current state, pain, magnitude, frequency, economic impact, trigger, alternative, mechanism, willingness to pay, a value chain node or a causal link). Linking never converts evidence into proof; recompute interprets it.
+
+**Assumptions** are typed — CAUSAL, VALUE, FEASIBILITY, WTP, ACCESS, GENERIC — and can be attached to a node or a link. **Experiments** test one link or one collapse-level assumption; results become evidence only when captured as evidence.
+
+**Backward compatibility** — the migration copies each pain's current/desired state into its variable with the pain's provenance and leaves every other new field UNKNOWN; nothing inferred is promoted to evidence. Opportunities without value dimensions or a ladder keep their original scores and verdicts; the extension rules never fire on `INCOMPLETE` inputs.
 
 ## Security
 
@@ -190,14 +224,15 @@ prisma/               schema, migrations, seed
 src/
   app/                routes: landing, (auth), app/ (dashboard, w/[workspaceId], opportunities/[id], settings), api/
   actions/            server actions
-  components/         ui/ (primitives), chat/, discovery/, opportunity/, evidence/, assumptions/, dashboard/, layout/, shared/
+  components/         ui/ (primitives), chat/, discovery/, opportunity/, evidence/, assumptions/, value/ (ladder, scorecard,
+                      value panel, node sheet, value strength editor, experiments), dashboard/, layout/, shared/
   domain/             enums + labels, Zod schemas
   db/                 prisma client, workspace and dashboard queries
-  services/           ai/, discovery/, scoring/, research/, report/, interview/
+  services/           ai/, discovery/, scoring/, value/ (epistemic engine), research/, report/, interview/
   prompts/            analyst system prompt, stage goals, extraction/research/interview prompts
   lib/                env, logger, sanitize, rate limit, session helpers
   types/              Auth.js augmentation
-tests/                unit (Vitest) and e2e (Playwright)
+tests/                unit (Vitest), integration (Vitest + DATABASE_URL) and e2e (Playwright)
 ```
 
 ## Known limitations

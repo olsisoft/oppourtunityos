@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { createEvidenceAction, suggestEvidenceSignalsAction } from "@/actions/evidence";
+import { claimTargetsFor, type ClaimTarget } from "@/components/evidence/claim-targets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,12 +28,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { WorkspaceGraph } from "@/db/workspaces";
 import {
   EVIDENCE_TYPE_LABELS,
   EvidenceType,
   SENTIMENT_LABELS,
   EvidenceSentiment,
 } from "@/domain/enums";
+import { cn } from "@/lib/utils";
 
 export interface PainOption {
   id: string;
@@ -43,12 +46,20 @@ export interface OpportunityOption {
   label: string;
 }
 
+type ClaimDirection = "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
+const DIRECTION_LABEL: Record<ClaimDirection, string> = {
+  SUPPORTS: "supports",
+  CONTRADICTS: "contradicts",
+  NEUTRAL: "neutral",
+};
+
 export function AddEvidenceDialog({
   open,
   onOpenChange,
   workspaceId,
   pains,
   opportunities,
+  graph,
   defaultPainId,
   defaultOpportunityId,
   hypothesis,
@@ -58,6 +69,8 @@ export function AddEvidenceDialog({
   workspaceId: string;
   pains: PainOption[];
   opportunities: OpportunityOption[];
+  /** When provided, the dialog offers "What claim does this evidence affect?". */
+  graph?: WorkspaceGraph;
   defaultPainId?: string;
   defaultOpportunityId?: string;
   hypothesis?: string;
@@ -85,8 +98,27 @@ export function AddEvidenceDialog({
     hasPurchaseIntent: false,
     isInterview: false,
   });
+  const [claims, setClaims] = useState<Record<string, ClaimDirection>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  const targets = useMemo(
+    () => (graph ? claimTargetsFor(graph, form.opportunityId || null) : []),
+    [graph, form.opportunityId],
+  );
+  const groups = useMemo(() => {
+    const byGroup = new Map<ClaimTarget["group"], ClaimTarget[]>();
+    for (const t of targets) byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
+    return [...byGroup.entries()];
+  }, [targets]);
+
+  const toggleClaim = (t: ClaimTarget) =>
+    setClaims((c) => {
+      const next = { ...c };
+      if (next[t.key]) delete next[t.key];
+      else next[t.key] = form.sentiment === "NEGATIVE" ? "CONTRADICTS" : "SUPPORTS";
+      return next;
+    });
 
   const suggest = async () => {
     if (form.sourceExcerpt.trim().length < 20) {
@@ -124,16 +156,31 @@ export function AddEvidenceDialog({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    const r = await createEvidenceAction({ workspaceId, ...form });
+    const claimInputs = targets
+      .filter((t) => claims[t.key])
+      .map((t) => ({
+        claimType: t.claimType,
+        opportunityId: form.opportunityId || undefined,
+        valueChainNodeId: t.valueChainNodeId,
+        causalLinkId: t.causalLinkId,
+        direction: claims[t.key],
+      }));
+    const r = await createEvidenceAction({ workspaceId, ...form, claims: claimInputs });
     setSaving(false);
     if (!r.ok) {
       toast.error(r.error);
       return;
     }
-    toast.success("Evidence captured — scores recomputed");
+    toast.success(
+      claimInputs.length
+        ? `Evidence captured — ${claimInputs.length} claim${claimInputs.length === 1 ? "" : "s"} reassessed`
+        : "Evidence captured — scores recomputed",
+    );
     onOpenChange(false);
     router.refresh();
   };
+
+  const selectedCount = Object.keys(claims).length;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -323,7 +370,10 @@ export function AddEvidenceDialog({
               <Label>Linked opportunity</Label>
               <Select
                 value={form.opportunityId || "none"}
-                onValueChange={(v) => set("opportunityId", v === "none" ? "" : v)}
+                onValueChange={(v) => {
+                  set("opportunityId", v === "none" ? "" : v);
+                  setClaims({});
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="None" />
@@ -340,9 +390,91 @@ export function AddEvidenceDialog({
             </div>
           </div>
 
+          {graph && (
+            <fieldset className="space-y-2 rounded-md border p-3">
+              <legend className="px-1 text-xs font-semibold tracking-wider uppercase">
+                What claim does this evidence affect?
+              </legend>
+              {!form.opportunityId ? (
+                <p className="text-muted-foreground text-xs">
+                  Choose a linked opportunity to attach this evidence to specific claims: the pain,
+                  its magnitude, willingness to pay, a value chain level or a causal link. One item
+                  may affect several claims.
+                </p>
+              ) : targets.length === 0 ? (
+                <p className="text-muted-foreground text-xs">No claims available.</p>
+              ) : (
+                <>
+                  <p className="text-muted-foreground text-xs">
+                    Tick each claim and say whether the source supports, contradicts or is neutral
+                    about it. The engine reassesses the claim; nothing becomes proven automatically.
+                  </p>
+                  {groups.map(([group, items]) => (
+                    <div key={group} className="space-y-1">
+                      <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+                        {group}
+                      </p>
+                      <ul className="grid gap-1 sm:grid-cols-2">
+                        {items.map((t) => {
+                          const dir = claims[t.key];
+                          return (
+                            <li
+                              key={t.key}
+                              className={cn(
+                                "flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs",
+                                dir && "border-foreground",
+                              )}
+                            >
+                              <Checkbox
+                                className="mt-0.5"
+                                checked={Boolean(dir)}
+                                onCheckedChange={() => toggleClaim(t)}
+                                aria-label={`Affects ${t.label}`}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium">{t.label}</p>
+                                {t.detail && (
+                                  <p className="text-muted-foreground truncate">{t.detail}</p>
+                                )}
+                                {dir && (
+                                  <div className="mt-1 flex gap-1">
+                                    {(
+                                      ["SUPPORTS", "CONTRADICTS", "NEUTRAL"] as ClaimDirection[]
+                                    ).map((d) => (
+                                      <button
+                                        key={d}
+                                        type="button"
+                                        onClick={() => setClaims((c) => ({ ...c, [t.key]: d }))}
+                                        className={cn(
+                                          "rounded border px-1.5 py-0.5 text-[10px]",
+                                          dir === d
+                                            ? "bg-foreground text-background border-foreground"
+                                            : "text-muted-foreground hover:text-foreground",
+                                        )}
+                                      >
+                                        {DIRECTION_LABEL[d]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </>
+              )}
+            </fieldset>
+          )}
+
           <DialogFooter className="items-center sm:justify-between">
             <Badge variant="muted" className="font-normal">
               Stored as EXTERNAL EVIDENCE, never as hypothesis
+              {selectedCount
+                ? ` · affects ${selectedCount} claim${selectedCount === 1 ? "" : "s"}`
+                : ""}
             </Badge>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

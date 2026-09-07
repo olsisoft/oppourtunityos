@@ -6,27 +6,18 @@ import { useState, useTransition } from "react";
 import { ArrowUpRight, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  deleteEntityAction,
-  updateIcpAction,
-  updatePainAction,
-  updateVariableAction,
-} from "@/actions/entities";
+import { deleteEntityAction, updateIcpAction, updatePainAction } from "@/actions/entities";
 import type { MapSelection } from "@/components/discovery/opportunity-map";
 import { ProvenanceBadge } from "@/components/shared/provenance-badge";
-import { ScorePill } from "@/components/shared/score-pill";
 import { VerdictBadge } from "@/components/shared/verdict-badge";
+import { Scorecard, frontierText } from "@/components/value/scorecard";
+import { VariableValueForm } from "@/components/value/variable-value-form";
+import type { WorkspaceGraph } from "@/db/workspaces";
+import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -38,25 +29,26 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ALTERNATIVE_CATEGORY_LABELS,
   DIRECTION_LABELS,
-  DesiredDirection,
   EVIDENCE_TYPE_LABELS,
-  VARIABLE_CATEGORY_LABELS,
-  VariableCategory,
 } from "@/domain/enums";
 
 export function NodeDetailSheet({
   selection,
   workspaceId,
+  graph,
   onClose,
 }: {
   selection: MapSelection | null;
   workspaceId: string;
+  graph: WorkspaceGraph;
   onClose: () => void;
 }) {
   return (
     <Sheet open={Boolean(selection)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-        {selection && <Body selection={selection} workspaceId={workspaceId} onClose={onClose} />}
+        {selection && (
+          <Body selection={selection} workspaceId={workspaceId} graph={graph} onClose={onClose} />
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -65,10 +57,12 @@ export function NodeDetailSheet({
 function Body({
   selection,
   workspaceId,
+  graph,
   onClose,
 }: {
   selection: MapSelection;
   workspaceId: string;
+  graph: WorkspaceGraph;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -120,14 +114,42 @@ function Body({
           pending={pending}
         />
       );
-    case "variable":
+    case "variable": {
+      const v = selection.item;
+      const siblings = graph.markets
+        .flatMap((m) => m.icps.flatMap((i) => i.variables))
+        .filter((x) => x.id !== v.id)
+        .map((x) => ({ id: x.id, name: x.name }));
       return (
-        <VariableForm
-          variable={selection.item}
-          onDelete={() => remove("variable", selection.item.id)}
-          pending={pending}
-        />
+        <div className="space-y-3 p-4 pt-10">
+          <SheetHeader className="p-0">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs uppercase">Valuable variable</span>
+              <ProvenanceBadge provenance={v.provenance} />
+            </div>
+            <SheetTitle>
+              {DIRECTION_LABELS[v.desiredDirection]} × {v.name}
+            </SheetTitle>
+            <SheetDescription>
+              {v.pains.length} pain{v.pains.length === 1 ? "" : "s"} attached. Each field carries
+              its own status; leave a field empty when it is UNKNOWN rather than guessing.
+            </SheetDescription>
+          </SheetHeader>
+          <VariableValueForm variable={v} siblings={siblings} />
+          <div className="flex justify-start border-t pt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => remove("variable", v.id)}
+              disabled={pending}
+            >
+              <Trash2 /> Delete variable
+            </Button>
+          </div>
+        </div>
       );
+    }
     case "pain":
       return (
         <PainForm
@@ -148,10 +170,18 @@ function Body({
             <SheetTitle>{o.title}</SheetTitle>
             <SheetDescription>{o.problemStatement ?? "No problem statement yet."}</SheetDescription>
           </SheetHeader>
-          <div className="mt-4 flex gap-6">
-            <ScorePill value={o.opportunityScore} label="Potential" size="lg" />
-            <ScorePill value={o.evidenceScore} label="Evidence" size="lg" />
+          <div className="mt-4">
+            <Scorecard
+              opportunity={o}
+              insights={deriveOpportunityInsights(o, graph.mechanisms.length)}
+              size="md"
+            />
           </div>
+          <p className="text-muted-foreground mt-3 text-xs">
+            Current Proof Frontier:{" "}
+            <span className="text-foreground">{frontierText(o.proofFrontierRung)}</span>. Everything
+            beyond it remains a product or causal hypothesis.
+          </p>
           <div className="mt-6">
             <Button asChild size="sm">
               <Link href={`/app/w/${workspaceId}/opportunities/${o.id}`}>
@@ -265,115 +295,6 @@ function IcpForm({
       </L>
       <L label="Notes">
         <Textarea rows={2} value={form.notes} onChange={set("notes")} />
-      </L>
-      <div className="flex items-center justify-between pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onDelete} disabled={pending}>
-          <Trash2 /> Delete
-        </Button>
-        <Button type="submit" size="sm" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Save
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function VariableForm({
-  variable,
-  onDelete,
-  pending,
-}: {
-  variable: Extract<MapSelection, { kind: "variable" }>["item"];
-  onDelete: () => void;
-  pending: boolean;
-}) {
-  const { save, saving } = useSave(updateVariableAction);
-  const [form, setForm] = useState({
-    name: variable.name,
-    description: variable.description ?? "",
-    category: variable.category,
-    desiredDirection: variable.desiredDirection,
-    importanceScore: variable.importanceScore,
-  });
-  return (
-    <form
-      className="space-y-3 p-4 pt-10"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void save({ variableId: variable.id, ...form });
-      }}
-    >
-      <SheetHeader className="p-0">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-xs uppercase">Valuable variable</span>
-          <ProvenanceBadge provenance={variable.provenance} />
-        </div>
-        <SheetTitle>
-          {DIRECTION_LABELS[variable.desiredDirection]} × {variable.name}
-        </SheetTitle>
-        <SheetDescription>
-          {variable.pains.length} pain{variable.pains.length === 1 ? "" : "s"} attached.
-        </SheetDescription>
-      </SheetHeader>
-      <L label="Name">
-        <Input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          required
-        />
-      </L>
-      <L label="Description">
-        <Textarea
-          rows={2}
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-        />
-      </L>
-      <div className="grid grid-cols-2 gap-3">
-        <L label="Category">
-          <Select
-            value={form.category}
-            onValueChange={(v) => setForm({ ...form, category: v as VariableCategory })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.values(VariableCategory).map((c) => (
-                <SelectItem key={c} value={c}>
-                  {VARIABLE_CATEGORY_LABELS[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </L>
-        <L label="Desired direction">
-          <Select
-            value={form.desiredDirection}
-            onValueChange={(v) => setForm({ ...form, desiredDirection: v as DesiredDirection })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.values(DesiredDirection).map((d) => (
-                <SelectItem key={d} value={d}>
-                  {DIRECTION_LABELS[d]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </L>
-      </div>
-      <L label={`Importance: ${form.importanceScore}/10`}>
-        <input
-          type="range"
-          min={0}
-          max={10}
-          value={form.importanceScore}
-          onChange={(e) => setForm({ ...form, importanceScore: Number(e.target.value) })}
-          className="w-full accent-current"
-        />
       </L>
       <div className="flex items-center justify-between pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onDelete} disabled={pending}>

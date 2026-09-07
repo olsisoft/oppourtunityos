@@ -1,5 +1,5 @@
 import { prisma } from "@/db/prisma";
-import { ForbiddenError } from "@/lib/session";
+import { ForbiddenError } from "@/lib/errors";
 import type { ProgressCounts } from "@/services/scoring/discovery-progress";
 
 /**
@@ -24,6 +24,42 @@ export async function listWorkspacesForUser(userId: string) {
   });
 }
 
+const evidenceSummarySelect = {
+  id: true,
+  sourceTitle: true,
+  type: true,
+  sentiment: true,
+  strengthScore: true,
+  relevanceScore: true,
+  isDemo: true,
+  isMocked: true,
+} as const;
+
+export const opportunityInclude = {
+  icp: true,
+  variable: { include: { parent: { select: { id: true, name: true } } } },
+  pain: { include: { triggers: true, alternatives: true } },
+  assumptions: { include: { links: true } },
+  evidence: true,
+  valueChainNodes: {
+    orderBy: { causalDistance: "asc" as const },
+    include: {
+      evidenceLinks: { include: { evidence: { select: evidenceSummarySelect } } },
+      assumptions: { include: { links: true } },
+    },
+  },
+  causalLinks: {
+    include: {
+      fromNode: { select: { id: true, level: true, statement: true } },
+      toNode: { select: { id: true, level: true, statement: true } },
+      evidenceLinks: { include: { evidence: { select: evidenceSummarySelect } } },
+      assumptions: { include: { links: true } },
+    },
+  },
+  experiments: { orderBy: { createdAt: "desc" as const } },
+  claimLinks: { include: { evidence: { select: evidenceSummarySelect } } },
+};
+
 export const workspaceGraphInclude = {
   markets: {
     orderBy: { createdAt: "asc" as const },
@@ -34,6 +70,7 @@ export const workspaceGraphInclude = {
           variables: {
             orderBy: [{ importanceScore: "desc" as const }, { createdAt: "asc" as const }],
             include: {
+              parent: { select: { id: true, name: true } },
               pains: {
                 orderBy: { createdAt: "asc" as const },
                 include: {
@@ -51,22 +88,28 @@ export const workspaceGraphInclude = {
   },
   evidence: {
     orderBy: { capturedAt: "desc" as const },
-    include: { pain: { select: { id: true, description: true } } },
+    include: {
+      pain: { select: { id: true, description: true } },
+      claimLinks: {
+        include: {
+          valueChainNode: { select: { id: true, level: true, statement: true } },
+          causalLink: { select: { id: true, statement: true } },
+        },
+      },
+    },
   },
   mechanisms: { orderBy: { createdAt: "asc" as const } },
   opportunities: {
     orderBy: [{ opportunityScore: "desc" as const }, { createdAt: "asc" as const }],
-    include: {
-      icp: true,
-      variable: true,
-      pain: { include: { triggers: true, alternatives: true } },
-      assumptions: { include: { links: true } },
-      evidence: true,
-    },
+    include: opportunityInclude,
   },
   assumptions: {
     orderBy: [{ importance: "desc" as const }, { createdAt: "asc" as const }],
-    include: { links: { include: { evidence: { select: { id: true, sourceTitle: true } } } } },
+    include: {
+      links: { include: { evidence: { select: { id: true, sourceTitle: true } } } },
+      valueChainNode: { select: { id: true, level: true, statement: true } },
+      causalLink: { select: { id: true, statement: true } },
+    },
   },
   conversations: {
     orderBy: { createdAt: "asc" as const },
@@ -84,6 +127,9 @@ export async function getWorkspaceGraph(workspaceId: string) {
 
 export type WorkspaceGraph = Awaited<ReturnType<typeof getWorkspaceGraph>>;
 export type OpportunityWithRelations = WorkspaceGraph["opportunities"][number];
+export type GraphValueChainNode = OpportunityWithRelations["valueChainNodes"][number];
+export type GraphCausalLink = OpportunityWithRelations["causalLinks"][number];
+export type GraphExperiment = OpportunityWithRelations["experiments"][number];
 export type GraphMarket = WorkspaceGraph["markets"][number];
 export type GraphIcp = GraphMarket["icps"][number];
 export type GraphVariable = GraphIcp["variables"][number];
@@ -104,6 +150,8 @@ export async function getWorkspaceCounts(workspaceId: string): Promise<ProgressC
     mechanisms,
     opportunities,
     scored,
+    valueChainNodes,
+    experiments,
     conversation,
   ] = await Promise.all([
     prisma.market.count({ where: { workspaceId } }),
@@ -118,6 +166,8 @@ export async function getWorkspaceCounts(workspaceId: string): Promise<ProgressC
     prisma.productMechanism.count({ where: { workspaceId } }),
     prisma.opportunity.count({ where: { workspaceId } }),
     prisma.opportunity.count({ where: { workspaceId, opportunityScore: { gt: 0 } } }),
+    prisma.valueChainNode.count({ where: { opportunity: { workspaceId } } }),
+    prisma.experiment.count({ where: { opportunity: { workspaceId } } }),
     prisma.conversation.findFirst({ where: { workspaceId }, select: { userContext: true } }),
   ]);
   const ctx = conversation?.userContext as { industries?: unknown[]; audiences?: unknown[] } | null;
@@ -135,6 +185,8 @@ export async function getWorkspaceCounts(workspaceId: string): Promise<ProgressC
     mechanisms,
     opportunities,
     scoredOpportunities: scored,
+    valueChainNodes,
+    experiments,
   };
 }
 

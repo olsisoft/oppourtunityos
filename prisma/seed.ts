@@ -10,7 +10,14 @@ import bcrypt from "bcryptjs";
 
 import { prisma } from "@/db/prisma";
 import type { Prisma } from "@/generated/prisma/client";
+import type {
+  Criticality,
+  EvidenceLinkDirection,
+  Provenance,
+  ValueChainLevel,
+} from "@/generated/prisma/enums";
 import { deriveAssumptionStatus } from "@/services/scoring/assumption-status";
+import { CAUSAL_DISTANCE_BY_LEVEL } from "@/services/value/epistemic";
 import { signalWeight } from "@/services/scoring/evidence-score";
 import { recomputeOpportunity, toEvidenceSignal } from "@/services/scoring/recompute";
 
@@ -129,6 +136,128 @@ async function seedBeautySalons(userId: string) {
     ),
   );
   const [noShow, leakage, idle, retention, shrinkage] = variables;
+
+  // ---- valuable variables as first-class entities.
+  // Parent economic variables are HYPOTHESES (no evidence names them). Every
+  // field carries its own provenance; a field nobody stated stays null (UNKNOWN).
+  const H: Provenance = "AI_HYPOTHESIS";
+  const I: Provenance = "INTERVIEW";
+  const baseFieldProvenance = { name: H, category: H, desiredDirection: H, importanceScore: H };
+  const chairHour = await prisma.variable.create({
+    data: {
+      icpId: icp.id,
+      name: "Revenue per available chair-hour",
+      category: "REVENUE",
+      desiredDirection: "INCREASE",
+      importanceScore: 9,
+      description:
+        "Parent economic variable: revenue earned per chair-hour the salon pays for. No-shows and idle capacity both reduce it.",
+      unit: "€ per chair-hour",
+      whoValuesIt: "Owner-operator",
+      whyItMatters: "Wages and rent are fixed per chair-hour; unsold hours are pure margin loss.",
+      provenance: H,
+      fieldProvenance: { ...baseFieldProvenance, unit: H, whoValuesIt: H, whyItMatters: H },
+    },
+  });
+  const netRevenue = await prisma.variable.create({
+    data: {
+      icpId: icp.id,
+      name: "Net revenue reaching the owner",
+      category: "REVENUE",
+      desiredDirection: "PROTECT",
+      importanceScore: 9,
+      description:
+        "Parent economic variable: revenue that actually reaches the till and the owner. Leakage and shrinkage erode it.",
+      unit: "€ per month",
+      whoValuesIt: "Owner-operator",
+      provenance: H,
+      fieldProvenance: { ...baseFieldProvenance, unit: H, whoValuesIt: H },
+    },
+  });
+  await prisma.variable.update({
+    where: { id: noShow.id },
+    data: {
+      target: "booked appointments that are not honoured or are cancelled the same day",
+      currentState: "Estimated 12–20% of appointments (owner estimates in the demo interviews)",
+      desiredState: "< 8%",
+      unit: "% of booked appointments per month",
+      whoValuesIt: "Owner-operator (revenue) and stylists (commission)",
+      whyItMatters:
+        "Each no-show is an unsold peak chair-hour; one owner quantified it at about €1,200 a month for 8 chairs.",
+      parentVariableId: chairHour.id,
+      fieldProvenance: {
+        ...baseFieldProvenance,
+        target: H,
+        currentState: I,
+        desiredState: H,
+        unit: H,
+        whoValuesIt: I,
+        whyItMatters: I,
+        parentVariableId: H,
+      },
+    },
+  });
+  await prisma.variable.update({
+    where: { id: leakage.id },
+    data: {
+      target: "services performed, discounts given and cash received that never reach the till",
+      currentState: "Owners suspect 3–8% of revenue; nobody measures it (demo interviews)",
+      desiredState: "< 1% with weekly reconciliation",
+      unit: "% of monthly revenue",
+      whoValuesIt: "Owner-operator; the accountant indirectly",
+      whyItMatters:
+        "Discovered months late, usually after a stylist leaves: €9,000 over six months in one demo interview.",
+      parentVariableId: netRevenue.id,
+      fieldProvenance: {
+        ...baseFieldProvenance,
+        target: H,
+        currentState: I,
+        desiredState: H,
+        unit: H,
+        whoValuesIt: I,
+        whyItMatters: I,
+        parentVariableId: H,
+      },
+    },
+  });
+  await prisma.variable.update({
+    where: { id: idle.id },
+    data: {
+      target: "chair-hours paid for but unsold on Tuesday–Thursday afternoons",
+      currentState: "40–60% mid-week occupancy (owner estimates)",
+      desiredState: "> 80% occupancy",
+      unit: "% occupancy, mid-week afternoons",
+      whoValuesIt: "Owner-operator",
+      parentVariableId: chairHour.id,
+      fieldProvenance: {
+        ...baseFieldProvenance,
+        target: H,
+        currentState: I,
+        desiredState: H,
+        unit: H,
+        whoValuesIt: H,
+        parentVariableId: H,
+      },
+    },
+  });
+  await prisma.variable.update({
+    where: { id: retention.id },
+    data: {
+      target: "clients who return within 90 days of a visit",
+      unit: "% of clients returning within 90 days",
+      // current and desired state: UNKNOWN — nobody in the demo measured it.
+      fieldProvenance: { ...baseFieldProvenance, target: H, unit: H },
+    },
+  });
+  await prisma.variable.update({
+    where: { id: shrinkage.id },
+    data: {
+      target: "retail and backbar product that disappears without a sale or service record",
+      parentVariableId: netRevenue.id,
+      // current state: UNKNOWN — "a few hundred euros a month" is a guess, not a measurement.
+      fieldProvenance: { ...baseFieldProvenance, target: H, parentVariableId: H },
+    },
+  });
 
   // ---- pains
   const noShowPain = await prisma.pain.create({
@@ -489,7 +618,7 @@ async function seedBeautySalons(userId: string) {
     sentiment: "NEUTRAL",
     hasWorkaround: true,
   });
-  await ev({
+  const e5 = await ev({
     workspaceId: workspace.id,
     painId: noShowPain.id,
     type: "REDDIT",
@@ -551,7 +680,7 @@ async function seedBeautySalons(userId: string) {
     hasExplicitPain: true,
     hasPurchaseIntent: true,
   });
-  await ev({
+  const e9 = await ev({
     workspaceId: workspace.id,
     painId: leakagePain.id,
     type: "JOB_POSTING",
@@ -565,7 +694,7 @@ async function seedBeautySalons(userId: string) {
     hasWorkaround: true,
     hasEconomicImpact: true,
   });
-  await ev({
+  const e10 = await ev({
     workspaceId: workspace.id,
     painId: leakagePain.id,
     type: "FORUM_POST",
@@ -865,6 +994,202 @@ async function seedBeautySalons(userId: string) {
     provenance: "USER",
   });
 
+  // ---- value causality ladders. Statements are HYPOTHESES; the status of each
+  // node and link is computed from linked evidence at recompute time. Nothing
+  // below marks a claim as proven.
+  const ladder = async (
+    opportunityId: string,
+    statements: Partial<Record<ValueChainLevel, string>>,
+    links: Array<{
+      from: ValueChainLevel;
+      to: ValueChainLevel;
+      statement: string;
+      criticality?: Criticality;
+    }>,
+  ) => {
+    const nodes = new Map<ValueChainLevel, string>();
+    for (const [level, statement] of Object.entries(statements) as Array<
+      [ValueChainLevel, string]
+    >) {
+      const n = await prisma.valueChainNode.create({
+        data: {
+          opportunityId,
+          level,
+          statement,
+          status: "HYPOTHESIS",
+          causalDistance: CAUSAL_DISTANCE_BY_LEVEL[level],
+          generatedBy: "AI_HYPOTHESIS",
+        },
+      });
+      nodes.set(level, n.id);
+    }
+    const linkIds = new Map<string, string>();
+    for (const l of links) {
+      const created = await prisma.causalLink.create({
+        data: {
+          opportunityId,
+          fromNodeId: nodes.get(l.from)!,
+          toNodeId: nodes.get(l.to)!,
+          statement: l.statement,
+          criticality: l.criticality ?? "CRITICAL",
+          status: "HYPOTHESIS",
+          generatedBy: "AI_HYPOTHESIS",
+        },
+      });
+      linkIds.set(`${l.from}->${l.to}`, created.id);
+    }
+    return {
+      node: (level: ValueChainLevel) => nodes.get(level)!,
+      link: (from: ValueChainLevel, to: ValueChainLevel) => linkIds.get(`${from}->${to}`)!,
+    };
+  };
+
+  const noShowLadder = await ladder(
+    noShowOpp.id,
+    {
+      MECHANISM:
+        "Risk prediction per booking plus an adaptive intervention (deposit, reminder or waitlist offer).",
+      CAPABILITY:
+        "Identify the bookings most likely to become no-shows and react before the appointment time.",
+      TRANSFORMATION: "Fewer high-risk appointments become unrecoverable empty slots.",
+      OPERATIONAL_VALUE:
+        "More appointments are attended, cancelled earlier, or backfilled from the waitlist.",
+      ECONOMIC_VALUE: "Unused peak chair capacity decreases.",
+      STRATEGIC_OUTCOME: "Revenue per available chair-hour potentially increases.",
+    },
+    [
+      {
+        from: "MECHANISM",
+        to: "CAPABILITY",
+        statement:
+          "The booking history contains enough signal to predict which appointments will not be honoured.",
+      },
+      {
+        from: "CAPABILITY",
+        to: "TRANSFORMATION",
+        statement:
+          "If a high-risk booking receives a deposit request or an adaptive reminder, it is less likely to end as a no-show.",
+      },
+      {
+        from: "TRANSFORMATION",
+        to: "OPERATIONAL_VALUE",
+        statement: "Slots freed early enough can actually be resold or attended in time to matter.",
+      },
+      {
+        from: "OPERATIONAL_VALUE",
+        to: "ECONOMIC_VALUE",
+        statement:
+          "Attended and backfilled appointments translate into paid chair-hours, not just activity.",
+      },
+      {
+        from: "ECONOMIC_VALUE",
+        to: "STRATEGIC_OUTCOME",
+        statement: "The recovered capacity is large enough to move revenue per chair-hour.",
+        criticality: "IMPORTANT",
+      },
+    ],
+  );
+
+  const leakageLadder = await ladder(
+    leakageOpp.id,
+    {
+      MECHANISM:
+        "Match every appointment in the booking system against a payment in the till (owners do this manually today).",
+      CAPABILITY:
+        "Unrecorded services and unauthorised discounts are surfaced per stylist, every week.",
+      TRANSFORMATION:
+        "Fewer services go unrecorded because discrepancies are caught within the week, not months later.",
+      OPERATIONAL_VALUE:
+        "The owner stops the Sunday-evening spreadsheet ritual and acts on a short weekly list.",
+      ECONOMIC_VALUE:
+        "Leaked revenue is recovered or prevented; the accountant's leakage work shrinks.",
+      STRATEGIC_OUTCOME: "Net revenue reaching the owner increases.",
+    },
+    [
+      {
+        from: "MECHANISM",
+        to: "CAPABILITY",
+        statement:
+          "Matching appointments to payments reveals the unrecorded services, and the data to do it exists in the POS and booking exports.",
+      },
+      {
+        from: "CAPABILITY",
+        to: "TRANSFORMATION",
+        statement: "Owners act on surfaced discrepancies quickly enough that the leakage stops.",
+      },
+      {
+        from: "TRANSFORMATION",
+        to: "OPERATIONAL_VALUE",
+        statement:
+          "A weekly automated report replaces the manual reconciliation rather than adding to it.",
+      },
+      {
+        from: "OPERATIONAL_VALUE",
+        to: "ECONOMIC_VALUE",
+        statement:
+          "Caught leakage is actually recovered (or deterred) in money, not only identified.",
+      },
+      {
+        from: "ECONOMIC_VALUE",
+        to: "STRATEGIC_OUTCOME",
+        statement: "Recovered leakage is material relative to net revenue.",
+        criticality: "IMPORTANT",
+      },
+    ],
+  );
+
+  // ---- evidence → claims. Only what the excerpt actually shows. The engine
+  // decides the status; the frontier is derived, never declared.
+  const claim = async (
+    evidenceId: string,
+    opportunityId: string,
+    claimType: Parameters<typeof prisma.evidenceClaimLink.create>[0]["data"]["claimType"],
+    target: { valueChainNodeId?: string; causalLinkId?: string } = {},
+    direction: EvidenceLinkDirection = "SUPPORTS",
+  ) =>
+    prisma.evidenceClaimLink.create({
+      data: { evidenceId, opportunityId, claimType, direction, ...target },
+    });
+
+  // Leakage: manual reconciliation is a documented practice (interview, job
+  // posting, forum) and it revealed €9,000 of unrecorded services → the
+  // mechanism and the capability have evidence. Nothing downstream has any.
+  await claim(e6.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+    valueChainNodeId: leakageLadder.node("MECHANISM"),
+  });
+  await claim(e9.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+    valueChainNodeId: leakageLadder.node("MECHANISM"),
+  });
+  await claim(e10.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+    valueChainNodeId: leakageLadder.node("MECHANISM"),
+  });
+  await claim(e6.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+    valueChainNodeId: leakageLadder.node("CAPABILITY"),
+  });
+  await claim(e6.id, leakageOpp.id, "CAUSAL_LINK", {
+    causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
+  });
+  await claim(e9.id, leakageOpp.id, "CAUSAL_LINK", {
+    causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
+  });
+  // Owner C changed behaviour after finding the gap (acts on discrepancies) —
+  // but nothing shows the leakage then stopped: the transformation stays a hypothesis.
+  await claim(e6.id, leakageOpp.id, "CAUSAL_LINK", {
+    causalLinkId: leakageLadder.link("CAPABILITY", "TRANSFORMATION"),
+  });
+  await claim(e7.id, leakageOpp.id, "WILLINGNESS_TO_PAY");
+  await claim(e8.id, leakageOpp.id, "WILLINGNESS_TO_PAY");
+  await claim(e6.id, leakageOpp.id, "MAGNITUDE");
+  await claim(e8.id, leakageOpp.id, "FREQUENCY");
+
+  // No-show: the problem is well evidenced, the ladder is not. One comment
+  // contradicts the premise that reminders are insufficient.
+  await claim(e1.id, noShowOpp.id, "MAGNITUDE");
+  await claim(e1.id, noShowOpp.id, "FREQUENCY");
+  await claim(e2.id, noShowOpp.id, "WILLINGNESS_TO_PAY");
+  await claim(e3.id, noShowOpp.id, "ALTERNATIVE");
+  await claim(e5.id, noShowOpp.id, "ALTERNATIVE", {}, "CONTRADICTS");
+
   // ---- assumptions with evidence links
   const link = async (
     assumptionId: string,
@@ -879,6 +1204,7 @@ async function seedBeautySalons(userId: string) {
       statement:
         "Salon owners lose significant revenue from no-shows (> €1,000/month for 5+ chairs).",
       importance: 9,
+      kind: "VALUE",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -890,6 +1216,7 @@ async function seedBeautySalons(userId: string) {
       opportunityId: noShowOpp.id,
       statement: "The owner controls software purchases.",
       importance: 8,
+      kind: "ACCESS",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -901,6 +1228,8 @@ async function seedBeautySalons(userId: string) {
       opportunityId: noShowOpp.id,
       statement: "Selective deposits reduce no-shows without reducing bookings.",
       importance: 9,
+      kind: "CAUSAL",
+      causalLinkId: noShowLadder.link("CAPABILITY", "TRANSFORMATION"),
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -911,6 +1240,7 @@ async function seedBeautySalons(userId: string) {
       opportunityId: noShowOpp.id,
       statement: "Salons would pay €79–149/month for no-show prevention.",
       importance: 8,
+      kind: "WTP",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -932,16 +1262,20 @@ async function seedBeautySalons(userId: string) {
       opportunityId: leakageOpp.id,
       statement: "Owners will confront staff when shown discrepancies.",
       importance: 8,
+      kind: "CAUSAL",
+      causalLinkId: leakageLadder.link("CAPABILITY", "TRANSFORMATION"),
       provenance: "AI_HYPOTHESIS",
     },
   });
   await link(a6.id, e6.id, "SUPPORTS");
-  await prisma.assumption.create({
+  const a7 = await prisma.assumption.create({
     data: {
       workspaceId: workspace.id,
       opportunityId: leakageOpp.id,
       statement: "POS and booking systems expose the data needed for reconciliation.",
       importance: 9,
+      kind: "FEASIBILITY",
+      causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -951,6 +1285,7 @@ async function seedBeautySalons(userId: string) {
       opportunityId: leakageOpp.id,
       statement: "Owners already pay someone (accountant, manager) to catch leakage.",
       importance: 7,
+      kind: "WTP",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -963,6 +1298,7 @@ async function seedBeautySalons(userId: string) {
       opportunityId: idleOpp.id,
       statement: "Clients accept invitations into specific quiet slots without discounts.",
       importance: 9,
+      kind: "CAUSAL",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -983,6 +1319,7 @@ async function seedBeautySalons(userId: string) {
       opportunityId: shrinkageOpp.id,
       statement: "Monthly shrinkage exceeds €300 for a typical salon.",
       importance: 8,
+      kind: "VALUE",
       provenance: "AI_HYPOTHESIS",
     },
   });
@@ -992,7 +1329,97 @@ async function seedBeautySalons(userId: string) {
       opportunityId: pricingOpp.id,
       statement: "Owners are willing to vary prices by time of day.",
       importance: 9,
+      kind: "ACCESS",
       provenance: "AI_HYPOTHESIS",
+    },
+  });
+
+  // New causally explicit assumptions (UNKNOWN until evidence is linked).
+  await prisma.assumption.create({
+    data: {
+      workspaceId: workspace.id,
+      opportunityId: noShowOpp.id,
+      statement: "Booking platforms expose enough data to calculate appointment risk.",
+      importance: 8,
+      kind: "FEASIBILITY",
+      causalLinkId: noShowLadder.link("MECHANISM", "CAPABILITY"),
+      provenance: "AI_HYPOTHESIS",
+    },
+  });
+  await prisma.assumption.create({
+    data: {
+      workspaceId: workspace.id,
+      opportunityId: noShowOpp.id,
+      statement:
+        "A 5 percentage-point reduction in no-shows creates enough economic value to justify the product.",
+      importance: 8,
+      kind: "VALUE",
+      causalLinkId: noShowLadder.link("OPERATIONAL_VALUE", "ECONOMIC_VALUE"),
+      provenance: "AI_HYPOTHESIS",
+    },
+  });
+  const a13 = await prisma.assumption.create({
+    data: {
+      workspaceId: workspace.id,
+      opportunityId: leakageOpp.id,
+      statement: "Recovered leakage exceeds the subscription price for a typical salon.",
+      importance: 8,
+      kind: "VALUE",
+      causalLinkId: leakageLadder.link("OPERATIONAL_VALUE", "ECONOMIC_VALUE"),
+      provenance: "AI_HYPOTHESIS",
+    },
+  });
+  await link(a13.id, e6.id, "SUPPORTS");
+  await link(a13.id, e7.id, "SUPPORTS");
+
+  // ---- Value Strength dimensions (0–10). Only what evidence or the user
+  // stated gets a number; a dimension nobody measured stays null → INCOMPLETE.
+  await prisma.opportunity.update({
+    where: { id: leakageOpp.id },
+    data: {
+      vsImportance: 9,
+      vsMagnitude: 7,
+      vsFrequency: 7,
+      vsPopulation: 7,
+      vsAttributability: 8,
+      valueDimensionProvenance: {
+        importance: "INTERVIEW",
+        magnitude: "INTERVIEW",
+        frequency: "INTERVIEW",
+        population: "EXTERNAL_EVIDENCE",
+        attributability: "AI_HYPOTHESIS",
+      },
+    },
+  });
+  await prisma.opportunity.update({
+    where: { id: noShowOpp.id },
+    data: {
+      vsImportance: 9,
+      vsMagnitude: 6,
+      vsFrequency: 8,
+      vsPopulation: null, // UNKNOWN — no survey in the demo
+      vsAttributability: null, // UNKNOWN — nothing has been tried
+      valueDimensionProvenance: {
+        importance: "INTERVIEW",
+        magnitude: "INTERVIEW",
+        frequency: "INTERVIEW",
+      },
+    },
+  });
+
+  // ---- one planned experiment on the first unproven leakage link.
+  await prisma.experiment.create({
+    data: {
+      opportunityId: leakageOpp.id,
+      causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
+      assumptionId: a7.id,
+      title: "Concierge reconciliation for five salons",
+      hypothesis:
+        "Exports from the two most common POS and booking tools are enough to match at least 95% of appointments to payments.",
+      design:
+        "Obtain one month of POS and booking exports from five salons; match them by hand; count unmatched appointments and discrepancies found per salon.",
+      successMetric: "Match rate ≥ 95% and at least one discrepancy surfaced per salon.",
+      status: "PLANNED",
     },
   });
 
@@ -1026,7 +1453,7 @@ async function seedBeautySalons(userId: string) {
   ]) {
     const r = await recomputeOpportunity(o.id);
     console.log(
-      `  ${o.title}: potential ${r?.opportunityScore} · evidence ${r?.evidenceScore} · ${r?.verdict}`,
+      `  ${o.title}: potential ${r?.opportunityScore} · evidence ${r?.evidenceScore} · value ${r?.valueStrength ?? "INCOMPLETE"} · causal ${r?.causalConfidence ?? "INCOMPLETE"} · frontier ${r?.proofFrontierRung ?? "NONE"} · ${r?.verdict}`,
     );
   }
 

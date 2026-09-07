@@ -113,6 +113,7 @@ export function buildHints(
       variables: variables.map((v) => v.name),
       pains: pains.map((p) => p.description),
       mechanisms: graph.mechanisms.map((m) => m.name),
+      opportunities: graph.opportunities.map((o) => o.title),
     },
   };
 }

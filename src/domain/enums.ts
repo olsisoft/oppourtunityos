@@ -4,8 +4,13 @@
  */
 import {
   AlternativeCategory,
+  AssumptionKind,
   AssumptionStatus,
+  ClaimType,
   Confidence,
+  Criticality,
+  EpistemicStatus,
+  ExperimentStatus,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
@@ -14,14 +19,20 @@ import {
   EvidenceType,
   MechanismCategory,
   Provenance,
+  ValueChainLevel,
   VariableCategory,
   Verdict,
 } from "@/generated/prisma/enums";
 
 export {
   AlternativeCategory,
+  AssumptionKind,
   AssumptionStatus,
+  ClaimType,
   Confidence,
+  Criticality,
+  EpistemicStatus,
+  ExperimentStatus,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
@@ -30,6 +41,7 @@ export {
   EvidenceType,
   MechanismCategory,
   Provenance,
+  ValueChainLevel,
   VariableCategory,
   Verdict,
 };
@@ -46,7 +58,9 @@ export const STAGE_ORDER: DiscoveryStage[] = [
   DiscoveryStage.EVIDENCE_DISCOVERY,
   DiscoveryStage.MECHANISM_DISCOVERY,
   DiscoveryStage.OPPORTUNITY_FORMATION,
+  DiscoveryStage.VALUE_CAUSALITY,
   DiscoveryStage.SCORING,
+  DiscoveryStage.EXPERIMENT_DESIGN,
   DiscoveryStage.RECOMMENDATION,
 ];
 
@@ -62,7 +76,9 @@ export const STAGE_LABELS: Record<DiscoveryStage, string> = {
   EVIDENCE_DISCOVERY: "Evidence",
   MECHANISM_DISCOVERY: "Mechanisms",
   OPPORTUNITY_FORMATION: "Opportunity",
+  VALUE_CAUSALITY: "Value chain",
   SCORING: "Scoring",
+  EXPERIMENT_DESIGN: "Experiment",
   RECOMMENDATION: "Decision",
 };
 
@@ -163,6 +179,13 @@ export const VARIABLE_CATEGORY_LABELS: Record<VariableCategory, string> = {
   DOWNTIME: "Downtime",
   INVENTORY: "Inventory",
   MARGIN: "Margin",
+  CASH: "Cash",
+  COMPLEXITY: "Complexity",
+  RELIABILITY: "Reliability",
+  PERFORMANCE: "Performance",
+  VISIBILITY: "Visibility",
+  PREDICTABILITY: "Predictability",
+  UTILIZATION: "Utilization",
   OTHER: "Other",
 };
 
@@ -176,6 +199,103 @@ export const DIRECTION_LABELS: Record<DesiredDirection, string> = {
   AUTOMATE: "Automate",
   OPTIMIZE: "Optimize",
   DETECT: "Detect",
+  PROTECT: "Protect",
+  RECOVER: "Recover",
+  STABILIZE: "Stabilize",
+  MAINTAIN: "Maintain",
+  EXPAND: "Expand",
+  RELEASE: "Release",
+  MEASURE: "Measure",
+  TRACE: "Trace",
+};
+
+export const EPISTEMIC_LABELS: Record<EpistemicStatus, string> = {
+  PROVEN: "PROVEN",
+  SUPPORTED: "SUPPORTED",
+  HYPOTHESIS: "HYPOTHESIS",
+  UNPROVEN: "UNPROVEN",
+  CONTRADICTED: "CONTRADICTED",
+  UNKNOWN: "UNKNOWN",
+};
+
+export const EPISTEMIC_DESCRIPTIONS: Record<EpistemicStatus, string> = {
+  PROVEN: "Linked evidence reaches the proven threshold (≥ 75) with no unresolved contradiction.",
+  SUPPORTED: "Linked evidence reaches the supported threshold (≥ 40).",
+  HYPOTHESIS: "Proposed by the analyst; no linked evidence.",
+  UNPROVEN: "Stated but not yet supported by sufficient evidence.",
+  CONTRADICTED:
+    "Contradicting evidence outweighs supporting evidence, or a critical assumption is contradicted.",
+  UNKNOWN: "Not stated.",
+};
+
+export const EPISTEMIC_TONE: Record<
+  EpistemicStatus,
+  "positive" | "info" | "warning" | "negative" | "muted" | "outline"
+> = {
+  PROVEN: "positive",
+  SUPPORTED: "info",
+  HYPOTHESIS: "warning",
+  UNPROVEN: "outline",
+  CONTRADICTED: "negative",
+  UNKNOWN: "muted",
+};
+
+export const VALUE_CHAIN_LEVEL_LABELS: Record<ValueChainLevel, string> = {
+  MECHANISM: "Mechanism",
+  CAPABILITY: "Capability",
+  TRANSFORMATION: "Transformation",
+  OPERATIONAL_VALUE: "Operational value",
+  ECONOMIC_VALUE: "Economic value",
+  STRATEGIC_OUTCOME: "Strategic outcome",
+  BUSINESS_OUTCOME: "Business outcome",
+};
+
+export const VALUE_CHAIN_LEVEL_HELP: Record<ValueChainLevel, string> = {
+  MECHANISM: "What the product does or contains.",
+  CAPABILITY: "What the customer can do that they could not do before.",
+  TRANSFORMATION: "What changes in the operation because of that capability.",
+  OPERATIONAL_VALUE: "The operational result of that change.",
+  ECONOMIC_VALUE: "The financial consequence.",
+  STRATEGIC_OUTCOME: "The company-level consequence.",
+  BUSINESS_OUTCOME: "Downstream business outcome (optional; hardest to attribute).",
+};
+
+export const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+  ICP: "ICP",
+  VARIABLE: "Variable",
+  CURRENT_STATE: "Current state",
+  PAIN: "Pain",
+  MAGNITUDE: "Magnitude",
+  FREQUENCY: "Frequency",
+  ECONOMIC_IMPACT: "Economic impact",
+  CAUSAL_LINK: "Causal link",
+  MECHANISM: "Mechanism",
+  WILLINGNESS_TO_PAY: "Willingness to pay",
+  VALUE_CHAIN_NODE: "Value chain node",
+  ALTERNATIVE: "Alternative",
+  TRIGGER: "Trigger",
+};
+
+export const ASSUMPTION_KIND_LABELS: Record<AssumptionKind, string> = {
+  GENERIC: "Assumption",
+  CAUSAL: "Causal assumption",
+  VALUE: "Value assumption",
+  FEASIBILITY: "Feasibility assumption",
+  WTP: "WTP assumption",
+  ACCESS: "Access assumption",
+};
+
+export const CRITICALITY_LABELS: Record<Criticality, string> = {
+  CRITICAL: "Critical",
+  IMPORTANT: "Important",
+  MINOR: "Minor",
+};
+
+export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
+  PLANNED: "Planned",
+  RUNNING: "Running",
+  COMPLETED: "Completed",
+  ABANDONED: "Abandoned",
 };
 
 export const ALTERNATIVE_CATEGORY_LABELS: Record<AlternativeCategory, string> = {

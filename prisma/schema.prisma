@@ -37,7 +37,9 @@ enum DiscoveryStage {
   EVIDENCE_DISCOVERY
   MECHANISM_DISCOVERY
   OPPORTUNITY_FORMATION
+  VALUE_CAUSALITY
   SCORING
+  EXPERIMENT_DESIGN
   RECOMMENDATION
 }
 
@@ -65,6 +67,13 @@ enum VariableCategory {
   DOWNTIME
   INVENTORY
   MARGIN
+  CASH
+  COMPLEXITY
+  RELIABILITY
+  PERFORMANCE
+  VISIBILITY
+  PREDICTABILITY
+  UTILIZATION
   OTHER
 }
 
@@ -78,6 +87,14 @@ enum DesiredDirection {
   AUTOMATE
   OPTIMIZE
   DETECT
+  PROTECT
+  RECOVER
+  STABILIZE
+  MAINTAIN
+  EXPAND
+  RELEASE
+  MEASURE
+  TRACE
 }
 
 enum AlternativeCategory {
@@ -167,6 +184,67 @@ enum AssumptionStatus {
 enum EvidenceLinkDirection {
   SUPPORTS
   CONTRADICTS
+  NEUTRAL
+}
+
+/// Epistemic status of a claim. PROVEN and SUPPORTED are evidence-driven
+/// (computed from linked evidence), never assigned by the LLM.
+enum EpistemicStatus {
+  PROVEN
+  SUPPORTED
+  HYPOTHESIS
+  UNPROVEN
+  CONTRADICTED
+  UNKNOWN
+}
+
+enum ValueChainLevel {
+  MECHANISM
+  CAPABILITY
+  TRANSFORMATION
+  OPERATIONAL_VALUE
+  ECONOMIC_VALUE
+  STRATEGIC_OUTCOME
+  BUSINESS_OUTCOME
+}
+
+enum Criticality {
+  CRITICAL
+  IMPORTANT
+  MINOR
+}
+
+/// What a piece of evidence speaks to.
+enum ClaimType {
+  ICP
+  VARIABLE
+  CURRENT_STATE
+  PAIN
+  MAGNITUDE
+  FREQUENCY
+  ECONOMIC_IMPACT
+  CAUSAL_LINK
+  MECHANISM
+  WILLINGNESS_TO_PAY
+  VALUE_CHAIN_NODE
+  ALTERNATIVE
+  TRIGGER
+}
+
+enum AssumptionKind {
+  GENERIC
+  CAUSAL
+  VALUE
+  FEASIBILITY
+  WTP
+  ACCESS
+}
+
+enum ExperimentStatus {
+  PLANNED
+  RUNNING
+  COMPLETED
+  ABANDONED
 }
 
 enum MessageRole {
@@ -260,24 +338,43 @@ model ICP {
   @@index([marketId])
 }
 
+/// Valuable Variable: the measurable or observable thing an ICP wants to move.
+/// `desiredDirection` is the action verb (Reduce, Increase, Protect, ...).
+/// Each structured field keeps its own provenance in `fieldProvenance`
+/// (field → USER | INTERVIEW | EXTERNAL_EVIDENCE | AI_HYPOTHESIS); a field
+/// without a value is UNKNOWN.
 model Variable {
-  id               String           @id @default(cuid())
-  icpId            String
-  name             String
-  description      String?
-  category         VariableCategory @default(OTHER)
-  desiredDirection DesiredDirection @default(IMPROVE)
-  importanceScore  Int              @default(5)
-  notes            String?
-  provenance       Provenance       @default(AI_HYPOTHESIS)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                String           @id @default(cuid())
+  icpId             String
+  name              String
+  description       String?
+  category          VariableCategory @default(OTHER)
+  desiredDirection  DesiredDirection @default(IMPROVE)
+  target            String?
+  currentState      String?
+  currentStateValue Float?
+  desiredState      String?
+  desiredStateValue Float?
+  unit              String?
+  importanceScore   Int              @default(5)
+  whoValuesIt       String?
+  whyItMatters      String?
+  parentVariableId  String?
+  evidenceStatus    EpistemicStatus  @default(UNKNOWN)
+  fieldProvenance   Json?
+  notes             String?
+  provenance        Provenance       @default(AI_HYPOTHESIS)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   icp           ICP           @relation(fields: [icpId], references: [id], onDelete: Cascade)
+  parent        Variable?     @relation("VariableHierarchy", fields: [parentVariableId], references: [id], onDelete: SetNull)
+  children      Variable[]    @relation("VariableHierarchy")
   pains         Pain[]
   opportunities Opportunity[]
 
   @@index([icpId])
+  @@index([parentVariableId])
 }
 
 model Pain {
@@ -372,6 +469,7 @@ model Evidence {
   pain            Pain?                @relation(fields: [painId], references: [id], onDelete: SetNull)
   opportunity     Opportunity?         @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   assumptionLinks AssumptionEvidence[]
+  claimLinks      EvidenceClaimLink[]
 
   @@index([workspaceId])
   @@index([painId])
@@ -430,6 +528,23 @@ model Opportunity {
   verdictReasons    Json?
   killWarnings      Json?
 
+  // Value Strength dimensions (0-10). Null = UNKNOWN; never guessed.
+  vsImportance             Int?
+  vsMagnitude              Int?
+  vsFrequency              Int?
+  vsPopulation             Int?
+  vsAttributability        Int?
+  valueDimensionProvenance Json?
+
+  // Computed value engineering outputs (null = INCOMPLETE). Never written by the LLM.
+  valueStrength          Int?
+  valueStrengthBreakdown Json?
+  causalConfidence       Int?
+  causalBreakdown        Json?
+  proofFrontier          Json?
+  proofFrontierRung      String?
+  valueActions           Json?
+
   risks          String[]   @default([])
   nextSteps      String[]   @default([])
   interviewGuide Json?
@@ -440,11 +555,117 @@ model Opportunity {
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   icp         ICP?         @relation(fields: [icpId], references: [id], onDelete: SetNull)
   variable    Variable?    @relation(fields: [variableId], references: [id], onDelete: SetNull)
-  pain        Pain?        @relation(fields: [painId], references: [id], onDelete: SetNull)
-  evidence    Evidence[]
-  assumptions Assumption[]
+  pain            Pain?               @relation(fields: [painId], references: [id], onDelete: SetNull)
+  evidence        Evidence[]
+  assumptions     Assumption[]
+  valueChainNodes ValueChainNode[]
+  causalLinks     CausalLink[]
+  claimLinks      EvidenceClaimLink[]
+  experiments     Experiment[]
 
   @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Value causality: ladder nodes, causal links, evidence-to-claim links,
+// experiments. Statuses and confidences are computed deterministically from
+// linked evidence and assumptions (see services/value).
+// ---------------------------------------------------------------------------
+
+model ValueChainNode {
+  id             String          @id @default(cuid())
+  opportunityId  String
+  level          ValueChainLevel
+  statement      String
+  status         EpistemicStatus @default(HYPOTHESIS)
+  confidence     Int             @default(0)
+  causalDistance Int             @default(0)
+  notes          String?
+  generatedBy    Provenance      @default(AI_HYPOTHESIS)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  opportunity   Opportunity         @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  outgoingLinks CausalLink[]        @relation("LinkFrom")
+  incomingLinks CausalLink[]        @relation("LinkTo")
+  evidenceLinks EvidenceClaimLink[]
+  assumptions   Assumption[]
+
+  @@unique([opportunityId, level])
+  @@index([opportunityId])
+}
+
+model CausalLink {
+  id            String          @id @default(cuid())
+  opportunityId String
+  fromNodeId    String
+  toNodeId      String
+  statement     String
+  status        EpistemicStatus @default(HYPOTHESIS)
+  confidence    Int             @default(0)
+  criticality   Criticality     @default(CRITICAL)
+  notes         String?
+  generatedBy   Provenance      @default(AI_HYPOTHESIS)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  opportunity   Opportunity         @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fromNode      ValueChainNode      @relation("LinkFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode        ValueChainNode      @relation("LinkTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+  evidenceLinks EvidenceClaimLink[]
+  assumptions   Assumption[]
+  experiments   Experiment[]
+
+  @@unique([fromNodeId, toNodeId])
+  @@index([opportunityId])
+}
+
+/// One evidence item may affect several claims. `claimId` points at the
+/// entity for entity-typed claims (variable, pain, alternative, trigger, ICP);
+/// ladder nodes and causal links use their dedicated foreign keys.
+model EvidenceClaimLink {
+  id               String                @id @default(cuid())
+  evidenceId       String
+  opportunityId    String?
+  claimType        ClaimType
+  claimId          String?
+  valueChainNodeId String?
+  causalLinkId     String?
+  direction        EvidenceLinkDirection @default(SUPPORTS)
+  note             String?
+  createdAt        DateTime              @default(now())
+
+  evidence       Evidence        @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  opportunity    Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  valueChainNode ValueChainNode? @relation(fields: [valueChainNodeId], references: [id], onDelete: Cascade)
+  causalLink     CausalLink?     @relation(fields: [causalLinkId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@index([opportunityId])
+  @@index([valueChainNodeId])
+  @@index([causalLinkId])
+  @@index([claimType, claimId])
+}
+
+model Experiment {
+  id            String           @id @default(cuid())
+  opportunityId String
+  causalLinkId  String?
+  assumptionId  String?
+  title         String
+  hypothesis    String
+  design        String?
+  successMetric String?
+  status        ExperimentStatus @default(PLANNED)
+  result        String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  causalLink  CausalLink? @relation(fields: [causalLinkId], references: [id], onDelete: SetNull)
+  assumption  Assumption? @relation(fields: [assumptionId], references: [id], onDelete: SetNull)
+
+  @@index([opportunityId])
 }
 
 // ---------------------------------------------------------------------------
@@ -452,24 +673,32 @@ model Opportunity {
 // ---------------------------------------------------------------------------
 
 model Assumption {
-  id            String           @id @default(cuid())
-  workspaceId   String
-  opportunityId String?
-  statement     String
-  status        AssumptionStatus @default(UNKNOWN)
-  importance    Int              @default(5)
-  confidence    Int              @default(0)
-  notes         String?
-  provenance    Provenance       @default(AI_HYPOTHESIS)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  workspaceId      String
+  opportunityId    String?
+  valueChainNodeId String?
+  causalLinkId     String?
+  kind             AssumptionKind   @default(GENERIC)
+  statement        String
+  status           AssumptionStatus @default(UNKNOWN)
+  importance       Int              @default(5)
+  confidence       Int              @default(0)
+  notes            String?
+  provenance       Provenance       @default(AI_HYPOTHESIS)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  workspace   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  opportunity Opportunity?         @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  links       AssumptionEvidence[]
+  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  opportunity    Opportunity?         @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  valueChainNode ValueChainNode?      @relation(fields: [valueChainNodeId], references: [id], onDelete: SetNull)
+  causalLink     CausalLink?          @relation(fields: [causalLinkId], references: [id], onDelete: SetNull)
+  links          AssumptionEvidence[]
+  experiments    Experiment[]
 
   @@index([workspaceId])
   @@index([opportunityId])
+  @@index([valueChainNodeId])
+  @@index([causalLinkId])
 }
 
 model AssumptionEvidence {

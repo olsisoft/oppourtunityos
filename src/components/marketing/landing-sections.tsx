@@ -14,34 +14,81 @@ import {
 import { VERDICT_TONE } from "@/domain/enums";
 import type { Verdict } from "@/generated/prisma/enums";
 
+/** Illustrative rows only — not measurements. Labelled "Example data" on the page. */
 const EXAMPLE_RADAR: Array<{
   title: string;
   potential: number;
   evidence: number;
+  value: number | null;
+  causal: number | null;
+  frontier: string;
   verdict: Verdict;
 }> = [
-  { title: "Employee revenue leakage", potential: 91, evidence: 87, verdict: "TEST" },
-  { title: "Appointment no-shows", potential: 88, evidence: 91, verdict: "TEST" },
-  { title: "Idle capacity", potential: 86, evidence: 72, verdict: "INTERVIEW" },
-  { title: "Inventory shrinkage", potential: 82, evidence: 58, verdict: "RESEARCH" },
-  { title: "Dynamic pricing", potential: 71, evidence: 31, verdict: "RESEARCH" },
+  {
+    title: "Employee revenue leakage",
+    potential: 89,
+    evidence: 91,
+    value: 84,
+    causal: 62,
+    frontier: "Operational value",
+    verdict: "TEST",
+  },
+  {
+    title: "Salon no-show prevention",
+    potential: 87,
+    evidence: 73,
+    value: null,
+    causal: null,
+    frontier: "Economic pain",
+    verdict: "INTERVIEW",
+  },
+  {
+    title: "Idle capacity",
+    potential: 86,
+    evidence: 72,
+    value: 71,
+    causal: null,
+    frontier: "Pain",
+    verdict: "INTERVIEW",
+  },
+  {
+    title: "Inventory shrinkage",
+    potential: 82,
+    evidence: 58,
+    value: null,
+    causal: null,
+    frontier: "Pain",
+    verdict: "RESEARCH",
+  },
+  {
+    title: "Dynamic pricing",
+    potential: 71,
+    evidence: 31,
+    value: null,
+    causal: null,
+    frontier: "Nothing supported yet",
+    verdict: "RESEARCH",
+  },
 ];
 
 const PIPELINE = [
   "Market",
   "ICP",
   "Valuable variable",
-  "Desired movement",
   "Pain",
-  "Trigger",
-  "Current alternative",
-  "Alternative failure",
   "Evidence",
-  "Mechanisms",
-  "Product hypothesis",
-  "Opportunity score",
-  "Evidence score",
-  "Decision",
+  "Opportunity",
+  "Mechanism",
+  "Causal chain",
+  "Proof frontier",
+  "Experiment",
+];
+
+const FOUR_QUESTIONS = [
+  ["Opportunity Potential", "Is the problem structurally attractive?"],
+  ["Evidence Confidence", "Do we have credible evidence that the problem is real?"],
+  ["Value Strength", "If we move the variable, how much value could be created?"],
+  ["Causal Confidence", "Do we know that the proposed mechanism can actually move it?"],
 ];
 
 export function LandingSections({ appHref }: { appHref: string }) {
@@ -56,6 +103,23 @@ export function LandingSections({ appHref }: { appHref: string }) {
               confuse a plausible story with a customer who loses money every week. The output looks
               like progress and costs you months.
             </p>
+            <div className="mt-6 grid gap-3 text-sm">
+              <div className="bg-background rounded-lg border p-4">
+                <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+                  Most AI idea generators
+                </p>
+                <p className="mt-1 font-medium">Idea → justification</p>
+              </div>
+              <div className="bg-background rounded-lg border p-4">
+                <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+                  OpportunityOS
+                </p>
+                <p className="mt-1 font-medium">
+                  Market → ICP → Valuable variable → Pain → Evidence → Opportunity → Mechanism →
+                  Proof frontier → Experiment
+                </p>
+              </div>
+            </div>
           </div>
           <ul className="grid gap-3 text-sm">
             {[
@@ -68,7 +132,10 @@ export function LandingSections({ appHref }: { appHref: string }) {
                 "No kill switch",
                 "Weak ideas never get killed because nothing is scored against a rule.",
               ],
-              ["No metric", "If you cannot name the variable a product moves, you cannot sell it."],
+              [
+                "No causal chain",
+                "If you cannot say how a mechanism moves a variable — and prove each step — you cannot sell it.",
+              ],
             ].map(([title, body]) => (
               <li key={title} className="bg-background rounded-lg border p-4">
                 <p className="font-medium">{title}</p>
@@ -84,7 +151,9 @@ export function LandingSections({ appHref }: { appHref: string }) {
         <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
           Every conversation moves through the same pipeline and produces a structured artifact, not
           a transcript. Products move valuable variables:{" "}
-          <span className="text-foreground">ICP × Variable × Desired movement</span>.
+          <span className="text-foreground">ICP × Variable × Desired movement</span>. Then the value
+          causality ladder says how — and the Proof Frontier says how much of it is actually
+          supported.
         </p>
         <ol className="mt-8 flex flex-wrap gap-2">
           {PIPELINE.map((step, i) => (
@@ -104,35 +173,31 @@ export function LandingSections({ appHref }: { appHref: string }) {
       <section className="bg-muted/40 border-y">
         <div className="mx-auto max-w-6xl px-6 py-16">
           <h2 className="text-2xl font-semibold tracking-tight">
-            Opportunity Potential vs Evidence Confidence
+            The AI doesn&apos;t decide what&apos;s true. Evidence does.
           </h2>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Opportunity Potential</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground text-sm leading-relaxed">
-                How attractive the opportunity appears structurally. Deterministic weights over
-                importance (20%), pain (20%), frequency (15%), gap (15%), willingness to pay (20%)
-                and alternative weakness (10%). Inputs are proposed by the analyst and edited by
-                you. Never invented by a model.
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Evidence Confidence</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground text-sm leading-relaxed">
-                How much external evidence supports the assumptions. Direct customer statements,
-                explicit pain, economic impact, workarounds and purchase intent weigh more than
-                volume. Contradictory evidence reduces confidence. One real buyer saying &ldquo;we
-                lose $20,000 a month&rdquo; beats fifty vague comments.
-              </CardContent>
-            </Card>
+          <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
+            The analyst proposes hypotheses and asks questions. Four independent scores, the
+            epistemic status of every claim, the Proof Frontier and the verdict are computed
+            deterministically from the evidence you capture. UNKNOWN stays UNKNOWN.
+          </p>
+          <div className="mt-6 grid gap-4 md:grid-cols-4">
+            {FOUR_QUESTIONS.map(([title, question]) => (
+              <Card key={title}>
+                <CardHeader>
+                  <CardTitle className="text-base">{title}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-muted-foreground text-sm leading-relaxed">
+                  {question}
+                </CardContent>
+              </Card>
+            ))}
           </div>
           <p className="text-muted-foreground mt-6 text-sm">
             High potential with low evidence yields{" "}
-            <span className="text-foreground font-medium">RESEARCH</span>, never BUILD.
+            <span className="text-foreground font-medium">RESEARCH</span>, never BUILD. A strong
+            problem whose mechanism has never been tested yields{" "}
+            <span className="text-foreground font-medium">TEST</span> — an experiment on the first
+            unproven causal link.
           </p>
         </div>
       </section>
@@ -140,15 +205,18 @@ export function LandingSections({ appHref }: { appHref: string }) {
       <section id="radar" className="mx-auto max-w-6xl px-6 py-16">
         <div className="flex items-baseline justify-between">
           <h2 className="text-2xl font-semibold tracking-tight">Example Opportunity Radar</h2>
-          <Badge variant="muted">Example data</Badge>
+          <Badge variant="muted">Example data — illustrative, not measured</Badge>
         </div>
-        <div className="mt-6 rounded-lg border">
+        <div className="mt-6 overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Opportunity</TableHead>
                 <TableHead className="text-right">Potential</TableHead>
                 <TableHead className="text-right">Evidence</TableHead>
+                <TableHead className="text-right">Value</TableHead>
+                <TableHead className="text-right">Causal</TableHead>
+                <TableHead>Proof frontier</TableHead>
                 <TableHead>Verdict</TableHead>
               </TableRow>
             </TableHeader>
@@ -162,6 +230,15 @@ export function LandingSections({ appHref }: { appHref: string }) {
                   <TableCell className="text-right font-mono tabular-nums">
                     {row.evidence}
                   </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {row.value ?? <span className="text-tone-warning text-[10px]">INCOMPLETE</span>}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {row.causal ?? (
+                      <span className="text-tone-warning text-[10px]">INCOMPLETE</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs">{row.frontier}</TableCell>
                   <TableCell>
                     <Badge variant={VERDICT_TONE[row.verdict]}>{row.verdict}</Badge>
                   </TableCell>
@@ -170,6 +247,10 @@ export function LandingSections({ appHref }: { appHref: string }) {
             </TableBody>
           </Table>
         </div>
+        <p className="text-muted-foreground mt-3 text-xs">
+          INCOMPLETE means an input is unknown, not zero. The frontier is where supported knowledge
+          currently ends; everything beyond it is a product or causal hypothesis.
+        </p>
       </section>
 
       <section className="bg-muted/40 border-y">
@@ -183,15 +264,15 @@ export function LandingSections({ appHref }: { appHref: string }) {
               ],
               [
                 "Structure",
-                "Every answer updates a structured opportunity model: ICPs, variables, pains, triggers, alternatives.",
+                "Every answer updates a structured model: ICPs, valuable variables, pains, mechanisms and the causal chain from mechanism to value.",
               ],
               [
                 "Evidence",
-                "Capture quotes, URLs, interviews and notes. Hypotheses and evidence never mix.",
+                "Capture quotes, URLs, interviews and notes, and say which claim each one supports or contradicts. Hypotheses and evidence never mix.",
               ],
               [
                 "Decide",
-                "Deterministic scores and a verdict rule tell you to ignore, kill, research, investigate, interview or test.",
+                "Deterministic scores, a Proof Frontier and a verdict rule tell you what to ignore, kill, research, interview or test next.",
               ],
             ].map(([title, body], i) => (
               <div key={title} className="bg-background rounded-lg border p-4">

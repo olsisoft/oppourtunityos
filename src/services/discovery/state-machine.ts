@@ -53,8 +53,13 @@ export function stageSatisfied(stage: DiscoveryStage, ctx: StageContext): boolea
       return c.mechanisms >= 2 || (c.mechanisms >= 1 && ctx.aiReady);
     case "OPPORTUNITY_FORMATION":
       return c.opportunities > 0;
+    case "VALUE_CAUSALITY":
+      // The ladder needs at least mechanism → capability → transformation.
+      return (c.valueChainNodes ?? 0) >= 3 || ((c.valueChainNodes ?? 0) >= 1 && ctx.aiReady);
     case "SCORING":
       return c.scoredOpportunities > 0;
+    case "EXPERIMENT_DESIGN":
+      return (c.experiments ?? 0) >= 1 || ctx.aiReady;
     case "RECOMMENDATION":
       return false; // terminal; never "completed"
     default:

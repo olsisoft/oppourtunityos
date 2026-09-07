@@ -11,7 +11,11 @@ import { requireUserId } from "@/lib/session";
 import { getAIProvider } from "@/services/ai";
 import type { EvidenceSummary } from "@/services/ai/schemas";
 import { getResearchProvider, type ResearchResult } from "@/services/research";
-import { recomputeOpportunitiesForPain, recomputeOpportunity } from "@/services/scoring/recompute";
+import {
+  recomputeOpportunitiesForEvidence,
+  recomputeOpportunitiesForPain,
+  recomputeOpportunity,
+} from "@/services/scoring/recompute";
 import { safeAction, zodFieldErrors, type ActionResult } from "./shared";
 
 async function recomputeAfterEvidence(painId?: string | null, opportunityId?: string | null) {
@@ -72,7 +76,49 @@ export async function createEvidenceAction(input: unknown): Promise<ActionResult
         hasPurchaseIntent: d.hasPurchaseIntent,
       },
     });
+    // Claims this evidence affects. Every target must belong to the workspace.
+    // Linking never changes the evidence itself; the deterministic engine
+    // interprets it during recompute.
+    let linkedClaims = 0;
+    for (const claim of d.claims) {
+      let opportunityId = claim.opportunityId ?? d.opportunityId ?? null;
+      if (claim.valueChainNodeId) {
+        const node = await prisma.valueChainNode.findFirst({
+          where: { id: claim.valueChainNodeId, opportunity: { workspaceId: d.workspaceId } },
+          select: { opportunityId: true },
+        });
+        if (!node) continue;
+        opportunityId = node.opportunityId;
+      }
+      if (claim.causalLinkId) {
+        const link = await prisma.causalLink.findFirst({
+          where: { id: claim.causalLinkId, opportunity: { workspaceId: d.workspaceId } },
+          select: { opportunityId: true },
+        });
+        if (!link) continue;
+        opportunityId = link.opportunityId;
+      }
+      if (opportunityId) {
+        const opp = await prisma.opportunity.findFirst({
+          where: { id: opportunityId, workspaceId: d.workspaceId },
+          select: { id: true },
+        });
+        if (!opp) continue;
+      }
+      await prisma.evidenceClaimLink.create({
+        data: {
+          evidenceId: evidence.id,
+          opportunityId,
+          claimType: claim.claimType,
+          valueChainNodeId: claim.valueChainNodeId ?? null,
+          causalLinkId: claim.causalLinkId ?? null,
+          direction: claim.direction,
+        },
+      });
+      linkedClaims++;
+    }
     await recomputeAfterEvidence(d.painId, d.opportunityId);
+    if (linkedClaims > 0) await recomputeOpportunitiesForEvidence(evidence.id);
     logger.info("evidence.created", {
       userId,
       workspaceId: d.workspaceId,

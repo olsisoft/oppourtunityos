@@ -16,6 +16,9 @@ export interface ProgressCounts {
   mechanisms: number;
   opportunities: number;
   scoredOpportunities: number;
+  /** Value causality ladder nodes across the workspace's opportunities. */
+  valueChainNodes?: number;
+  experiments?: number;
 }
 
 export type ProgressStatus = "done" | "partial" | "pending";
@@ -37,6 +40,8 @@ export interface DiscoveryProgress {
 
 const EVIDENCE_TARGET = 6;
 const MECHANISM_TARGET = 3;
+/** Mechanism → Capability → Transformation → Operational → Economic → Strategic. */
+const VALUE_CHAIN_TARGET = 6;
 
 function step(stage: DiscoveryStage, label: string, percent: number, detail: string): ProgressStep {
   const p = Math.max(0, Math.min(100, Math.round(percent)));
@@ -99,6 +104,18 @@ export function computeDiscoveryProgress(c: ProgressCounts): DiscoveryProgress {
       "Opportunity",
       c.opportunities >= 1 ? 100 : 0,
       `${c.opportunities} formed`,
+    ),
+    step(
+      "VALUE_CAUSALITY",
+      "Value chain",
+      Math.min(100, ((c.valueChainNodes ?? 0) / VALUE_CHAIN_TARGET) * 100),
+      `${c.valueChainNodes ?? 0} of ${VALUE_CHAIN_TARGET} ladder levels`,
+    ),
+    step(
+      "EXPERIMENT_DESIGN",
+      "Experiment",
+      (c.experiments ?? 0) >= 1 ? 100 : 0,
+      `${c.experiments ?? 0} planned`,
     ),
     step(
       "RECOMMENDATION",

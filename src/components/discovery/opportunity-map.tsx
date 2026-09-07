@@ -7,6 +7,8 @@ import { ProvenanceBadge } from "@/components/shared/provenance-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { VerdictBadge } from "@/components/shared/verdict-badge";
 import { Badge } from "@/components/ui/badge";
+import { frontierText } from "@/components/value/scorecard";
+import { ValueLadder } from "@/components/value/value-ladder";
 import type {
   GraphIcp,
   GraphMarket,
@@ -17,6 +19,8 @@ import type {
 } from "@/db/workspaces";
 import { DIRECTION_LABELS } from "@/domain/enums";
 import { cn, truncate } from "@/lib/utils";
+import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
+import { fieldStatus } from "@/services/value/variable-semantics";
 
 export type MapSelection =
   | { kind: "market"; item: GraphMarket }
@@ -36,7 +40,7 @@ export function OpportunityMap({
     return (
       <EmptyState
         title="No market yet"
-        description="The map fills itself as the conversation progresses: Market → ICP → Variables → Pains → Opportunities."
+        description="The map fills itself as the conversation progresses: Market → ICP → Variables → Pains → Opportunities → Mechanism → Value chain."
       />
     );
   }
@@ -92,6 +96,18 @@ function MarketNode({
   );
 }
 
+function stateLine(variable: GraphVariable): string {
+  const current = variable.currentState?.trim();
+  const desired = variable.desiredState?.trim();
+  const cur = current
+    ? `current ${current} (${fieldStatus(variable, "currentState").toLowerCase().replace("_", " ")})`
+    : "current UNKNOWN";
+  const des = desired
+    ? `desired ${desired} (${fieldStatus(variable, "desiredState").toLowerCase().replace("_", " ")})`
+    : "desired UNKNOWN";
+  return `importance ${variable.importanceScore}/10 · ${cur} · ${des}`;
+}
+
 function VariableNode({
   variable,
   graph,
@@ -109,9 +125,9 @@ function VariableNode({
       <div className="flex items-start gap-1">
         <Node
           className="flex-1"
-          label="Variable"
-          title={`${DIRECTION_LABELS[variable.desiredDirection]} × ${variable.name}`}
-          subtitle={`importance ${variable.importanceScore}/10`}
+          label="Valuable variable"
+          title={`${DIRECTION_LABELS[variable.desiredDirection]} × ${variable.name}${variable.target ? ` × ${variable.target}` : ""}`}
+          subtitle={stateLine(variable)}
           provenance={variable.provenance}
           onClick={() => onSelect({ kind: "variable", item: variable })}
         />
@@ -144,6 +160,7 @@ function VariableNode({
                   <Connector />
                   <OpportunityNode
                     opportunity={o}
+                    mechanismCount={graph.mechanisms.length}
                     onClick={() => onSelect({ kind: "opportunity", item: o })}
                   />
                 </div>
@@ -158,6 +175,7 @@ function VariableNode({
               <Connector />
               <OpportunityNode
                 opportunity={o}
+                mechanismCount={graph.mechanisms.length}
                 onClick={() => onSelect({ kind: "opportunity", item: o })}
               />
             </div>
@@ -166,31 +184,103 @@ function VariableNode({
   );
 }
 
+/**
+ * Progressive disclosure: collapsed, an opportunity is one row. Expanded, it
+ * reveals Mechanism → Value chain (with the Proof Frontier marker) → Experiments.
+ */
 function OpportunityNode({
-  opportunity,
+  opportunity: o,
+  mechanismCount,
   onClick,
 }: {
   opportunity: OpportunityWithRelations;
+  mechanismCount: number;
   onClick: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const insights = deriveOpportunityInsights(o, mechanismCount);
+  const planned = o.experiments.filter((e) => e.status !== "ABANDONED").length;
+  const hasChain = o.valueChainNodes.length > 0;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="bg-card hover:bg-accent w-full rounded-md border p-2.5 text-left transition-colors"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-          Opportunity
-        </span>
-        <VerdictBadge verdict={opportunity.verdict} />
+    <div className="space-y-2">
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          onClick={onClick}
+          className="bg-card hover:bg-accent w-full flex-1 rounded-md border p-2.5 text-left transition-colors"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+              Opportunity
+            </span>
+            <VerdictBadge verdict={o.verdict} />
+          </div>
+          <p className="mt-1 text-sm font-medium">{o.title}</p>
+          <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-xs tabular-nums">
+            <span>potential {o.opportunityScore}</span>
+            <span>evidence {o.evidenceScore}</span>
+            <span>value {o.valueStrength ?? "INCOMPLETE"}</span>
+            <span>causal {o.causalConfidence ?? "INCOMPLETE"}</span>
+          </div>
+          <p className="text-muted-foreground mt-1 text-[11px]">
+            Proof frontier · {frontierText(o.proofFrontierRung)}
+          </p>
+        </button>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground mt-2 rounded p-1"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "Collapse value chain" : "Expand value chain"}
+          aria-expanded={expanded}
+        >
+          <ChevronDown className={cn("size-4 transition-transform", !expanded && "-rotate-90")} />
+        </button>
       </div>
-      <p className="mt-1 text-sm font-medium">{opportunity.title}</p>
-      <div className="text-muted-foreground mt-1 flex gap-3 font-mono text-xs tabular-nums">
-        <span>potential {opportunity.opportunityScore}</span>
-        <span>evidence {opportunity.evidenceScore}</span>
-      </div>
-    </button>
+
+      {expanded && (
+        <div className="ml-3 space-y-2 border-l pl-3">
+          <Connector />
+          <div className="bg-card rounded-md border p-2.5">
+            <span className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+              Mechanism
+            </span>
+            <p className="mt-1 text-sm">
+              {o.mechanism?.trim() ? (
+                o.mechanism
+              ) : (
+                <span className="text-muted-foreground">
+                  UNKNOWN — no mechanism chosen yet. Problem ≠ product.
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="ml-3 space-y-2 border-l pl-3">
+            <Connector label="Value chain" />
+            {hasChain ? (
+              <ValueLadder
+                opportunity={o}
+                frontier={insights.frontier}
+                compact
+                showProblemRungs={false}
+              />
+            ) : (
+              <p className="text-muted-foreground rounded-md border border-dashed p-2 text-xs">
+                No value chain stated yet. Open the Value tab to state how the mechanism creates
+                value: Mechanism → Capability → Transformation → Operational → Economic → Strategic.
+              </p>
+            )}
+            <Connector
+              label={
+                planned
+                  ? `${planned} experiment${planned === 1 ? "" : "s"}`
+                  : "No experiment planned"
+              }
+            />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

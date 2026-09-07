@@ -54,6 +54,8 @@ describe("computeDiscoveryProgress", () => {
       mechanisms: 4,
       opportunities: 3,
       scoredOpportunities: 3,
+      valueChainNodes: 6,
+      experiments: 1,
     });
     expect(p.overallPercent).toBe(100);
     expect(p.nextIncompleteStage).toBe("RECOMMENDATION");

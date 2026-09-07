@@ -35,6 +35,7 @@ export interface TurnHints {
     variables: string[];
     pains: string[];
     mechanisms: string[];
+    opportunities: string[];
   };
 }
 

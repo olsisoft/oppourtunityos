@@ -9,10 +9,20 @@ import { deleteEvidenceAction } from "@/actions/evidence";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { GraphEvidence } from "@/db/workspaces";
-import { EVIDENCE_TYPE_LABELS, SENTIMENT_LABELS } from "@/domain/enums";
+import {
+  CLAIM_TYPE_LABELS,
+  EVIDENCE_TYPE_LABELS,
+  SENTIMENT_LABELS,
+  VALUE_CHAIN_LEVEL_LABELS,
+} from "@/domain/enums";
 import { cn, formatDate, truncate } from "@/lib/utils";
 
 const SENTIMENT_TONE = { POSITIVE: "positive", NEGATIVE: "negative", NEUTRAL: "muted" } as const;
+const DIRECTION_TONE = {
+  SUPPORTS: "text-tone-positive",
+  CONTRADICTS: "text-tone-negative",
+  NEUTRAL: "text-muted-foreground",
+} as const;
 
 export function EvidenceItem({
   evidence: e,
@@ -33,6 +43,7 @@ export function EvidenceItem({
     e.hasWorkaround && "workaround",
     e.hasPurchaseIntent && "purchase intent",
   ].filter(Boolean) as string[];
+  const claims = e.claimLinks ?? [];
 
   const remove = async () => {
     if (!confirm("Delete this evidence? Scores will be recomputed.")) return;
@@ -102,6 +113,35 @@ export function EvidenceItem({
             · {f}
           </span>
         ))}
+      </div>
+      <div className="mt-2 border-t pt-2">
+        <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+          Claims affected
+        </p>
+        {claims.length === 0 ? (
+          <p className="text-muted-foreground mt-0.5 text-[11px]">
+            Not linked to a specific claim. It counts toward the pain or opportunity it is attached
+            to; link it to a claim to move a value chain level or a causal link.
+          </p>
+        ) : (
+          <ul className="mt-1 flex flex-wrap gap-1">
+            {claims.map((c) => {
+              const target = c.valueChainNode
+                ? `${VALUE_CHAIN_LEVEL_LABELS[c.valueChainNode.level]}: ${truncate(c.valueChainNode.statement, 50)}`
+                : c.causalLink
+                  ? `Causal link: ${truncate(c.causalLink.statement, 50)}`
+                  : CLAIM_TYPE_LABELS[c.claimType];
+              return (
+                <li key={c.id} className="rounded border px-1.5 py-0.5 text-[11px]">
+                  <span className={cn("font-medium", DIRECTION_TONE[c.direction])}>
+                    {c.direction.toLowerCase()}
+                  </span>{" "}
+                  <span className="text-muted-foreground">{target}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </article>
   );
