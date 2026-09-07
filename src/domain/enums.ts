@@ -1,0 +1,228 @@
+/**
+ * Domain enums and human-readable labels. Safe to import from client
+ * components (no Prisma runtime involved; enums are plain objects).
+ */
+import {
+  AlternativeCategory,
+  AssumptionStatus,
+  Confidence,
+  DesiredDirection,
+  DiscoveryStage,
+  EntryMode,
+  EvidenceOrigin,
+  EvidenceSentiment,
+  EvidenceType,
+  MechanismCategory,
+  Provenance,
+  VariableCategory,
+  Verdict,
+} from "@/generated/prisma/enums";
+
+export {
+  AlternativeCategory,
+  AssumptionStatus,
+  Confidence,
+  DesiredDirection,
+  DiscoveryStage,
+  EntryMode,
+  EvidenceOrigin,
+  EvidenceSentiment,
+  EvidenceType,
+  MechanismCategory,
+  Provenance,
+  VariableCategory,
+  Verdict,
+};
+
+export const STAGE_ORDER: DiscoveryStage[] = [
+  DiscoveryStage.START,
+  DiscoveryStage.USER_CONTEXT,
+  DiscoveryStage.MARKET_SELECTION,
+  DiscoveryStage.ICP_DISCOVERY,
+  DiscoveryStage.VARIABLE_DISCOVERY,
+  DiscoveryStage.PAIN_DISCOVERY,
+  DiscoveryStage.TRIGGER_DISCOVERY,
+  DiscoveryStage.ALTERNATIVE_DISCOVERY,
+  DiscoveryStage.EVIDENCE_DISCOVERY,
+  DiscoveryStage.MECHANISM_DISCOVERY,
+  DiscoveryStage.OPPORTUNITY_FORMATION,
+  DiscoveryStage.SCORING,
+  DiscoveryStage.RECOMMENDATION,
+];
+
+export const STAGE_LABELS: Record<DiscoveryStage, string> = {
+  START: "Start",
+  USER_CONTEXT: "Your context",
+  MARKET_SELECTION: "Market",
+  ICP_DISCOVERY: "ICP",
+  VARIABLE_DISCOVERY: "Variables",
+  PAIN_DISCOVERY: "Pain",
+  TRIGGER_DISCOVERY: "Trigger",
+  ALTERNATIVE_DISCOVERY: "Alternatives",
+  EVIDENCE_DISCOVERY: "Evidence",
+  MECHANISM_DISCOVERY: "Mechanisms",
+  OPPORTUNITY_FORMATION: "Opportunity",
+  SCORING: "Scoring",
+  RECOMMENDATION: "Decision",
+};
+
+export const VERDICT_ORDER: Verdict[] = [
+  Verdict.TEST,
+  Verdict.INTERVIEW,
+  Verdict.INVESTIGATE,
+  Verdict.RESEARCH,
+  Verdict.KILL,
+  Verdict.IGNORE,
+];
+
+export const VERDICT_LABELS: Record<Verdict, string> = {
+  IGNORE: "Ignore",
+  KILL: "Kill",
+  RESEARCH: "Research",
+  INVESTIGATE: "Investigate",
+  INTERVIEW: "Interview",
+  TEST: "Test",
+};
+
+export const VERDICT_DESCRIPTIONS: Record<Verdict, string> = {
+  IGNORE: "Structurally weak and unproven. Do not invest time.",
+  KILL: "Evidence shows the opportunity is structurally weak.",
+  RESEARCH: "Promising hypothesis, insufficient proof. Gather evidence.",
+  INVESTIGATE: "Moderate potential and partial evidence. Deepen the analysis.",
+  INTERVIEW: "Strong enough to justify customer discovery interviews.",
+  TEST: "Strong enough for a lightweight market test (concierge, landing page, prototype).",
+};
+
+export const VERDICT_TONE: Record<Verdict, "positive" | "info" | "warning" | "negative" | "muted"> =
+  {
+    TEST: "positive",
+    INTERVIEW: "positive",
+    INVESTIGATE: "info",
+    RESEARCH: "warning",
+    KILL: "negative",
+    IGNORE: "muted",
+  };
+
+export const PROVENANCE_LABELS: Record<Provenance, string> = {
+  USER: "Stated by you",
+  AI_HYPOTHESIS: "AI hypothesis",
+  EXTERNAL_EVIDENCE: "External evidence",
+  INTERVIEW: "Interview",
+  COMPUTED: "Computed",
+};
+
+export const PROVENANCE_SHORT: Record<Provenance, string> = {
+  USER: "USER",
+  AI_HYPOTHESIS: "HYPOTHESIS",
+  EXTERNAL_EVIDENCE: "EVIDENCE",
+  INTERVIEW: "INTERVIEW",
+  COMPUTED: "COMPUTED",
+};
+
+export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  FORUM_POST: "Forum post",
+  REDDIT: "Reddit",
+  REVIEW: "Review",
+  COMPETITOR_REVIEW: "Competitor review",
+  INTERVIEW: "Interview",
+  SURVEY: "Survey",
+  JOB_POSTING: "Job posting",
+  SEARCH_SIGNAL: "Search signal",
+  CUSTOMER_QUOTE: "Customer quote",
+  MARKET_REPORT: "Market report",
+  MANUAL_NOTE: "Manual note",
+  OTHER: "Other",
+};
+
+export const EVIDENCE_ORIGIN_LABELS: Record<EvidenceOrigin, string> = {
+  USER_CAPTURED: "Captured manually",
+  INTERVIEW: "Interview notes",
+  RESEARCH_PROVIDER: "Research provider",
+  DEMO: "Demo data",
+};
+
+export const SENTIMENT_LABELS: Record<EvidenceSentiment, string> = {
+  POSITIVE: "Supports",
+  NEGATIVE: "Contradicts",
+  NEUTRAL: "Neutral",
+};
+
+export const VARIABLE_CATEGORY_LABELS: Record<VariableCategory, string> = {
+  REVENUE: "Revenue",
+  COST: "Cost",
+  TIME: "Time",
+  RISK: "Risk",
+  CAPACITY: "Capacity",
+  QUALITY: "Quality",
+  RETENTION: "Retention",
+  CONVERSION: "Conversion",
+  PRODUCTIVITY: "Productivity",
+  AVAILABILITY: "Availability",
+  COMPLIANCE: "Compliance",
+  FRAUD: "Fraud",
+  DOWNTIME: "Downtime",
+  INVENTORY: "Inventory",
+  MARGIN: "Margin",
+  OTHER: "Other",
+};
+
+export const DIRECTION_LABELS: Record<DesiredDirection, string> = {
+  INCREASE: "Increase",
+  DECREASE: "Reduce",
+  ACCELERATE: "Accelerate",
+  IMPROVE: "Improve",
+  SIMPLIFY: "Simplify",
+  PREVENT: "Prevent",
+  AUTOMATE: "Automate",
+  OPTIMIZE: "Optimize",
+  DETECT: "Detect",
+};
+
+export const ALTERNATIVE_CATEGORY_LABELS: Record<AlternativeCategory, string> = {
+  SPREADSHEET: "Spreadsheet",
+  MANUAL_PROCESS: "Manual process",
+  INTERNAL_EMPLOYEE: "Internal employee",
+  OUTSOURCING: "Outsourcing",
+  COMPETITOR_SOFTWARE: "Competitor software",
+  MESSAGING: "Messaging",
+  EMAIL: "Email",
+  PHONE: "Phone",
+  CUSTOM_SOFTWARE: "Custom software",
+  NO_SOLUTION: "No solution",
+  OTHER: "Other",
+};
+
+export const MECHANISM_CATEGORY_LABELS: Record<MechanismCategory, string> = {
+  AUTOMATION: "Automation",
+  AI_AGENT: "AI agent",
+  PREDICTION: "Prediction",
+  MONITORING: "Monitoring",
+  MARKETPLACE: "Marketplace",
+  WORKFLOW: "Workflow",
+  FINTECH: "Fintech",
+  COMPUTER_VISION: "Computer vision",
+  HARDWARE: "Hardware",
+  ROBOTICS: "Robotics",
+  OPTIMIZATION: "Optimization",
+  API: "API",
+  DATA_AGGREGATION: "Data aggregation",
+  VERTICAL_SAAS: "Vertical SaaS",
+  INFRASTRUCTURE: "Infrastructure",
+  OTHER: "Other",
+};
+
+export const ASSUMPTION_STATUS_LABELS: Record<AssumptionStatus, string> = {
+  UNKNOWN: "Unknown",
+  SUPPORTED: "Supported",
+  CONTRADICTED: "Contradicted",
+};
+
+export const CONFIDENCE_LABELS: Record<Confidence, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+};
+
+export function enumValues<T extends Record<string, string>>(e: T): T[keyof T][] {
+  return Object.values(e) as T[keyof T][];
+}
