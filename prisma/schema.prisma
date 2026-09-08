@@ -466,6 +466,8 @@ model User {
   name         String?
   email        String   @unique
   passwordHash String
+  /// Preferred interface language ("en" | "fr"); copied into the locale cookie at login.
+  locale       String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -832,6 +834,8 @@ model ValueChainNode {
   generalization GeneralizationStatus @default(UNTESTED)
   /// Language-gated inference sentence for the current status (computed).
   inference      String?
+  /// Structured form of `inference` (dictionary key + params) rendered in the user's language.
+  inferenceMessage Json?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -861,6 +865,8 @@ model CausalLink {
   observedScope  Json?
   generalization GeneralizationStatus @default(UNTESTED)
   inference      String?
+  /// Structured form of `inference` (dictionary key + params) rendered in the user's language.
+  inferenceMessage Json?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -993,6 +999,8 @@ model ExperimentResult {
   validityAssessment Json?
   /// System-generated, language-gated interpretation of what was observed.
   interpretation     String?
+  /// Structured form of `interpretation` (dictionary key + params) rendered in the user's language.
+  interpretationMessage Json?
   scope              Json?
   organizationCount  Int?
   userCount          Int?

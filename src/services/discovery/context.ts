@@ -1,3 +1,4 @@
+import type { Locale } from "@/i18n/locales";
 /**
  * Builds the compact workspace summary the analyst sees on every turn, and
  * the structured hints used by the mock provider and the state machine.
@@ -93,12 +94,14 @@ export function buildHints(
   userMessage: string,
   turnIndex: number,
   userContext: UserContext | null,
+  locale: Locale = "en",
 ): TurnHints {
   const conversation = graph.conversations[0];
   const icps = graph.markets.flatMap((m) => m.icps);
   const variables = icps.flatMap((i) => i.variables);
   const pains = variables.flatMap((v) => v.pains);
   return {
+    locale,
     workspaceName: graph.name,
     stage: conversation?.stage ?? "START",
     entryMode: graph.entryMode,

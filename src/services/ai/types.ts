@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { Locale } from "@/i18n/locales";
 import type { DiscoveryStage, EntryMode } from "@/generated/prisma/enums";
 import type { ProgressCounts } from "@/services/scoring/discovery-progress";
 
@@ -21,6 +22,8 @@ export interface UserContext {
  * information inside the prompt; the mock provider uses the hints directly.
  */
 export interface TurnHints {
+  /** Language of the conversation ("en" | "fr"); replies and extracted text follow it. */
+  locale?: Locale;
   workspaceName: string;
   stage: DiscoveryStage;
   entryMode: EntryMode | null;

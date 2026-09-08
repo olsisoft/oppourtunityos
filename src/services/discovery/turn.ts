@@ -1,3 +1,4 @@
+import type { Locale } from "@/i18n/locales";
 /**
  * One discovery turn:
  *   persist user message → stream analyst reply → structured extraction →
@@ -10,7 +11,7 @@ import { prisma } from "@/db/prisma";
 import { getOrCreateConversation, getWorkspaceCounts, getWorkspaceGraph } from "@/db/workspaces";
 import { logger } from "@/lib/logger";
 import { cleanText } from "@/lib/sanitize";
-import { ANALYST_SYSTEM_PROMPT, stageInstructions } from "@/prompts/system";
+import { ANALYST_SYSTEM_PROMPT, stageInstructions, languageInstruction } from "@/prompts/system";
 import { getAIProvider } from "@/services/ai";
 import type { QuestionCard } from "@/services/ai/schemas";
 import type { UserContext } from "@/services/ai/types";
@@ -49,6 +50,8 @@ export interface TurnInput {
   workspaceId: string;
   message: string;
   entryMode?: EntryMode;
+  /** Language of the conversation; defaults to English. */
+  locale?: Locale;
   signal?: AbortSignal;
 }
 
@@ -85,7 +88,8 @@ export async function* runDiscoveryTurn(input: TurnInput): AsyncGenerator<TurnEv
   const graph = await getWorkspaceGraph(input.workspaceId);
   const counts = await getWorkspaceCounts(input.workspaceId);
   const userContext = (conversation.userContext as UserContext | null) ?? null;
-  const hints = buildHints(graph, counts, message, turnIndex, userContext);
+  const locale = input.locale ?? "en";
+  const hints = buildHints(graph, counts, message, turnIndex, userContext, locale);
   const summary = buildWorkspaceSummary(graph);
   const history = historyToMessages(conversation.messages);
 
@@ -93,6 +97,8 @@ export async function* runDiscoveryTurn(input: TurnInput): AsyncGenerator<TurnEv
     ANALYST_SYSTEM_PROMPT,
     "",
     stageInstructions(previousStage, graph.entryMode),
+    "",
+    languageInstruction(locale),
     "",
     "<workspace_state>",
     summary,

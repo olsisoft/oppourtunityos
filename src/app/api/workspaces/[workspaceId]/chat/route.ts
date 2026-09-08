@@ -8,6 +8,7 @@ import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { ForbiddenError } from "@/lib/session";
 import { AIProviderError } from "@/services/ai/types";
+import { getLocale } from "@/i18n/server";
 import { runDiscoveryTurn, type TurnEvent } from "@/services/discovery/turn";
 
 export const runtime = "nodejs";
@@ -56,6 +57,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
+  const locale = await getLocale();
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -66,6 +68,7 @@ export async function POST(
           workspaceId,
           message: body.data.message,
           entryMode: body.data.entryMode,
+          locale,
           signal: request.signal,
         })) {
           send(event);

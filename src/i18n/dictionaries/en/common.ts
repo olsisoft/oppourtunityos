@@ -1,0 +1,23 @@
+/** English strings — section "common": words shared by several screens. */
+export const common = {
+  language: "Language",
+  loading: "Loading…",
+  save: "Save",
+  cancel: "Cancel",
+  close: "Close",
+  delete: "Delete",
+  edit: "Edit",
+  done: "Done",
+  back: "Back",
+  retry: "Retry",
+  yes: "Yes",
+  no: "No",
+  unknown: "Unknown",
+  notRecorded: "not recorded",
+  none: "None",
+  optional: "optional",
+  demo: "demo",
+  demoData: "DEMO DATA",
+  justNow: "just now",
+  outOf100: "/100",
+} as const;

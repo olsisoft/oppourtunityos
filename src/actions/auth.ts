@@ -2,11 +2,14 @@
 
 import bcrypt from "bcryptjs";
 import { AuthError } from "next-auth";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { signIn, signOut } from "@/auth";
 import { prisma } from "@/db/prisma";
 import { loginSchema, registerSchema } from "@/domain/schemas";
+import { isLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/i18n/locales";
+import { getLocale } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import type { ActionResult } from "./shared";
 
@@ -33,7 +36,12 @@ export async function registerAction(
   }
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
   const user = await prisma.user.create({
-    data: { name: parsed.data.name, email: parsed.data.email, passwordHash },
+    data: {
+      name: parsed.data.name,
+      email: parsed.data.email,
+      passwordHash,
+      locale: await getLocale(),
+    },
   });
   logger.info("auth.registered", { userId: user.id });
 
@@ -60,15 +68,29 @@ export async function loginAction(
     await signIn("credentials", {
       email: parsed.data.email,
       password: parsed.data.password,
-      redirectTo: safeCallback(formData.get("callbackUrl")),
+      redirect: false,
     });
-    return { ok: true, data: undefined };
   } catch (error) {
     if (error instanceof AuthError) {
       return { ok: false, error: "Invalid email or password." };
     }
-    throw error; // NEXT_REDIRECT
+    throw error;
   }
+  // The account's language follows the user to this browser.
+  const user = await prisma.user.findUnique({
+    where: { email: parsed.data.email },
+    select: { locale: true },
+  });
+  if (isLocale(user?.locale)) {
+    const store = await cookies();
+    store.set(LOCALE_COOKIE, user.locale, {
+      path: "/",
+      maxAge: LOCALE_COOKIE_MAX_AGE,
+      sameSite: "lax",
+      httpOnly: false,
+    });
+  }
+  redirect(safeCallback(formData.get("callbackUrl")));
 }
 
 export async function logoutAction() {
