@@ -34,9 +34,10 @@ High potential with low evidence yields **RESEARCH**, never BUILD. The **Proof F
 7. [AI provider configuration](#ai-provider-configuration)
 8. [Scoring](#scoring)
 9. [Value engineering](#value-engineering)
-10. [Security](#security)
-11. [Project structure](#project-structure)
-12. [Known limitations](#known-limitations)
+10. [Languages (English · French)](#languages-english--french)
+11. [Security](#security)
+12. [Project structure](#project-structure)
+13. [Known limitations](#known-limitations)
 
 ---
 
@@ -246,6 +247,17 @@ _Do we have the **right** evidence for the claim we are trying to make?_ Evidenc
 
 **Non-negotiable rules** encoded and tested: evidence existence ≠ fitness; fitness is claim-specific; interviews cannot establish causality alone; existing spend ≠ WTP; stated WTP ≠ purchase; before/after ≠ causality; correlation never becomes causal language; OBSERVED means observed within a scope; a sample is not the market; generalization needs scope-compatible evidence; the AI cannot override admissibility or promote evidence quality; UNKNOWN stays UNKNOWN; inconclusive stays inconclusive; low-fit evidence informs but never dominates; duplicates of one source count once; strong contradictions are never averaged away; the frontier moves on appropriate evidence, not quantity; causal claims need methodological evidence; every inference is inspectable.
 
+## Languages (English · French)
+
+The platform is bilingual. The language is chosen with the EN | FR switcher (app header, landing page, sign-in pages, settings) and stored in a cookie and on the account; new visitors get the language of their browser (`Accept-Language`). No URL prefix: every route is the same in both languages.
+
+- **Interface**: every screen, label, form, toast and error comes from typed dictionaries (`src/i18n/dictionaries/en|fr/*`). French is typed against English, so a missing translation is a compile error, and a test checks both dictionaries are complete.
+- **Engine sentences**: what the deterministic engines say (frontier blockers, inferences, next best actions, validity checks, system interpretations, knowledge changes) is persisted as a _system message_ — dictionary key + parameters + canonical English text — and rendered in the reader's language; rows written before this change keep their English text.
+- **AI analyst**: the conversation runs in the chosen language (the prompt carries a language instruction); the mock provider has French templates.
+- **Data stays data**: user content, evidence excerpts and the demo workspace are never translated.
+
+Conventions, API and the French glossary: [`docs/i18n.md`](docs/i18n.md).
+
 ## Security
 
 - All `/app` routes are gated by `src/proxy.ts` (JWT, no DB call) and every page/action re-checks the session.
@@ -266,6 +278,7 @@ src/
   components/         ui/ (primitives), chat/, discovery/, opportunity/, evidence/, assumptions/, value/ (ladder, scorecard,
                       value panel, node sheet, value strength editor, experiments), dashboard/, layout/, shared/
   domain/             enums + labels, Zod schemas
+  i18n/               locales, dictionaries (en, fr), t(), structured system messages, formatting
   db/                 prisma client, workspace and dashboard queries
   services/           ai/, discovery/, scoring/, value/ (epistemic engine), research/, report/, interview/
   prompts/            analyst system prompt, stage goals, extraction/research/interview prompts
