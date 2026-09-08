@@ -2,6 +2,7 @@
 
 import { Check, Minus } from "lucide-react";
 
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 import type { DiscoveryProgress } from "@/services/scoring/discovery-progress";
 
@@ -12,12 +13,13 @@ export function DiscoveryProgressBar({
   progress: DiscoveryProgress;
   compact?: boolean;
 }) {
+  const t = useT();
   return (
     <div className={cn("rounded-lg border", compact ? "p-3" : "p-4")}>
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs font-semibold tracking-wider uppercase">Discovery progress</p>
+        <p className="text-xs font-semibold tracking-wider uppercase">{t("chat.progress.title")}</p>
         <span className="text-muted-foreground font-mono text-xs tabular-nums">
-          {progress.overallPercent}%
+          {t("chat.progress.percent", { value: progress.overallPercent })}
         </span>
       </div>
       <ul
@@ -30,16 +32,16 @@ export function DiscoveryProgressBar({
           <li
             key={step.stage}
             className="flex items-center justify-between gap-2 text-xs"
-            title={step.detail}
+            title={t(step.detail)}
           >
             <span className={cn(step.status === "pending" && "text-muted-foreground")}>
-              {step.label}
+              {t(step.label)}
             </span>
             <span className="text-muted-foreground flex items-center font-mono tabular-nums">
               {step.status === "done" ? (
                 <Check className="text-tone-positive size-3.5" />
               ) : step.status === "partial" ? (
-                `${step.percent}%`
+                t("chat.progress.percent", { value: step.percent })
               ) : (
                 <Minus className="size-3.5" />
               )}

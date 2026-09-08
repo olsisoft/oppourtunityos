@@ -4,27 +4,39 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
-import { createEvidenceSchema } from "@/domain/schemas";
+import { createEvidenceSchema, scopeFromFields } from "@/domain/schemas";
+import { sourceTypeForLegacy } from "@/services/value/evidence-sources";
+import { getLocale, getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import { cleanText, cleanUrl } from "@/lib/sanitize";
 import { requireUserId } from "@/lib/session";
 import { getAIProvider } from "@/services/ai";
 import type { EvidenceSummary } from "@/services/ai/schemas";
 import { getResearchProvider, type ResearchResult } from "@/services/research";
-import { recomputeOpportunitiesForPain, recomputeOpportunity } from "@/services/scoring/recompute";
+import {
+  recomputeOpportunitiesForEvidence,
+  recomputeOpportunitiesForPain,
+  recomputeOpportunity,
+} from "@/services/scoring/recompute";
 import { safeAction, zodFieldErrors, type ActionResult } from "./shared";
 
-async function recomputeAfterEvidence(painId?: string | null, opportunityId?: string | null) {
-  if (opportunityId) await recomputeOpportunity(opportunityId);
-  if (painId) await recomputeOpportunitiesForPain(painId);
+async function recomputeAfterEvidence(
+  painId?: string | null,
+  opportunityId?: string | null,
+  evidenceId?: string | null,
+) {
+  const ctx = { trigger: "EVIDENCE_ADDED" as const, evidenceId: evidenceId ?? null };
+  if (opportunityId) await recomputeOpportunity(opportunityId, ctx);
+  if (painId) await recomputeOpportunitiesForPain(painId, ctx);
 }
 
 export async function createEvidenceAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = createEvidenceSchema.safeParse(input);
   if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the highlighted fields.",
+      error: t("validation.checkHighlighted"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   }
@@ -50,13 +62,27 @@ export async function createEvidenceAction(input: unknown): Promise<ActionResult
     }
 
     const sourceDate = d.sourceDate ? new Date(d.sourceDate) : null;
+    const legacyType = d.isInterview ? "INTERVIEW" : d.type;
+    // Source taxonomy: explicit, else derived from the legacy type. Never a model choice.
+    const sourceType = d.sourceType ?? sourceTypeForLegacy(legacyType);
+    const scope = scopeFromFields(d, {
+      sampleSize: d.sampleSize ?? null,
+      organizationCount: d.organizationCount ?? null,
+      userCount: d.userCount ?? null,
+    });
     const evidence = await prisma.evidence.create({
       data: {
         workspaceId: d.workspaceId,
         painId: d.painId ?? null,
         opportunityId: d.opportunityId ?? null,
-        type: d.isInterview ? "INTERVIEW" : d.type,
+        type: legacyType,
         origin: d.isInterview ? "INTERVIEW" : "USER_CAPTURED",
+        sourceType,
+        sourceOriginId: d.sourceOriginId ? cleanText(d.sourceOriginId, 200) : null,
+        sampleSize: d.sampleSize ?? null,
+        organizationCount: d.organizationCount ?? null,
+        userCount: d.userCount ?? null,
+        scope: scope ? JSON.parse(JSON.stringify(scope)) : undefined,
         sourceTitle: cleanText(d.sourceTitle, 200),
         sourceUrl: cleanUrl(d.sourceUrl),
         sourceExcerpt: cleanText(d.sourceExcerpt, 4000),
@@ -72,7 +98,53 @@ export async function createEvidenceAction(input: unknown): Promise<ActionResult
         hasPurchaseIntent: d.hasPurchaseIntent,
       },
     });
-    await recomputeAfterEvidence(d.painId, d.opportunityId);
+    // Claims this evidence affects. Every target must belong to the workspace.
+    // Linking never changes the evidence itself; the deterministic engine
+    // interprets it during recompute.
+    let linkedClaims = 0;
+    for (const claim of d.claims) {
+      let opportunityId = claim.opportunityId ?? d.opportunityId ?? null;
+      if (claim.valueChainNodeId) {
+        const node = await prisma.valueChainNode.findFirst({
+          where: { id: claim.valueChainNodeId, opportunity: { workspaceId: d.workspaceId } },
+          select: { opportunityId: true },
+        });
+        if (!node) continue;
+        opportunityId = node.opportunityId;
+      }
+      if (claim.causalLinkId) {
+        const link = await prisma.causalLink.findFirst({
+          where: { id: claim.causalLinkId, opportunity: { workspaceId: d.workspaceId } },
+          select: { opportunityId: true },
+        });
+        if (!link) continue;
+        opportunityId = link.opportunityId;
+      }
+      if (opportunityId) {
+        const opp = await prisma.opportunity.findFirst({
+          where: { id: opportunityId, workspaceId: d.workspaceId },
+          select: { id: true },
+        });
+        if (!opp) continue;
+      }
+      await prisma.evidenceClaimLink.create({
+        data: {
+          evidenceId: evidence.id,
+          opportunityId,
+          claimType: claim.claimType,
+          valueChainNodeId: claim.valueChainNodeId ?? null,
+          causalLinkId: claim.causalLinkId ?? null,
+          direction: claim.direction,
+        },
+      });
+      linkedClaims++;
+    }
+    await recomputeAfterEvidence(d.painId, d.opportunityId, evidence.id);
+    if (linkedClaims > 0)
+      await recomputeOpportunitiesForEvidence(evidence.id, {
+        trigger: "EVIDENCE_ADDED",
+        evidenceId: evidence.id,
+      });
     logger.info("evidence.created", {
       userId,
       workspaceId: d.workspaceId,
@@ -119,6 +191,7 @@ export async function suggestEvidenceSignalsAction(input: {
       cleanText(input.sourceTitle, 200),
       cleanText(input.excerpt, 4000),
       cleanText(input.hypothesis, 500),
+      await getLocale(),
     );
     return { ...summary, isMock: provider.isMock };
   });
@@ -137,6 +210,7 @@ export async function runResearchAction(input: {
       query: cleanText(input.query, 200),
       hypothesis: input.hypothesis ? cleanText(input.hypothesis, 500) : undefined,
       limit: 5,
+      locale: await getLocale(),
     });
     logger.info("research.search", {
       userId,

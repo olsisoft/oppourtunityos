@@ -10,9 +10,11 @@ import type { SidebarWorkspace } from "@/components/layout/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
 export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
+  const t = useT();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -22,14 +24,14 @@ export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
         variant="ghost"
         size="icon-sm"
         onClick={() => setOpen(true)}
-        aria-label="Open navigation"
+        aria-label={t("layout.nav.openNavigation")}
       >
         <Menu />
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="left" className="w-72">
           <SheetHeader>
-            <SheetTitle>Workspaces</SheetTitle>
+            <SheetTitle>{t("layout.nav.workspaces")}</SheetTitle>
           </SheetHeader>
           <div className="space-y-1 px-4">
             <Button
@@ -40,7 +42,7 @@ export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                 setNewOpen(true);
               }}
             >
-              <Plus /> New discovery
+              <Plus /> {t("layout.nav.newDiscovery")}
             </Button>
             <Link
               href="/app"
@@ -50,7 +52,7 @@ export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                 pathname === "/app" && "bg-accent",
               )}
             >
-              <LayoutDashboard className="size-4" /> Dashboard
+              <LayoutDashboard className="size-4" /> {t("layout.nav.dashboard")}
             </Link>
             {workspaces.map((w) => (
               <Link
@@ -65,7 +67,7 @@ export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                 <span className="truncate">{w.name}</span>
                 {w.isDemo && (
                   <Badge variant="muted" className="px-1.5 py-0 text-[10px]">
-                    Demo
+                    {t("layout.demoBadge")}
                   </Badge>
                 )}
               </Link>
@@ -78,7 +80,7 @@ export function MobileNav({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                 pathname === "/app/settings" && "bg-accent",
               )}
             >
-              <Settings className="size-4" /> Settings
+              <Settings className="size-4" /> {t("layout.nav.settings")}
             </Link>
           </div>
         </SheetContent>

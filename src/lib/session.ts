@@ -9,12 +9,7 @@ export class UnauthorizedError extends Error {
   }
 }
 
-export class ForbiddenError extends Error {
-  constructor(message = "Forbidden") {
-    super(message);
-    this.name = "ForbiddenError";
-  }
-}
+export { ForbiddenError } from "@/lib/errors";
 
 /** For server components: redirect to login when there is no session. */
 export async function requireUser() {

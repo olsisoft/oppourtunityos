@@ -4,7 +4,7 @@
 import { saturate } from "./evidence-score";
 
 export interface AssumptionEvidenceLink {
-  direction: "SUPPORTS" | "CONTRADICTS";
+  direction: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
   /** Evidence weight 0–1 (see signalWeight). */
   weight: number;
 }
@@ -23,7 +23,7 @@ export function deriveAssumptionStatus(links: AssumptionEvidenceLink[]): Assumpt
   const s = supports.reduce((a, l) => a + l.weight, 0);
   const c = contradicts.reduce((a, l) => a + l.weight, 0);
 
-  if (links.length === 0) {
+  if (supports.length + contradicts.length === 0) {
     return { status: "UNKNOWN", confidence: 0, supportCount: 0, contradictCount: 0 };
   }
 

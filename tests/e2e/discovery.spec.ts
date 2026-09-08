@@ -20,9 +20,19 @@ async function login(page: Page) {
 test("landing page states the product philosophy", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Stop asking AI for startup ideas." }),
+    page.getByRole("heading", {
+      name: "Know what is worth building before you spend months building it.",
+    }),
   ).toBeVisible();
-  await expect(page.getByText("Discover problems worth solving.")).toBeVisible();
+  await expect(page.getByText(/Stop asking AI for startup ideas\./).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "The AI doesn't decide what's true. Evidence does." }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "From assumption to decision" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Not all evidence proves the same thing" }),
+  ).toBeVisible();
+  await expect(page.getByText(/it has to fit the claim/i).first()).toBeVisible();
   await expect(page.getByRole("link", { name: /Find an opportunity/ }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Validate an idea" }).first()).toBeVisible();
 });
@@ -43,7 +53,12 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   await expect(
     page.getByRole("heading", { name: "What should I investigate next?" }),
   ).toBeVisible();
-  await expect(page.getByText("Next recommended research action")).toBeVisible();
+  await expect(page.getByText("Next best action").first()).toBeVisible();
+  // Four independent scores on the dashboard table.
+  await expect(page.getByRole("columnheader", { name: "Value" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Causal" })).toBeVisible();
+  // INCOMPLETE is shown when a Value / Causal input is UNKNOWN — never a fabricated number.
+  await expect(page.getByText("INCOMPLETE").first()).toBeVisible();
 
   await page
     .getByRole("link", { name: /Beauty Salons \(demo\)/ })
@@ -59,10 +74,17 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   ).toBeVisible();
   await expect(page.getByText("TEST", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("KILL", { exact: true }).first()).toBeVisible();
+  // Value tab: valuable variable, ladder, proof frontier with its scope, commercial ladder.
+  await page.getByRole("tab", { name: "Value" }).click();
+  await expect(page.getByText("Valuable variable").first()).toBeVisible();
+  await expect(page.getByText(/Proof frontier/).first()).toBeVisible();
+  await expect(page.getByText(/^Scope:/).first()).toBeVisible();
+  await expect(page.getByText("Commercial ladder").first()).toBeVisible();
 
-  // Evidence tab labels demo data.
+  // Evidence tab labels demo data and shows fit to claim per link.
   await page.getByRole("tab", { name: /Evidence/ }).click();
   await expect(page.getByText("DEMO DATA").first()).toBeVisible();
+  await expect(page.getByText("Fit to claim").first()).toBeVisible();
 
   // Report page explains the scores.
   await page.getByRole("tab", { name: /Radar/ }).click();
@@ -72,8 +94,55 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   await expect(page.getByText("Why this verdict")).toBeVisible();
   await expect(page.getByText("Why this Opportunity Potential")).toBeVisible();
   await expect(page.getByText("Why this Evidence Confidence")).toBeVisible();
-  await expect(page.getByText("Next best action")).toBeVisible();
-  await expect(page.getByText("Critical assumptions")).toBeVisible();
+  await expect(page.getByText("Next best action").first()).toBeVisible();
+  await expect(page.getByText("Value causality ladder")).toBeVisible();
+  await expect(page.getByText(/Current Proof Frontier/).first()).toBeVisible();
+  await expect(page.getByText("Riskiest assumption")).toBeVisible();
+  await expect(page.getByText("Why this Value Strength")).toBeVisible();
+  await expect(page.getByText("Why this Causal Confidence")).toBeVisible();
+  await expect(page.getByText("Learning history")).toBeVisible();
+  await expect(page.getByText(/Why the frontier stops here/).first()).toBeVisible();
+});
+
+test("the learning loop: plan an experiment, record a result, see the frontier move", async ({
+  page,
+}) => {
+  await login(page);
+  await page
+    .getByRole("link", { name: /Beauty Salons \(demo\)/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/w\//);
+  await page.getByRole("tab", { name: /Radar/ }).click();
+  await page.getByRole("link", { name: "Employee revenue leakage detection" }).click();
+  await page.waitForURL(/\/opportunities\//);
+
+  // The seeded feasibility test is PLANNED with deterministic thresholds.
+  const card = page.locator("li", { hasText: "Concierge reconciliation" }).first();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Record result" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(/Decided by the thresholds/)).toBeVisible();
+  await dialog.getByLabel("Observed value").fill("97");
+  await expect(dialog.getByText("Supported", { exact: true }).first()).toBeVisible();
+  await dialog
+    .getByLabel(/Result summary/)
+    .fill("Exports from 5 salons matched 97% of appointments to payments (e2e run).");
+  await dialog.getByRole("button", { name: "Record result" }).click();
+
+  // The knowledge update is shown: before → after, with the experimental validity
+  // and a system-generated, language-gated interpretation bound to the scope.
+  await expect(page.getByText("What the last test changed")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Proof frontier/).first()).toBeVisible();
+  await expect(page.getByText("Experimental validity").first()).toBeVisible();
+  await expect(page.getByText(/System interpretation/).first()).toBeVisible();
+  await expect(page.getByText(/not established beyond/i).first()).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
+
+  // The result is now evidence and appears in the learning history.
+  await expect(page.getByText(/Experiment: Concierge reconciliation/).first()).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("a new workspace runs the 'I already have an idea' flow and updates the map", async ({
@@ -114,4 +183,35 @@ test("a new workspace runs the 'I already have an idea' flow and updates the map
     );
   await page.getByRole("button", { name: "Save evidence" }).click();
   await expect(page.getByText("Interview — clinic owner (e2e)")).toBeVisible({ timeout: 15_000 });
+});
+
+test("the interface switches to French and back, and the choice sticks", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Français" }).first().click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(
+    page.getByRole("heading", {
+      name: "Sachez ce qui vaut la peine d’être construit avant d’y passer des mois.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Se connecter" }).first()).toBeVisible();
+
+  // The cookie keeps the choice on the next page.
+  await page.goto("/login");
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.getByRole("heading", { name: "Se connecter" })).toBeVisible();
+
+  // Signed in, the demo workspace renders French labels and French engine sentences.
+  await page.getByLabel("E-mail").fill(DEMO_EMAIL);
+  await page.getByLabel(/Mot de passe/).fill(DEMO_PASSWORD);
+  await page.getByRole("button", { name: "Se connecter" }).click();
+  await page.waitForURL(/\/app/);
+  await expect(page.getByRole("heading", { name: /investiguer|explorer|examiner/i })).toBeVisible();
+  await expect(page.getByText(/Prochaine meilleure action/i).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "English" }).first().click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(
+    page.getByRole("heading", { name: "What should I investigate next?" }),
+  ).toBeVisible();
 });

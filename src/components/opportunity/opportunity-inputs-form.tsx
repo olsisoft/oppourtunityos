@@ -8,10 +8,9 @@ import { toast } from "sonner";
 import { updateOpportunityAction } from "@/actions/opportunities";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useT } from "@/i18n/client";
 import {
   computeOpportunityScore,
-  OPPORTUNITY_INPUT_HELP,
-  OPPORTUNITY_INPUT_LABELS,
   OPPORTUNITY_WEIGHTS,
   type OpportunityInputKey,
   type OpportunityScoreInputs,
@@ -24,13 +23,17 @@ export function InputsEditor({
   value: OpportunityScoreInputs;
   onChange: (next: OpportunityScoreInputs) => void;
 }) {
+  const t = useT();
   const preview = useMemo(() => computeOpportunityScore(value), [value]);
   return (
     <div className="space-y-3 rounded-lg border p-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold tracking-wider uppercase">Scoring inputs (0–10)</p>
+        <p className="text-xs font-semibold tracking-wider uppercase">
+          {t("opportunity.inputs.title")}
+        </p>
         <span className="font-mono text-sm tabular-nums">
-          Potential preview <span className="font-semibold">{preview.score}</span>/100
+          {t("opportunity.inputs.preview")} <span className="font-semibold">{preview.score}</span>
+          {t("common.outOf100")}
         </span>
       </div>
       {(Object.keys(OPPORTUNITY_WEIGHTS) as OpportunityInputKey[]).map((key) => (
@@ -43,13 +46,15 @@ export function InputsEditor({
                     className="cursor-help text-xs font-medium underline decoration-dotted underline-offset-2"
                     htmlFor={`input-${key}`}
                   >
-                    {OPPORTUNITY_INPUT_LABELS[key]}
+                    {t(`labels.opportunityInput.${key}`)}
                   </label>
                 </TooltipTrigger>
-                <TooltipContent>{OPPORTUNITY_INPUT_HELP[key]}</TooltipContent>
+                <TooltipContent>{t(`labels.opportunityInputHelp.${key}`)}</TooltipContent>
               </Tooltip>
               <span className="text-muted-foreground text-[10px]">
-                {Math.round(OPPORTUNITY_WEIGHTS[key] * 100)}%
+                {t("opportunity.inputs.weight", {
+                  value: Math.round(OPPORTUNITY_WEIGHTS[key] * 100),
+                })}
               </span>
             </div>
             <input
@@ -77,6 +82,7 @@ export function OpportunityInputsForm({
   opportunityId: string;
   initial: OpportunityScoreInputs;
 }) {
+  const t = useT();
   const router = useRouter();
   const [value, setValue] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -86,9 +92,9 @@ export function OpportunityInputsForm({
     setSaving(true);
     const r = await updateOpportunityAction({ opportunityId, inputs: value });
     setSaving(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
-      toast.success("Inputs saved — scores recomputed");
+      toast.success(t("opportunity.inputs.saved"));
       router.refresh();
     }
   };
@@ -97,12 +103,9 @@ export function OpportunityInputsForm({
     <div className="space-y-3">
       <InputsEditor value={value} onChange={setValue} />
       <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-xs">
-          Editing inputs marks them as yours (provenance USER). The verdict is recomputed by the
-          rule engine.
-        </p>
+        <p className="text-muted-foreground text-xs">{t("opportunity.inputs.note")}</p>
         <Button size="sm" onClick={save} disabled={!dirty || saving}>
-          {saving && <Loader2 className="animate-spin" />} Save inputs
+          {saving && <Loader2 className="animate-spin" />} {t("opportunity.inputs.save")}
         </Button>
       </div>
     </div>

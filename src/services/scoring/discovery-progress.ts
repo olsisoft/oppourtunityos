@@ -1,8 +1,12 @@
 /**
  * Discovery progress — how much of the pipeline artifact exists.
  * Pure function over counts so the UI and the state machine share one truth.
+ *
+ * Step labels and details are SystemMessages (see src/i18n/messages.ts) so
+ * they render in the reader's language; `text` holds the canonical English.
  */
 import type { DiscoveryStage } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 
 export interface ProgressCounts {
   userContextCaptured: boolean;
@@ -16,16 +20,19 @@ export interface ProgressCounts {
   mechanisms: number;
   opportunities: number;
   scoredOpportunities: number;
+  /** Value causality ladder nodes across the workspace's opportunities. */
+  valueChainNodes?: number;
+  experiments?: number;
 }
 
 export type ProgressStatus = "done" | "partial" | "pending";
 
 export interface ProgressStep {
   stage: DiscoveryStage;
-  label: string;
+  label: SystemMessage;
   status: ProgressStatus;
   percent: number;
-  detail: string;
+  detail: SystemMessage;
 }
 
 export interface DiscoveryProgress {
@@ -37,12 +44,14 @@ export interface DiscoveryProgress {
 
 const EVIDENCE_TARGET = 6;
 const MECHANISM_TARGET = 3;
+/** Mechanism → Capability → Transformation → Operational → Economic → Strategic. */
+const VALUE_CHAIN_TARGET = 6;
 
-function step(stage: DiscoveryStage, label: string, percent: number, detail: string): ProgressStep {
+function step(stage: DiscoveryStage, percent: number, detail: SystemMessage): ProgressStep {
   const p = Math.max(0, Math.min(100, Math.round(percent)));
   return {
     stage,
-    label,
+    label: msg(`scoring.progress.step.${stage}`),
     percent: p,
     status: p >= 100 ? "done" : p > 0 ? "partial" : "pending",
     detail,
@@ -50,61 +59,76 @@ function step(stage: DiscoveryStage, label: string, percent: number, detail: str
 }
 
 export function computeDiscoveryProgress(c: ProgressCounts): DiscoveryProgress {
+  const valueChainNodes = c.valueChainNodes ?? 0;
+  const experiments = c.experiments ?? 0;
   const steps: ProgressStep[] = [
     step(
       "MARKET_SELECTION",
-      "Market",
       c.markets >= 1 ? 100 : 0,
-      `${c.markets} market${c.markets === 1 ? "" : "s"}`,
+      msg("scoring.progress.detail.markets", { count: c.markets }),
     ),
-    step("ICP_DISCOVERY", "ICP", c.icps >= 1 ? 100 : 0, `${c.icps} ICP${c.icps === 1 ? "" : "s"}`),
+    step(
+      "ICP_DISCOVERY",
+      c.icps >= 1 ? 100 : 0,
+      msg("scoring.progress.detail.icps", { count: c.icps }),
+    ),
     step(
       "VARIABLE_DISCOVERY",
-      "Variables",
       c.variables >= 2 ? 100 : c.variables === 1 ? 50 : 0,
-      `${c.variables} variable${c.variables === 1 ? "" : "s"}`,
+      msg("scoring.progress.detail.variables", { count: c.variables }),
     ),
     step(
       "PAIN_DISCOVERY",
-      "Pain",
       c.pains >= 1 ? 100 : 0,
-      `${c.pains} pain${c.pains === 1 ? "" : "s"}`,
+      msg("scoring.progress.detail.pains", { count: c.pains }),
     ),
     step(
       "TRIGGER_DISCOVERY",
-      "Trigger",
       c.triggers >= 1 ? 100 : 0,
-      `${c.triggers} trigger${c.triggers === 1 ? "" : "s"}`,
+      msg("scoring.progress.detail.triggers", { count: c.triggers }),
     ),
     step(
       "ALTERNATIVE_DISCOVERY",
-      "Alternative",
       c.alternatives >= 1 ? 100 : 0,
-      `${c.alternatives} alternative${c.alternatives === 1 ? "" : "s"}`,
+      msg("scoring.progress.detail.alternatives", { count: c.alternatives }),
     ),
     step(
       "EVIDENCE_DISCOVERY",
-      "Evidence",
       (c.evidence / EVIDENCE_TARGET) * 100,
-      `${c.evidence} of ${EVIDENCE_TARGET} target items`,
+      msg("scoring.progress.detail.evidence", { count: c.evidence, target: EVIDENCE_TARGET }),
     ),
     step(
       "MECHANISM_DISCOVERY",
-      "Mechanisms",
       (c.mechanisms / MECHANISM_TARGET) * 100,
-      `${c.mechanisms} of ${MECHANISM_TARGET} explored`,
+      msg("scoring.progress.detail.mechanisms", {
+        count: c.mechanisms,
+        target: MECHANISM_TARGET,
+      }),
     ),
     step(
       "OPPORTUNITY_FORMATION",
-      "Opportunity",
       c.opportunities >= 1 ? 100 : 0,
-      `${c.opportunities} formed`,
+      msg("scoring.progress.detail.opportunities", { count: c.opportunities }),
+    ),
+    step(
+      "VALUE_CAUSALITY",
+      Math.min(100, (valueChainNodes / VALUE_CHAIN_TARGET) * 100),
+      msg("scoring.progress.detail.valueChain", {
+        count: valueChainNodes,
+        target: VALUE_CHAIN_TARGET,
+      }),
+    ),
+    step(
+      "EXPERIMENT_DESIGN",
+      experiments >= 1 ? 100 : 0,
+      msg("scoring.progress.detail.experiments", { count: experiments }),
     ),
     step(
       "RECOMMENDATION",
-      "Decision",
       c.scoredOpportunities >= 1 ? 100 : 0,
-      c.scoredOpportunities >= 1 ? "Verdict computed" : "No verdict yet",
+      c.scoredOpportunities >= 1
+        ? msg("scoring.progress.detail.verdictComputed")
+        : msg("scoring.progress.detail.noVerdict"),
     ),
   ];
 

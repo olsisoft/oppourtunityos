@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useT } from "@/i18n/client";
 import type { OpportunityScoreInputs } from "@/services/scoring/opportunity-score";
 
 const DEFAULT_INPUTS: OpportunityScoreInputs = {
@@ -48,6 +49,7 @@ export function NewOpportunityDialog({
   workspaceId: string;
   pains: Array<{ id: string; label: string; icpId: string; variableId: string }>;
 }) {
+  const t = useT();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState("");
@@ -72,10 +74,10 @@ export function NewOpportunityDialog({
     });
     setSaving(false);
     if (!r.ok) {
-      toast.error(r.error);
+      toast.error(t(r.error));
       return;
     }
-    toast.success("Opportunity created and scored");
+    toast.success(t("opportunity.new.created"));
     onOpenChange(false);
     router.push(`/app/w/${workspaceId}/opportunities/${r.data.id}`);
   };
@@ -85,28 +87,25 @@ export function NewOpportunityDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>New opportunity</DialogTitle>
-            <DialogDescription>
-              An opportunity is ICP × variable × movement anchored on a pain. Scores are computed
-              from the 0–10 inputs; evidence is scored separately.
-            </DialogDescription>
+            <DialogTitle>{t("opportunity.new.title")}</DialogTitle>
+            <DialogDescription>{t("opportunity.new.description")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label htmlFor="opp-title">Title</Label>
+            <Label htmlFor="opp-title">{t("opportunity.new.titleLabel")}</Label>
             <Input
               id="opp-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
-              placeholder="e.g. Salon no-show prevention"
+              placeholder={t("opportunity.new.titlePlaceholder")}
             />
           </div>
           {pains.length > 0 && (
             <div className="space-y-1.5">
-              <Label>Pain</Label>
+              <Label>{t("opportunity.new.pain")}</Label>
               <Select value={painId} onValueChange={setPainId}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a pain" />
+                  <SelectValue placeholder={t("opportunity.new.selectPain")} />
                 </SelectTrigger>
                 <SelectContent>
                   {pains.map((p) => (
@@ -119,7 +118,7 @@ export function NewOpportunityDialog({
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="opp-problem">Problem statement</Label>
+            <Label htmlFor="opp-problem">{t("opportunity.new.problemStatement")}</Label>
             <Textarea
               id="opp-problem"
               rows={2}
@@ -128,21 +127,21 @@ export function NewOpportunityDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="opp-metric">Metric that proves value</Label>
+            <Label htmlFor="opp-metric">{t("opportunity.new.metric")}</Label>
             <Input
               id="opp-metric"
               value={metric}
               onChange={(e) => setMetric(e.target.value)}
-              placeholder="e.g. no-show rate per month"
+              placeholder={t("opportunity.new.metricPlaceholder")}
             />
           </div>
           <InputsEditor value={inputs} onChange={setInputs} />
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={saving || !title.trim()}>
-              {saving && <Loader2 className="animate-spin" />} Create and score
+              {saving && <Loader2 className="animate-spin" />} {t("opportunity.new.submit")}
             </Button>
           </DialogFooter>
         </form>

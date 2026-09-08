@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
 import { createOpportunitySchema, updateOpportunitySchema } from "@/domain/schemas";
+import { getLocale, getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import { requireUserId } from "@/lib/session";
 import { getAIProvider } from "@/services/ai";
@@ -18,9 +19,10 @@ export async function createOpportunityAction(
 ): Promise<ActionResult<{ id: string }>> {
   const parsed = createOpportunitySchema.safeParse(input);
   if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the highlighted fields.",
+      error: t("mock.opportunityAction.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   }
@@ -65,9 +67,10 @@ export async function createOpportunityAction(
 export async function updateOpportunityAction(input: unknown): Promise<ActionResult> {
   const parsed = updateOpportunitySchema.safeParse(input);
   if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the highlighted fields.",
+      error: t("mock.opportunityAction.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   }
@@ -129,11 +132,13 @@ export async function generateInterviewGuideAction(
     if (!o) throw new Error("Opportunity not found");
     await assertWorkspaceAccess(userId, o.workspaceId);
 
+    const locale = await getLocale();
+    const t = await getT();
     const inputs = {
       opportunityTitle: o.title,
-      icp: o.icp?.name ?? "the ICP",
-      variable: o.variable?.name ?? "the variable",
-      pain: o.pain?.description ?? o.problemStatement ?? "the problem",
+      icp: o.icp?.name ?? t("mock.fallback.icp"),
+      variable: o.variable?.name ?? t("mock.fallback.variable"),
+      pain: o.pain?.description ?? o.problemStatement ?? t("mock.fallback.problem"),
       trigger: o.pain?.triggers[0]?.description ?? null,
       alternatives: o.pain?.alternatives.map((a) => a.name) ?? [],
     };
@@ -142,16 +147,16 @@ export async function generateInterviewGuideAction(
     let source: "ai" | "template" | "mock";
     try {
       const provider = getAIProvider();
-      guide = await provider.generateInterviewGuide(inputs);
+      guide = await provider.generateInterviewGuide({ ...inputs, locale });
       source = provider.isMock ? "mock" : "ai";
     } catch (error) {
       logger.warn("interview.guide_ai_failed", { opportunityId, error });
-      guide = buildTemplateInterviewGuide(inputs);
+      guide = buildTemplateInterviewGuide(inputs, locale);
       source = "template";
     }
     if (source === "mock") {
       // The template is better than the mock output; keep it deterministic.
-      guide = buildTemplateInterviewGuide(inputs);
+      guide = buildTemplateInterviewGuide(inputs, locale);
       source = "template";
     }
 

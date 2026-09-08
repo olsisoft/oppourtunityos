@@ -4,8 +4,10 @@ import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n/client";
 
 export function CopyReportButton({ markdown }: { markdown: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -21,7 +23,8 @@ export function CopyReportButton({ markdown }: { markdown: string }) {
         }
       }}
     >
-      {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy report as Markdown"}
+      {copied ? <Check /> : <Copy />}{" "}
+      {copied ? t("opportunity.report.copied") : t("opportunity.report.copy")}
     </Button>
   );
 }

@@ -78,7 +78,7 @@ describe("discovery state machine", () => {
     ).toBe(false);
   });
 
-  it("evidence can be skipped knowingly but scoring requires a scored opportunity", () => {
+  it("evidence can be skipped knowingly, but scoring needs a value chain and a scored opportunity", () => {
     const counts: ProgressCounts = {
       ...empty,
       markets: 1,
@@ -90,12 +90,26 @@ describe("discovery state machine", () => {
       mechanisms: 3,
       opportunities: 1,
     };
-    expect(maxReachableStage({ counts, entryMode: "NO_IDEA", aiReady: true })).toBe("SCORING");
+    // An opportunity without a value causality ladder stops at VALUE_CAUSALITY.
+    expect(maxReachableStage({ counts, entryMode: "NO_IDEA", aiReady: true })).toBe(
+      "VALUE_CAUSALITY",
+    );
+    // With a ladder (mechanism → capability → transformation …) scoring becomes reachable.
+    const withChain = { ...counts, valueChainNodes: 6 };
+    expect(maxReachableStage({ counts: withChain, entryMode: "NO_IDEA", aiReady: true })).toBe(
+      "SCORING",
+    );
+    // A scored opportunity unlocks experiment design; an experiment (or an
+    // explicit AI ready flag) unlocks the recommendation.
+    const scored = { ...withChain, evidence: 1, scoredOpportunities: 1 };
+    expect(maxReachableStage({ counts: scored, entryMode: "NO_IDEA", aiReady: false })).toBe(
+      "EXPERIMENT_DESIGN",
+    );
     expect(
       maxReachableStage({
-        counts: { ...counts, scoredOpportunities: 1 },
+        counts: { ...scored, experiments: 1 },
         entryMode: "NO_IDEA",
-        aiReady: true,
+        aiReady: false,
       }),
     ).toBe("RECOMMENDATION");
   });

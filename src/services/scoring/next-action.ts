@@ -6,6 +6,7 @@
  * recommends "build software" as the default.
  */
 import type { Verdict } from "@/generated/prisma/enums";
+import { msg, type MessageParam, type SystemMessage } from "@/i18n/messages";
 import type { EvidenceScoreResult } from "./evidence-score";
 import type { KillWarning } from "./kill-criteria";
 
@@ -23,8 +24,8 @@ export type NextActionType =
 
 export interface NextAction {
   type: NextActionType;
-  title: string;
-  rationale: string;
+  title: SystemMessage;
+  rationale: SystemMessage;
   effort: "low" | "medium" | "high";
 }
 
@@ -52,14 +53,17 @@ export interface NextActionInput {
 
 export function computeNextActions(input: NextActionInput): NextAction[] {
   const actions: NextAction[] = [];
-  const icp = input.icpName?.trim() || "target customers";
-  const pain = input.painDescription?.trim() || "this problem";
+  const icp: MessageParam = input.icpName?.trim() || msg("nextAction.fallback.icp");
+  const pain: MessageParam = input.painDescription?.trim() || msg("nextAction.fallback.problem");
 
   if (input.verdict === "KILL") {
     actions.push({
       type: "KILL",
-      title: "Write down why this opportunity is dead and archive it",
-      rationale: `Evidence Confidence is ${input.evidenceScore}/100 while Opportunity Potential is only ${input.opportunityScore}/100: the evidence says the structure is weak.`,
+      title: msg("nextAction.mvp.KILL.title"),
+      rationale: msg("nextAction.mvp.KILL.rationale", {
+        evidenceScore: input.evidenceScore,
+        opportunityScore: input.opportunityScore,
+      }),
       effort: "low",
     });
     return actions;
@@ -68,9 +72,8 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   if (input.verdict === "IGNORE") {
     actions.push({
       type: "IGNORE",
-      title: "Park this opportunity; revisit only if new evidence appears",
-      rationale:
-        "Both potential and evidence are low. Spending research time here has poor expected value.",
+      title: msg("nextAction.mvp.IGNORE.title"),
+      rationale: msg("nextAction.mvp.IGNORE.rationale"),
       effort: "low",
     });
     return actions;
@@ -80,8 +83,8 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   for (const w of critical.slice(0, 2)) {
     actions.push({
       type: "RESOLVE_WARNING",
-      title: w.suggestion,
-      rationale: w.message,
+      title: msg("nextAction.mvp.RESOLVE_WARNING.title", { suggestion: w.suggestion }),
+      rationale: msg("nextAction.mvp.RESOLVE_WARNING.rationale", { message: w.message }),
       effort: "medium",
     });
   }
@@ -92,8 +95,11 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   if (riskiest && riskiest.importance >= 7) {
     actions.push({
       type: "VALIDATE_ASSUMPTION",
-      title: `Validate the riskiest assumption: "${riskiest.statement}"`,
-      rationale: `Importance ${riskiest.importance}/10 with ${riskiest.evidenceCount} linked evidence item${riskiest.evidenceCount === 1 ? "" : "s"}. If this is false the opportunity collapses.`,
+      title: msg("nextAction.mvp.VALIDATE_ASSUMPTION.title", { statement: riskiest.statement }),
+      rationale: msg("nextAction.mvp.VALIDATE_ASSUMPTION.rationale", {
+        importance: riskiest.importance,
+        count: riskiest.evidenceCount,
+      }),
       effort: "medium",
     });
   }
@@ -102,25 +108,24 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   if ((component("economicImpact")?.itemCount ?? 0) === 0) {
     actions.push({
       type: "RESEARCH",
-      title: `Determine the economic impact of ${pain}`,
-      rationale:
-        "No evidence quantifies what the problem costs. Scores stay hypothetical until it does.",
+      title: msg("nextAction.mvp.ECONOMIC_IMPACT.title", { pain }),
+      rationale: msg("nextAction.mvp.ECONOMIC_IMPACT.rationale"),
       effort: "medium",
     });
   }
   if ((component("directCustomer")?.itemCount ?? 0) === 0) {
     actions.push({
       type: "INTERVIEW",
-      title: `Talk to 3 ${icp} and capture what they say as evidence`,
-      rationale: "There is no direct customer evidence yet. Everything rests on reasoning.",
+      title: msg("nextAction.mvp.DIRECT_CUSTOMER.title", { icp }),
+      rationale: msg("nextAction.mvp.DIRECT_CUSTOMER.rationale"),
       effort: "medium",
     });
   }
   if (input.frequency >= 5 && (component("explicitPain")?.itemCount ?? 0) === 0) {
     actions.push({
       type: "RESEARCH",
-      title: "Find evidence that this pain occurs at least weekly",
-      rationale: "Frequency is assumed high but no source states the pain explicitly.",
+      title: msg("nextAction.mvp.EXPLICIT_PAIN.title"),
+      rationale: msg("nextAction.mvp.EXPLICIT_PAIN.rationale"),
       effort: "low",
     });
   }
@@ -128,8 +133,8 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   if (input.alternativeCount === 0) {
     actions.push({
       type: "COMPARE_ALTERNATIVES",
-      title: `Map what ${icp} do today and where it fails`,
-      rationale: "No current alternative is documented. Alternative weakness cannot be trusted.",
+      title: msg("nextAction.mvp.ALTERNATIVES.title", { icp }),
+      rationale: msg("nextAction.mvp.ALTERNATIVES.rationale"),
       effort: "low",
     });
   }
@@ -137,8 +142,8 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   if (!input.hasTrigger) {
     actions.push({
       type: "DEFINE",
-      title: "Identify the trigger that makes the problem urgent",
-      rationale: "Without a trigger there is no buying moment.",
+      title: msg("nextAction.mvp.TRIGGER.title"),
+      rationale: msg("nextAction.mvp.TRIGGER.rationale"),
       effort: "low",
     });
   }
@@ -147,17 +152,19 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
     case "RESEARCH":
       actions.push({
         type: "RESEARCH",
-        title: "Capture at least 5 external evidence items before thinking about solutions",
-        rationale: `Opportunity Potential ${input.opportunityScore}/100 with Evidence Confidence ${input.evidenceScore}/100: promising but unproven.`,
+        title: msg("nextAction.mvp.RESEARCH.title"),
+        rationale: msg("nextAction.mvp.RESEARCH.rationale", {
+          opportunityScore: input.opportunityScore,
+          evidenceScore: input.evidenceScore,
+        }),
         effort: "medium",
       });
       break;
     case "INVESTIGATE":
       actions.push({
         type: "RESEARCH",
-        title: "Sharpen the ICP and variable, then add direct evidence",
-        rationale:
-          "Moderate potential with partial evidence. A narrower ICP often raises both scores.",
+        title: msg("nextAction.mvp.INVESTIGATE.title"),
+        rationale: msg("nextAction.mvp.INVESTIGATE.rationale"),
         effort: "medium",
       });
       break;
@@ -165,24 +172,25 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
       if (input.mechanismCount < 3) {
         actions.push({
           type: "EXPLORE_MECHANISMS",
-          title: "Explore at least 3 mechanisms before selecting a product hypothesis",
-          rationale: `${input.mechanismCount} mechanism${input.mechanismCount === 1 ? "" : "s"} documented. Problem ≠ product.`,
+          title: msg("nextAction.mvp.EXPLORE_MECHANISMS.title"),
+          rationale: msg("nextAction.mvp.EXPLORE_MECHANISMS.rationale", {
+            count: input.mechanismCount,
+          }),
           effort: "low",
         });
       }
       actions.push({
         type: "INTERVIEW",
-        title: `Interview 5 ${icp} about the last time ${pain} happened`,
-        rationale:
-          "Scores justify customer discovery. Use the generated interview guide and save notes as evidence.",
+        title: msg("nextAction.mvp.INTERVIEW.title", { icp, pain }),
+        rationale: msg("nextAction.mvp.INTERVIEW.rationale"),
         effort: "high",
       });
       break;
     case "TEST":
       actions.push({
         type: "TEST",
-        title: "Run a concierge test or landing page before writing software",
-        rationale: "Both scores are strong. A lightweight test validates demand cheaper than code.",
+        title: msg("nextAction.mvp.TEST.title"),
+        rationale: msg("nextAction.mvp.TEST.rationale"),
         effort: "high",
       });
       break;
@@ -193,8 +201,8 @@ export function computeNextActions(input: NextActionInput): NextAction[] {
   // De-duplicate by title, keep order.
   const seen = new Set<string>();
   return actions.filter((a) => {
-    if (seen.has(a.title)) return false;
-    seen.add(a.title);
+    if (seen.has(a.title.text)) return false;
+    seen.add(a.title.text);
     return true;
   });
 }
@@ -204,8 +212,8 @@ export function primaryNextAction(input: NextActionInput): NextAction {
   return (
     actions[0] ?? {
       type: "DEFINE",
-      title: "Define the ICP, variable and pain before anything else",
-      rationale: "The opportunity is not yet structured enough to recommend an action.",
+      title: msg("nextAction.mvp.DEFINE.title"),
+      rationale: msg("nextAction.mvp.DEFINE.rationale"),
       effort: "low",
     }
   );

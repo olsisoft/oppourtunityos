@@ -1,8 +1,30 @@
 import { prisma } from "@/db/prisma";
 import { workspaceGraphInclude } from "@/db/workspaces";
-import type { Verdict } from "@/generated/prisma/enums";
+import type { AssumptionKind, Verdict } from "@/generated/prisma/enums";
+import { msg, type LocalizedText } from "@/i18n/messages";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { NextAction } from "@/services/scoring/next-action";
+import type { ValueAction } from "@/services/value/next-value-action";
+import { frontierMovement, type FrontierPosition } from "@/services/value/proof-frontier";
+
+/** Days without a completed experiment after which learning counts as stalled. */
+export const STALLED_AFTER_DAYS = 21;
+
+/** Rendered with t(`dashboard.gaps.kinds.${kind}`). */
+export type EvidenceGapKind = "PROBLEM" | "MAGNITUDE" | "CAUSAL" | "WTP" | "FEASIBILITY";
+
+/** Evidence exists but does not fit the claim it is linked to. Rendered with t(`dashboard.fitness.kinds.${kind}`). */
+export type FitnessGapKind = "NOT_ADMISSIBLE" | "LOW_FIT" | "WEAK_DESIGN";
+
+/** Causal and value assumptions are the ones that collapse an opportunity. */
+const KIND_BONUS: Record<AssumptionKind, number> = {
+  CAUSAL: 9,
+  VALUE: 8,
+  WTP: 5,
+  FEASIBILITY: 4,
+  ACCESS: 3,
+  GENERIC: 0,
+};
 
 export async function getDashboardData(userId: string) {
   const workspaces = await prisma.workspace.findMany({
@@ -30,16 +52,25 @@ export async function getDashboardData(userId: string) {
   });
   const mechanismsByWorkspace = new Map(mechanismCounts.map((m) => [m.workspaceId, m._count._all]));
 
-  const weakestAssumptions = await prisma.assumption.findMany({
+  const untestedAssumptions = await prisma.assumption.findMany({
     where: { workspace: { userId }, status: "UNKNOWN" },
     orderBy: [{ importance: "desc" }, { createdAt: "asc" }],
-    take: 6,
+    take: 40,
     include: {
       workspace: { select: { id: true, name: true } },
       opportunity: { select: { id: true, title: true } },
+      valueChainNode: { select: { level: true } },
+      causalLink: { select: { statement: true } },
       links: true,
     },
   });
+  const weakestAssumptions = [...untestedAssumptions]
+    .sort(
+      (a, b) =>
+        b.importance * 10 + KIND_BONUS[b.kind] - (a.importance * 10 + KIND_BONUS[a.kind]) ||
+        a.createdAt.getTime() - b.createdAt.getTime(),
+    )
+    .slice(0, 6);
 
   const byVerdict: Record<Verdict, number> = {
     TEST: 0,
@@ -56,9 +87,113 @@ export async function getDashboardData(userId: string) {
     insights: deriveOpportunityInsights(o, mechanismsByWorkspace.get(o.workspaceId) ?? 0),
   }));
 
-  const evidenceGaps = enriched.filter(
-    ({ opportunity: o }) => o.opportunityScore >= 60 && o.evidenceScore < 40,
-  );
+  // Typed evidence gaps: what kind of evidence is missing, not just "low evidence".
+  const evidenceGaps = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .flatMap(({ opportunity: o, insights }) => {
+      const gaps: Array<{ kind: EvidenceGapKind; detail: LocalizedText }> = [];
+      if (o.opportunityScore >= 60 && o.evidenceScore < 40) {
+        gaps.push({
+          kind: "PROBLEM",
+          detail: msg("dashboard.gaps.problemDetail", {
+            potential: o.opportunityScore,
+            evidence: o.evidenceScore,
+            gap: insights.evidenceBreakdown?.gaps[0] ?? msg("dashboard.gaps.noEvidenceCaptured"),
+          }),
+        });
+      }
+      if (
+        insights.valueStrength?.status === "INCOMPLETE" &&
+        insights.valueStrength.missing.includes("magnitude")
+      ) {
+        gaps.push({ kind: "MAGNITUDE", detail: msg("dashboard.gaps.magnitudeDetail") });
+      }
+      if (
+        o.valueChainNodes.length > 0 &&
+        (o.causalConfidence === null || o.causalConfidence < 40)
+      ) {
+        gaps.push({
+          kind: "CAUSAL",
+          detail:
+            o.causalConfidence === null
+              ? msg("dashboard.gaps.causalNoEvidence")
+              : msg("dashboard.gaps.causalWeak", { confidence: o.causalConfidence }),
+        });
+      }
+      const wtpEvidence =
+        o.evidence.some((e) => e.hasPurchaseIntent) ||
+        o.claimLinks.some(
+          (l) => l.claimType === "WILLINGNESS_TO_PAY" && l.direction === "SUPPORTS",
+        );
+      if (!wtpEvidence && o.opportunityScore >= 60) {
+        gaps.push({ kind: "WTP", detail: msg("dashboard.gaps.wtpDetail") });
+      }
+      if (o.assumptions.some((a) => a.kind === "FEASIBILITY" && a.status === "UNKNOWN")) {
+        gaps.push({ kind: "FEASIBILITY", detail: msg("dashboard.gaps.feasibilityDetail") });
+      }
+      return gaps.map((g) => ({ opportunity: o, insights, ...g }));
+    })
+    .slice(0, 10);
+
+  type Enriched = (typeof enriched)[number];
+  interface FitnessGap {
+    opportunity: Enriched["opportunity"];
+    kind: FitnessGapKind;
+    claim: LocalizedText;
+    detail: LocalizedText;
+  }
+  interface GeneralizationGap {
+    opportunity: Enriched["opportunity"];
+    level: LocalizedText;
+    generalization: "CASE_ONLY" | "SAMPLE_SUPPORTED" | "BROADER_HYPOTHESIS";
+    scope: LocalizedText;
+    detail: LocalizedText;
+    question: LocalizedText | null;
+  }
+
+  // EVIDENCE FITNESS GAPS — the frontier is blocked by evidence that exists
+  // but is not admissible, does not fit, or comes from too weak a design.
+  const fitnessGaps: FitnessGap[] = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .flatMap(({ opportunity: o, insights }) => {
+      const blocked = insights.frontier?.blockedAt;
+      if (!blocked) return [];
+      return blocked.blockers
+        .filter(
+          (b) => b.kind === "LOW_FIT" || b.kind === "NOT_ADMISSIBLE" || b.kind === "WEAK_DESIGN",
+        )
+        .slice(0, 1)
+        .map((b) => ({
+          opportunity: o,
+          kind: b.kind as FitnessGapKind,
+          claim: blocked.label,
+          detail: b.message,
+        }));
+    })
+    .slice(0, 8);
+
+  // GENERALIZATION GAPS — a level is observed, but only in a case or a sample.
+  const generalizationGaps: GeneralizationGap[] = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .flatMap(({ opportunity: o, insights }) => {
+      const f = insights.frontier;
+      if (!f || f.frontier === "NONE") return [];
+      const rung = f.rungs.find((r) => r.rung === f.frontier);
+      const gen = rung?.summary?.generalization ?? null;
+      if (gen !== "CASE_ONLY" && gen !== "SAMPLE_SUPPORTED" && gen !== "BROADER_HYPOTHESIS")
+        return [];
+      return [
+        {
+          opportunity: o,
+          level: f.frontierLabel,
+          generalization: gen,
+          scope: f.frontierScope.text,
+          detail: rung?.summary?.generalizationGap ?? "",
+          question: rung?.summary?.nextGeneralizationQuestion ?? null,
+        },
+      ];
+    })
+    .slice(0, 8);
 
   const candidate =
     enriched.find(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE") ?? null;
@@ -72,6 +207,66 @@ export async function getDashboardData(userId: string) {
           workspaceId: candidate.opportunity.workspaceId,
         }
       : null;
+  const nextValueAction: (ValueAction & { frontier: string | null }) | null =
+    candidate && candidate.insights.primaryValueAction
+      ? {
+          ...candidate.insights.primaryValueAction,
+          frontier: candidate.opportunity.proofFrontierRung,
+        }
+      : null;
+
+  // RECENT LEARNING — the latest knowledge changes across the user's opportunities.
+  const recentLearning = (
+    await prisma.knowledgeChange.findMany({
+      where: { opportunity: { workspace: { userId } } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      include: {
+        opportunity: { select: { id: true, title: true, workspaceId: true } },
+        experiment: { select: { title: true } },
+        evidence: { select: { sourceTitle: true } },
+      },
+    })
+  ).map((c) => ({
+    ...c,
+    movement: frontierMovement(
+      (c.previousFrontier ?? "NONE") as FrontierPosition,
+      (c.newFrontier ?? "NONE") as FrontierPosition,
+    ),
+  }));
+
+  // OPPORTUNITIES WITH STALLED LEARNING — live opportunities with untested critical
+  // assumptions and no completed experiment in the last STALLED_AFTER_DAYS days.
+  const cutoff = Date.now() - STALLED_AFTER_DAYS * 86_400_000;
+  const stalled = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .map(({ opportunity: o }) => {
+      const lastCompleted = o.experiments
+        .filter((e) => e.status === "COMPLETED" && e.completedAt)
+        .map((e) => e.completedAt!.getTime())
+        .sort((a, b) => b - a)[0];
+      const untestedCritical = o.assumptions.filter(
+        (a) => a.status === "UNKNOWN" && a.importance >= 8,
+      ).length;
+      const daysSince = lastCompleted
+        ? Math.floor((Date.now() - lastCompleted) / 86_400_000)
+        : null;
+      return {
+        opportunity: o,
+        untestedCritical,
+        daysSince,
+        planned: o.experiments.filter((e) => e.status === "PLANNED" || e.status === "RUNNING")
+          .length,
+      };
+    })
+    .filter(
+      (x) =>
+        x.untestedCritical > 0 &&
+        (x.daysSince === null
+          ? x.opportunity.createdAt.getTime() < cutoff
+          : x.daysSince > STALLED_AFTER_DAYS),
+    )
+    .slice(0, 6);
 
   const evidenceCount = workspaces.reduce((s, w) => s + w._count.evidence, 0);
 
@@ -81,13 +276,18 @@ export async function getDashboardData(userId: string) {
     strongest: enriched.slice(0, 5),
     byVerdict,
     evidenceGaps,
+    fitnessGaps,
+    generalizationGaps,
     weakestAssumptions,
     nextAction,
+    nextValueAction,
+    recentLearning,
+    stalled,
     totals: {
       workspaces: workspaces.filter((w) => w.status === "ACTIVE").length,
       opportunities: opportunities.length,
       evidence: evidenceCount,
-      untestedAssumptions: weakestAssumptions.length,
+      untestedAssumptions: untestedAssumptions.length,
     },
   };
 }

@@ -4,11 +4,13 @@
  */
 import { z } from "zod";
 import { wrapUntrusted } from "@/lib/sanitize";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
 import {
   ANALYST_SYSTEM_PROMPT,
   EXTRACTION_INSTRUCTIONS,
-  INTERVIEW_GUIDE_PROMPT,
+  interviewGuideSystemPrompt,
   RESEARCH_SUMMARY_PROMPT,
+  languageInstruction,
 } from "@/prompts/system";
 import {
   DiscoveryExtractionSchema,
@@ -39,6 +41,8 @@ export interface InterviewGuideRequest {
   pain: string;
   trigger: string | null;
   alternatives: string[];
+  /** Language the guide must be written in (default English). */
+  locale?: Locale;
 }
 
 export abstract class BaseAIProvider implements AIProvider {
@@ -152,6 +156,7 @@ export abstract class BaseAIProvider implements AIProvider {
     sourceTitle: string,
     excerpt: string,
     hypothesis: string,
+    locale: Locale = DEFAULT_LOCALE,
   ): Promise<EvidenceSummary> {
     const content = [
       `Hypothesis under evaluation: ${hypothesis}`,
@@ -159,7 +164,7 @@ export abstract class BaseAIProvider implements AIProvider {
       wrapUntrusted(sourceTitle, excerpt),
     ].join("\n");
     return this.structuredOutput({
-      system: RESEARCH_SUMMARY_PROMPT,
+      system: [RESEARCH_SUMMARY_PROMPT, "", languageInstruction(locale)].join("\n"),
       messages: [{ role: "user", content }],
       schema: EvidenceSummarySchema,
       schemaName: "evidence_summary",
@@ -176,7 +181,7 @@ export abstract class BaseAIProvider implements AIProvider {
       `Current alternatives: ${req.alternatives.length ? req.alternatives.join(", ") : "UNKNOWN"}`,
     ].join("\n");
     return this.structuredOutput({
-      system: INTERVIEW_GUIDE_PROMPT,
+      system: interviewGuideSystemPrompt(req.locale ?? DEFAULT_LOCALE),
       messages: [{ role: "user", content }],
       schema: InterviewGuideSchema,
       schemaName: "interview_guide",

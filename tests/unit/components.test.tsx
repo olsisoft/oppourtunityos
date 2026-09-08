@@ -16,14 +16,14 @@ describe("KillCriteria", () => {
           {
             code: "NO_TRIGGER",
             severity: "warning",
-            message: "No trigger.",
-            suggestion: "Ask when it becomes urgent.",
+            message: { key: "test.kill.noTrigger", text: "No trigger." },
+            suggestion: { key: "test.kill.noTrigger.fix", text: "Ask when it becomes urgent." },
           },
           {
             code: "LOW_WTP",
             severity: "critical",
-            message: "WTP is low.",
-            suggestion: "Look for existing spend.",
+            message: { key: "test.kill.lowWtp", text: "WTP is low." },
+            suggestion: { key: "test.kill.lowWtp.fix", text: "Look for existing spend." },
           },
         ]}
       />,

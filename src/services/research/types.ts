@@ -1,4 +1,5 @@
 import type { EvidenceType } from "@/generated/prisma/enums";
+import type { Locale } from "@/i18n/locales";
 
 /**
  * Research abstraction. V1 ships a manual capture path and a clearly labelled
@@ -25,6 +26,8 @@ export interface ResearchQuery {
   /** Free-text hypothesis used to frame relevance. */
   hypothesis?: string;
   limit?: number;
+  /** Language of the user; providers that write text (the mock) follow it. */
+  locale?: Locale;
 }
 
 export interface ResearchProvider {

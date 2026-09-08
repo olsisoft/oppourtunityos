@@ -10,7 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EntryMode } from "@/generated/prisma/enums";
-import { cn, relativeTime } from "@/lib/utils";
+import { useLocale, useT } from "@/i18n/client";
+import { formatRelative } from "@/i18n/format";
+import { cn } from "@/lib/utils";
 
 export interface SidebarWorkspace {
   id: string;
@@ -23,6 +25,8 @@ export interface SidebarWorkspace {
 }
 
 export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
+  const t = useT();
+  const locale = useLocale();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const recent = [...workspaces].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5);
@@ -31,22 +35,22 @@ export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
     <aside className="bg-sidebar hidden w-60 shrink-0 flex-col border-r md:flex">
       <div className="p-3">
         <Button className="w-full justify-start" size="sm" onClick={() => setOpen(true)}>
-          <Plus /> New discovery
+          <Plus /> {t("layout.nav.newDiscovery")}
         </Button>
       </div>
       <nav className="px-3">
         <NavLink href="/app" active={pathname === "/app"} icon={<LayoutDashboard />}>
-          Dashboard
+          {t("layout.nav.dashboard")}
         </NavLink>
       </nav>
       <ScrollArea className="min-h-0 flex-1 px-3 py-3">
         <p className="text-muted-foreground px-2 pb-2 text-[11px] font-medium tracking-wider uppercase">
-          Workspaces
+          {t("layout.nav.workspaces")}
         </p>
         <ul className="space-y-0.5">
           {workspaces.length === 0 && (
             <li className="text-muted-foreground px-2 py-2 text-xs">
-              No workspaces yet. Start a new discovery.
+              {t("layout.nav.noWorkspaces")}
             </li>
           )}
           {workspaces.map((w) => {
@@ -65,7 +69,7 @@ export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                   <span className="truncate">{w.name}</span>
                   {w.isDemo && (
                     <Badge variant="muted" className="px-1.5 py-0 text-[10px]">
-                      Demo
+                      {t("layout.demoBadge")}
                     </Badge>
                   )}
                 </Link>
@@ -76,7 +80,7 @@ export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
         {recent.length > 0 && (
           <>
             <p className="text-muted-foreground px-2 pt-5 pb-2 text-[11px] font-medium tracking-wider uppercase">
-              Recent discoveries
+              {t("layout.nav.recent")}
             </p>
             <ul className="space-y-0.5">
               {recent.map((w) => (
@@ -86,7 +90,9 @@ export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
                     className="text-muted-foreground hover:text-foreground flex items-center justify-between rounded-md px-2 py-1 text-xs"
                   >
                     <span className="truncate">{w.name}</span>
-                    <span className="shrink-0 tabular-nums">{relativeTime(w.updatedAt)}</span>
+                    <span className="shrink-0 tabular-nums">
+                      {formatRelative(w.updatedAt, locale)}
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -96,7 +102,7 @@ export function Sidebar({ workspaces }: { workspaces: SidebarWorkspace[] }) {
       </ScrollArea>
       <div className="border-t p-3">
         <NavLink href="/app/settings" active={pathname === "/app/settings"} icon={<Settings />}>
-          Settings
+          {t("layout.nav.settings")}
         </NavLink>
       </div>
       <NewWorkspaceDialog open={open} onOpenChange={setOpen} />

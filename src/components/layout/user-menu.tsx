@@ -14,8 +14,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useT } from "@/i18n/client";
 
 export function UserMenu({ user }: { user: { name: string | null; email: string | null } }) {
+  const t = useT();
   const initials = (user.name ?? user.email ?? "?")
     .split(/[\s@.]+/)
     .filter(Boolean)
@@ -25,7 +27,12 @@ export function UserMenu({ user }: { user: { name: string | null; email: string 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-2 px-2" aria-label="User menu">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2 px-2"
+          aria-label={t("layout.userMenu.label")}
+        >
           <Avatar className="size-6">
             <AvatarFallback>{initials || "U"}</AvatarFallback>
           </Avatar>
@@ -34,18 +41,18 @@ export function UserMenu({ user }: { user: { name: string | null; email: string 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="font-normal">
-          <p className="text-sm font-medium">{user.name ?? "Account"}</p>
+          <p className="text-sm font-medium">{user.name ?? t("layout.userMenu.account")}</p>
           <p className="text-muted-foreground truncate text-xs">{user.email}</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/app/settings">
-            <Settings /> Settings
+            <Settings /> {t("layout.userMenu.settings")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => logoutAction()}>
-          <LogOut /> Sign out
+          <LogOut /> {t("layout.userMenu.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

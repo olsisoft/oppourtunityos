@@ -4,33 +4,67 @@
  */
 import {
   AlternativeCategory,
+  AssumptionKind,
   AssumptionStatus,
+  ClaimType,
   Confidence,
+  Criticality,
+  EpistemicStatus,
+  ExperimentOutcome,
+  ExperimentStatus,
+  ExperimentType,
+  KnowledgeTrigger,
+  OutcomeSource,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
+  EvidenceAdmissibility,
   EvidenceOrigin,
   EvidenceSentiment,
+  EvidenceSourceType,
   EvidenceType,
+  ExperimentDesignLevel,
+  GeneralizationStatus,
+  InternalValidity,
+  AssignmentMethod,
   MechanismCategory,
   Provenance,
+  ValueChainLevel,
   VariableCategory,
+  VariablePolarity,
   Verdict,
 } from "@/generated/prisma/enums";
 
 export {
   AlternativeCategory,
+  AssumptionKind,
   AssumptionStatus,
+  ClaimType,
   Confidence,
+  Criticality,
+  EpistemicStatus,
+  ExperimentOutcome,
+  ExperimentStatus,
+  ExperimentType,
+  KnowledgeTrigger,
+  OutcomeSource,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
+  EvidenceAdmissibility,
   EvidenceOrigin,
   EvidenceSentiment,
+  EvidenceSourceType,
   EvidenceType,
+  ExperimentDesignLevel,
+  GeneralizationStatus,
+  InternalValidity,
+  AssignmentMethod,
   MechanismCategory,
   Provenance,
+  ValueChainLevel,
   VariableCategory,
+  VariablePolarity,
   Verdict,
 };
 
@@ -46,7 +80,9 @@ export const STAGE_ORDER: DiscoveryStage[] = [
   DiscoveryStage.EVIDENCE_DISCOVERY,
   DiscoveryStage.MECHANISM_DISCOVERY,
   DiscoveryStage.OPPORTUNITY_FORMATION,
+  DiscoveryStage.VALUE_CAUSALITY,
   DiscoveryStage.SCORING,
+  DiscoveryStage.EXPERIMENT_DESIGN,
   DiscoveryStage.RECOMMENDATION,
 ];
 
@@ -62,7 +98,9 @@ export const STAGE_LABELS: Record<DiscoveryStage, string> = {
   EVIDENCE_DISCOVERY: "Evidence",
   MECHANISM_DISCOVERY: "Mechanisms",
   OPPORTUNITY_FORMATION: "Opportunity",
+  VALUE_CAUSALITY: "Value chain",
   SCORING: "Scoring",
+  EXPERIMENT_DESIGN: "Experiment",
   RECOMMENDATION: "Decision",
 };
 
@@ -131,6 +169,7 @@ export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   CUSTOMER_QUOTE: "Customer quote",
   MARKET_REPORT: "Market report",
   MANUAL_NOTE: "Manual note",
+  EXPERIMENT: "Experiment result",
   OTHER: "Other",
 };
 
@@ -139,6 +178,7 @@ export const EVIDENCE_ORIGIN_LABELS: Record<EvidenceOrigin, string> = {
   INTERVIEW: "Interview notes",
   RESEARCH_PROVIDER: "Research provider",
   DEMO: "Demo data",
+  EXPERIMENT_RESULT: "Experiment result",
 };
 
 export const SENTIMENT_LABELS: Record<EvidenceSentiment, string> = {
@@ -163,6 +203,13 @@ export const VARIABLE_CATEGORY_LABELS: Record<VariableCategory, string> = {
   DOWNTIME: "Downtime",
   INVENTORY: "Inventory",
   MARGIN: "Margin",
+  CASH: "Cash",
+  COMPLEXITY: "Complexity",
+  RELIABILITY: "Reliability",
+  PERFORMANCE: "Performance",
+  VISIBILITY: "Visibility",
+  PREDICTABILITY: "Predictability",
+  UTILIZATION: "Utilization",
   OTHER: "Other",
 };
 
@@ -176,6 +223,241 @@ export const DIRECTION_LABELS: Record<DesiredDirection, string> = {
   AUTOMATE: "Automate",
   OPTIMIZE: "Optimize",
   DETECT: "Detect",
+  PROTECT: "Protect",
+  RECOVER: "Recover",
+  STABILIZE: "Stabilize",
+  MAINTAIN: "Maintain",
+  EXPAND: "Expand",
+  RELEASE: "Release",
+  MEASURE: "Measure",
+  TRACE: "Trace",
+};
+
+export const EPISTEMIC_LABELS: Record<EpistemicStatus, string> = {
+  UNKNOWN: "UNKNOWN",
+  HYPOTHESIS: "HYPOTHESIS",
+  UNPROVEN: "UNPROVEN",
+  SUPPORTED: "SUPPORTED",
+  STRONGLY_SUPPORTED: "STRONGLY SUPPORTED",
+  OBSERVED: "OBSERVED",
+  MIXED: "MIXED",
+  CONTRADICTED: "CONTRADICTED",
+};
+
+export const EPISTEMIC_DESCRIPTIONS: Record<EpistemicStatus, string> = {
+  UNKNOWN: "Not stated.",
+  HYPOTHESIS: "Proposed by the analyst; no admissible evidence linked.",
+  UNPROVEN: "Stated but not yet supported by sufficient, fitting evidence.",
+  SUPPORTED: "Fitting evidence reaches the supported threshold (≥ 40).",
+  STRONGLY_SUPPORTED:
+    "Fitting evidence from at least two independent origins reaches the strong threshold (≥ 75). Not measured directly.",
+  OBSERVED:
+    "Directly measured or observed by high-fit evidence (records, behaviour, experiment) — within a defined scope only.",
+  MIXED:
+    "High-fit evidence both supports and contradicts the claim. The contradiction blocks advancement until resolved.",
+  CONTRADICTED:
+    "Contradicting evidence outweighs supporting evidence, or a critical assumption is contradicted.",
+};
+
+export const EPISTEMIC_TONE: Record<
+  EpistemicStatus,
+  "positive" | "info" | "warning" | "negative" | "muted" | "outline"
+> = {
+  UNKNOWN: "muted",
+  HYPOTHESIS: "warning",
+  UNPROVEN: "outline",
+  SUPPORTED: "info",
+  STRONGLY_SUPPORTED: "positive",
+  OBSERVED: "positive",
+  MIXED: "warning",
+  CONTRADICTED: "negative",
+};
+
+export const VALUE_CHAIN_LEVEL_LABELS: Record<ValueChainLevel, string> = {
+  MECHANISM: "Mechanism",
+  CAPABILITY: "Capability",
+  TRANSFORMATION: "Transformation",
+  OPERATIONAL_VALUE: "Operational value",
+  ECONOMIC_VALUE: "Economic value",
+  STRATEGIC_OUTCOME: "Strategic outcome",
+  BUSINESS_OUTCOME: "Business outcome",
+};
+
+export const VALUE_CHAIN_LEVEL_HELP: Record<ValueChainLevel, string> = {
+  MECHANISM: "What the product does or contains.",
+  CAPABILITY: "What the customer can do that they could not do before.",
+  TRANSFORMATION: "What changes in the operation because of that capability.",
+  OPERATIONAL_VALUE: "The operational result of that change.",
+  ECONOMIC_VALUE: "The financial consequence.",
+  STRATEGIC_OUTCOME: "The company-level consequence.",
+  BUSINESS_OUTCOME: "Downstream business outcome (optional; hardest to attribute).",
+};
+
+export const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+  MARKET_EXISTS: "Market exists",
+  ICP_EXISTS: "ICP exists",
+  ICP_ACCESSIBLE: "ICP accessible",
+  PAIN_EXISTS: "Pain exists",
+  PAIN_SEVERITY: "Pain severity",
+  PAIN_FREQUENCY: "Pain frequency",
+  CURRENT_STATE: "Current state",
+  TRIGGER_EXISTS: "Trigger exists",
+  ALTERNATIVE_EXISTS: "Alternative exists",
+  VARIABLE_IMPORTANCE: "Variable importance",
+  MAGNITUDE: "Magnitude",
+  POPULATION_AFFECTED: "Population affected",
+  ECONOMIC_IMPACT: "Economic impact",
+  OPERATIONAL_VALUE: "Operational value",
+  ECONOMIC_VALUE: "Economic value",
+  STRATEGIC_OUTCOME: "Strategic outcome",
+  BUSINESS_OUTCOME: "Business outcome",
+  MECHANISM_FEASIBLE: "Mechanism feasible",
+  CAPABILITY_EXISTS: "Capability exists",
+  TRANSFORMATION_OCCURS: "Transformation occurs",
+  MECHANISM_CAUSES_CAPABILITY: "Mechanism → capability",
+  CAPABILITY_CAUSES_TRANSFORMATION: "Capability → transformation",
+  TRANSFORMATION_CAUSES_OPERATIONAL_VALUE: "Transformation → operational value",
+  OPERATIONAL_VALUE_CAUSES_ECONOMIC_VALUE: "Operational value → economic value",
+  ECONOMIC_VALUE_CAUSES_STRATEGIC_OUTCOME: "Economic value → strategic outcome",
+  STRATEGIC_OUTCOME_CAUSES_BUSINESS_OUTCOME: "Strategic outcome → business outcome",
+  CAUSAL_EFFECT: "Causal effect",
+  EXISTING_SPEND: "Existing spend",
+  PURCHASE_INTENT: "Purchase intent",
+  WILLINGNESS_TO_PAY: "Stated willingness to pay",
+  PRICE_ACCEPTANCE: "Price acceptance",
+  ACTUAL_PURCHASE: "Actual purchase",
+  RETENTION_INTENT: "Retention intent",
+  ACTUAL_RETENTION: "Actual retention",
+  BUYER_REACHABILITY: "Buyer reachability",
+  CHANNEL_ACCESS: "Channel access",
+  PROCUREMENT_FEASIBILITY: "Procurement feasibility",
+  OTHER: "Other claim",
+};
+
+export const EVIDENCE_SOURCE_TYPE_LABELS: Record<EvidenceSourceType, string> = {
+  INTERVIEW: "Interview",
+  SURVEY: "Survey",
+  CUSTOMER_QUOTE: "Customer quote",
+  FORUM_POST: "Forum post",
+  REDDIT_POST: "Reddit post",
+  SALES_CONVERSATION: "Sales conversation",
+  OBSERVED_WORKFLOW: "Observed workflow",
+  PRODUCT_USAGE: "Product usage data",
+  CLICKSTREAM: "Clickstream",
+  PURCHASE_BEHAVIOR: "Purchase behaviour",
+  CRM_DATA: "CRM data",
+  TRANSACTION_RECORDS: "Transaction records",
+  FINANCIAL_RECORDS: "Financial records",
+  SYSTEM_LOGS: "System logs",
+  BOOKING_DATA: "Booking data",
+  POS_DATA: "POS data",
+  ERP_DATA: "ERP data",
+  SUPPORT_TICKETS: "Support tickets",
+  TIME_TRACKING_DATA: "Time-tracking data",
+  COMPETITOR_REVIEW: "Competitor review",
+  PRICING_PAGE: "Pricing page",
+  JOB_POSTING: "Job posting",
+  PUBLIC_FINANCIALS: "Public financials",
+  INDUSTRY_REPORT: "Industry report",
+  GOVERNMENT_DATA: "Government data",
+  MARKET_DATASET: "Market dataset",
+  PROTOTYPE_TEST: "Prototype test",
+  CONCIERGE_TEST: "Concierge test",
+  BEFORE_AFTER_TEST: "Before / after test",
+  MATCHED_COMPARISON: "Matched comparison",
+  CONTROLLED_EXPERIMENT: "Controlled experiment",
+  AB_TEST: "A/B test",
+  RANDOMIZED_EXPERIMENT: "Randomized experiment",
+  PRICING_EXPERIMENT: "Pricing experiment",
+  LANDING_PAGE_EXPERIMENT: "Landing page experiment",
+  TECHNICAL_SPIKE: "Technical spike",
+  BENCHMARK: "Benchmark",
+  DATA_FEASIBILITY_STUDY: "Data feasibility study",
+  INTEGRATION_TEST: "Integration test",
+  LOAD_TEST: "Load test",
+  SIGNED_LOI: "Signed letter of intent",
+  PAID_PILOT: "Paid pilot",
+  CONTRACT: "Contract",
+  INVOICE: "Invoice",
+  SUBSCRIPTION_PURCHASE: "Subscription purchase",
+  RENEWAL: "Renewal",
+  EXPANSION: "Expansion",
+  OTHER: "Other / unknown provenance",
+};
+
+export const ASSUMPTION_KIND_LABELS: Record<AssumptionKind, string> = {
+  GENERIC: "Assumption",
+  CAUSAL: "Causal assumption",
+  VALUE: "Value assumption",
+  FEASIBILITY: "Feasibility assumption",
+  WTP: "WTP assumption",
+  ACCESS: "Access assumption",
+};
+
+export const CRITICALITY_LABELS: Record<Criticality, string> = {
+  CRITICAL: "Critical",
+  IMPORTANT: "Important",
+  MINOR: "Minor",
+};
+
+export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
+  PLANNED: "Planned",
+  RUNNING: "Running",
+  COMPLETED: "Completed",
+  ABANDONED: "Cancelled",
+  CANCELLED: "Cancelled",
+  INVALID: "Invalid",
+};
+
+export const EXPERIMENT_TYPE_LABELS: Record<ExperimentType, string> = {
+  CUSTOMER_INTERVIEW: "Customer interview",
+  PRICING_TEST: "Pricing test",
+  LANDING_PAGE_TEST: "Landing page test",
+  CONCIERGE_TEST: "Concierge test",
+  PROTOTYPE_TEST: "Prototype test",
+  DATA_FEASIBILITY_TEST: "Data feasibility test",
+  AB_TEST: "A/B test",
+  MANUAL_WORKFLOW_TEST: "Manual workflow test",
+  COHORT_OBSERVATION: "Cohort observation",
+  TECHNICAL_SPIKE: "Technical spike",
+  RETROSPECTIVE_DATA_ANALYSIS: "Retrospective data analysis",
+  OTHER: "Other",
+};
+
+export const EXPERIMENT_OUTCOME_LABELS: Record<ExperimentOutcome, string> = {
+  SUPPORTED: "Supported",
+  CONTRADICTED: "Contradicted",
+  INCONCLUSIVE: "Inconclusive",
+  INVALID: "Invalid",
+};
+
+export const EXPERIMENT_OUTCOME_TONE: Record<
+  ExperimentOutcome,
+  "positive" | "negative" | "muted" | "warning"
+> = {
+  SUPPORTED: "positive",
+  CONTRADICTED: "negative",
+  INCONCLUSIVE: "muted",
+  INVALID: "warning",
+};
+
+export const OUTCOME_SOURCE_LABELS: Record<OutcomeSource, string> = {
+  THRESHOLD: "decided by the configured thresholds",
+  USER: "classified by you (no deterministic threshold)",
+};
+
+export const KNOWLEDGE_TRIGGER_LABELS: Record<KnowledgeTrigger, string> = {
+  EXPERIMENT_RESULT: "Experiment result",
+  EVIDENCE_ADDED: "Evidence added",
+  EVIDENCE_LINKED: "Evidence linked to a claim",
+  ASSUMPTION_UPDATED: "Assumption updated",
+  RECOMPUTE: "Recompute",
+};
+
+export const VARIABLE_POLARITY_LABELS: Record<VariablePolarity, string> = {
+  POSITIVE: "More is better",
+  NEGATIVE: "Less is better",
+  NEUTRAL: "Context-dependent",
 };
 
 export const ALTERNATIVE_CATEGORY_LABELS: Record<AlternativeCategory, string> = {

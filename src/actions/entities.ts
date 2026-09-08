@@ -11,6 +11,7 @@ import {
   updatePainSchema,
   updateVariableSchema,
 } from "@/domain/schemas";
+import { getT } from "@/i18n/server";
 import { requireUserId } from "@/lib/session";
 import {
   recomputeOpportunitiesForPain,
@@ -44,12 +45,14 @@ async function workspaceIdForPain(painId: string) {
 
 export async function updateIcpAction(input: unknown): Promise<ActionResult> {
   const parsed = updateIcpSchema.safeParse(input);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the fields.",
+      error: t("validation.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
+  }
   const { icpId, ...data } = parsed.data;
   return safeAction("icp.update", async () => {
     const userId = await requireUserId();
@@ -64,12 +67,14 @@ export async function updateIcpAction(input: unknown): Promise<ActionResult> {
 
 export async function updateVariableAction(input: unknown): Promise<ActionResult> {
   const parsed = updateVariableSchema.safeParse(input);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the fields.",
+      error: t("validation.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
+  }
   const { variableId, ...data } = parsed.data;
   return safeAction("variable.update", async () => {
     const userId = await requireUserId();
@@ -86,12 +91,14 @@ export async function updateVariableAction(input: unknown): Promise<ActionResult
 
 export async function updatePainAction(input: unknown): Promise<ActionResult> {
   const parsed = updatePainSchema.safeParse(input);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the fields.",
+      error: t("validation.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
+  }
   const { painId, ...data } = parsed.data;
   return safeAction("pain.update", async () => {
     const userId = await requireUserId();
@@ -108,12 +115,14 @@ export async function createAlternativeAction(
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   const parsed = createAlternativeSchema.safeParse(input);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the fields.",
+      error: t("validation.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
+  }
   const d = parsed.data;
   return safeAction("alternative.create", async () => {
     const userId = await requireUserId();
@@ -139,12 +148,14 @@ export async function createAlternativeAction(
 
 export async function createMechanismAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = createMechanismSchema.safeParse(input);
-  if (!parsed.success)
+  if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the fields.",
+      error: t("validation.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
+  }
   const d = parsed.data;
   return safeAction("mechanism.create", async () => {
     const userId = await requireUserId();

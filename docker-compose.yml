@@ -1,0 +1,25 @@
+# Local development database. The app itself runs with `npm run dev`.
+#   docker compose up -d
+#   cp .env.example .env   (DATABASE_URL below matches the default)
+#   npm install && npm run db:migrate && npm run db:seed && npm run dev
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opportunityos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: opportunityos
+    ports:
+      - "5432:5432"
+    volumes:
+      - opportunityos-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d opportunityos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  opportunityos-pgdata:

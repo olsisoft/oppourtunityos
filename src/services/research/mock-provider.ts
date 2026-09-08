@@ -1,8 +1,12 @@
 /**
  * Mocked research provider. Returns deterministic, obviously synthetic results
  * so the research → evidence flow can be exercised without web access.
- * Every result is flagged `isMocked: true` and titled "[MOCK]".
+ * Every result is flagged `isMocked: true` and titled "[MOCK]" (French:
+ * « [SIMULÉ] »); the texts live under "mock.research" in the dictionaries and
+ * follow `query.locale`.
  */
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
+import { renderKey } from "@/i18n/messages";
 import type { ResearchProvider, ResearchQuery, ResearchResult } from "./types";
 
 function hash(input: string): number {
@@ -19,24 +23,27 @@ export class MockResearchProvider implements ResearchProvider {
   readonly isMocked = true;
 
   async search(query: ResearchQuery): Promise<ResearchResult[]> {
-    const topic = query.query.trim() || "the problem";
+    const locale: Locale = query.locale ?? DEFAULT_LOCALE;
+    const text = (kind: string, field: "title" | "excerpt", topic: string) =>
+      renderKey(locale, `mock.research.${kind}.${field}`, { topic });
+    const topic = query.query.trim() || renderKey(locale, "mock.fallback.problem");
     const seed = hash(topic);
     const limit = Math.min(query.limit ?? 4, 6);
     const templates: Array<Omit<ResearchResult, "id" | "providerName" | "isMocked">> = [
       {
         type: "FORUM_POST",
-        title: `[MOCK] Forum thread: "How do you deal with ${topic}?"`,
+        title: text("forum", "title", topic),
         url: null,
-        excerpt: `[MOCK DATA] Synthetic forum post. An owner describes struggling with ${topic} and tracking it in a spreadsheet. Replace with a real source before trusting it.`,
+        excerpt: text("forum", "excerpt", topic),
         author: "mock-user-1",
         publishedAt: new Date(Date.now() - (seed % 200) * 86_400_000).toISOString().slice(0, 10),
         relevanceHint: 5,
       },
       {
         type: "COMPETITOR_REVIEW",
-        title: `[MOCK] Competitor review mentioning ${topic}`,
+        title: text("review", "title", topic),
         url: null,
-        excerpt: `[MOCK DATA] Synthetic review: "The tool helps a bit with ${topic} but we still lose money every month." No real product is referenced.`,
+        excerpt: text("review", "excerpt", topic),
         author: "mock-reviewer",
         publishedAt: new Date(Date.now() - ((seed >> 3) % 300) * 86_400_000)
           .toISOString()
@@ -45,9 +52,9 @@ export class MockResearchProvider implements ResearchProvider {
       },
       {
         type: "JOB_POSTING",
-        title: `[MOCK] Job posting: coordinator responsible for ${topic}`,
+        title: text("job", "title", topic),
         url: null,
-        excerpt: `[MOCK DATA] Synthetic posting for a role whose duties include handling ${topic}. Signals a workaround via labour, if real.`,
+        excerpt: text("job", "excerpt", topic),
         author: null,
         publishedAt: new Date(Date.now() - ((seed >> 5) % 90) * 86_400_000)
           .toISOString()
@@ -56,9 +63,9 @@ export class MockResearchProvider implements ResearchProvider {
       },
       {
         type: "REDDIT",
-        title: `[MOCK] Reddit comment contradicting the hypothesis about ${topic}`,
+        title: text("reddit", "title", topic),
         url: null,
-        excerpt: `[MOCK DATA] Synthetic comment: "Honestly ${topic} is not a big deal for us, the reminders we already send are fine." Contradictory signal example.`,
+        excerpt: text("reddit", "excerpt", topic),
         author: "mock-redditor",
         publishedAt: new Date(Date.now() - ((seed >> 7) % 400) * 86_400_000)
           .toISOString()
@@ -67,9 +74,9 @@ export class MockResearchProvider implements ResearchProvider {
       },
       {
         type: "MARKET_REPORT",
-        title: `[MOCK] Industry note on ${topic}`,
+        title: text("report", "title", topic),
         url: null,
-        excerpt: `[MOCK DATA] Synthetic market note. Contains no real statistics on purpose. Use it only to test the evidence workflow.`,
+        excerpt: text("report", "excerpt", topic),
         author: null,
         publishedAt: null,
         relevanceHint: 3,

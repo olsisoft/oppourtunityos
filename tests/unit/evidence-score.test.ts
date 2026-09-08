@@ -23,7 +23,7 @@ describe("computeEvidenceScore", () => {
   it("returns 0 with an explicit explanation when there is no evidence", () => {
     const r = computeEvidenceScore([], NOW);
     expect(r.score).toBe(0);
-    expect(r.explanation[0]).toMatch(/No evidence captured/);
+    expect(r.explanation[0].text).toMatch(/No evidence captured/);
     expect(r.gaps.length).toBeGreaterThan(0);
   });
 

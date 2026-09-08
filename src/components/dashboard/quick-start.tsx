@@ -5,8 +5,10 @@ import { Compass, Lightbulb } from "lucide-react";
 
 import { NewWorkspaceDialog } from "@/components/layout/new-workspace-dialog";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n/client";
 
 export function QuickStart({ intent }: { intent?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(Boolean(intent));
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -17,9 +19,9 @@ export function QuickStart({ intent }: { intent?: string }) {
       >
         <Compass className="size-5" />
         <span>
-          <span className="block font-medium">I don&apos;t know what to build</span>
+          <span className="block font-medium">{t("dashboard.quickStart.discoverTitle")}</span>
           <span className="text-muted-foreground block text-xs font-normal">
-            Start from your context and discover a market
+            {t("dashboard.quickStart.discoverBody")}
           </span>
         </span>
       </Button>
@@ -30,9 +32,9 @@ export function QuickStart({ intent }: { intent?: string }) {
       >
         <Lightbulb className="size-5" />
         <span>
-          <span className="block font-medium">I already have an idea</span>
+          <span className="block font-medium">{t("dashboard.quickStart.validateTitle")}</span>
           <span className="text-muted-foreground block text-xs font-normal">
-            Reverse-engineer it into ICP, variable, pain and evidence
+            {t("dashboard.quickStart.validateBody")}
           </span>
         </span>
       </Button>
