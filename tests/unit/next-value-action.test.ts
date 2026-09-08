@@ -73,10 +73,10 @@ describe("computeValueActions", () => {
     ];
     const [first] = computeValueActions(input);
     expect(first.type).toBe("COLLAPSE_ASSUMPTION");
-    expect(first.what).toMatch(/adaptive reminders/);
-    expect(first.ifFalse).toMatch(/collapses/);
-    expect(first.evidenceToMove).toMatch(/controlled comparison/);
-    expect(first.experiment).toMatch(/pilot/);
+    expect(first.what.text).toMatch(/adaptive reminders/);
+    expect(first.ifFalse.text).toMatch(/collapses/);
+    expect(first.evidenceToMove.text).toMatch(/controlled comparison/);
+    expect(first.experiment?.text).toMatch(/pilot/);
   });
 
   it("otherwise targets the causal link blocking the Proof Frontier", () => {
@@ -191,16 +191,18 @@ describe("computeValueActions", () => {
     );
     const [first] = computeValueActions(input);
     expect(first.type).toBe("CAUSAL_LINK");
-    expect(first.what).toMatch(/Test the causal link/);
-    expect(first.affects).toBe("Mechanism → Capability");
+    expect(first.what.text).toMatch(/Test the causal link/);
+    expect(first.affects.text).toBe("Mechanism → Capability");
     expect(first.causalLinkId).toBe("l1");
   });
 
   it("asks for economic magnitude when the dimension is UNKNOWN and never estimates it", () => {
     const actions = computeValueActions(baseInput());
     const magnitude = actions.find((a) => a.type === "ECONOMIC_MAGNITUDE");
-    expect(magnitude?.why).toMatch(/UNKNOWN/);
-    expect(actions.some((a) => a.type === "SECONDARY" && /population/i.test(a.what))).toBe(true);
+    expect(magnitude?.why.text).toMatch(/UNKNOWN/);
+    expect(actions.some((a) => a.type === "SECONDARY" && /population/i.test(a.what.text))).toBe(
+      true,
+    );
   });
 });
 
@@ -232,7 +234,7 @@ describe("next best action — ordinal prioritization", () => {
       }),
       evidence: {
         components: [],
-        gaps: ["No direct customer evidence."],
+        gaps: [{ key: "test.gap", text: "No direct customer evidence." }],
         counts: { total: 0, supporting: 0, contradicting: 0, neutral: 0, direct: 0 },
       },
       assumptions: [
@@ -265,7 +267,7 @@ describe("next best action — ordinal prioritization", () => {
     });
     expect(actions[0].priority).toBe(1);
     expect(actions[0].priorityScore).toBeGreaterThan(actions[actions.length - 1].priorityScore);
-    expect(actions[0].whyNow).toMatch(/cheapest|tractable|independent assumption/);
+    expect(actions[0].whyNow.text).toMatch(/cheapest|tractable|independent assumption/);
     // the planned experiment supplies effort / time / cost, so nothing is assumed for it
     const wtp = actions.find((a) => a.assumptionId === "a1");
     expect(wtp?.scoring.assumed).toEqual([]);

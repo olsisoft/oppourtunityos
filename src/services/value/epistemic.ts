@@ -31,13 +31,14 @@ import {
   type EvidenceScoreResult,
   type EvidenceSignal,
 } from "@/services/scoring/evidence-score";
-import { claimGroup, CLAIM_STATEMENTS } from "./claim-taxonomy";
+import { msg, type SystemMessage } from "@/i18n/messages";
+import { claimGroup, claimStatement } from "./claim-taxonomy";
 import { fitBand, type EvidenceFit, type FitBand } from "./evidence-fit";
 import { IMPLIED_DESIGN_LEVEL, sourceTypeForLegacy } from "./evidence-sources";
 import { designIndex } from "./experimental-validity";
 import { assessGeneralization, type GeneralizationResult } from "./generalization";
 import { inferenceSentence } from "./language-gate";
-import { describeScope, type Scope } from "./scope";
+import { scopeMessage, type Scope } from "./scope";
 
 /**
  * Same thresholds as the verdict grid: TEST needs ≥ 75 evidence, INVESTIGATE
@@ -143,7 +144,8 @@ export interface ClaimFitness {
     originId: string;
     duplicate: boolean;
     measurement: boolean;
-    summary: string | null;
+    /** The fit summary of the item (evidence-fit), null for legacy inputs without fit. */
+    summary: EvidenceFit["summary"] | null;
   }>;
 }
 
@@ -163,12 +165,13 @@ export interface ClaimAssessment {
   /** A high-fit measurement supports the claim: it was observed, within a scope. */
   observed: boolean;
   observedScope: Scope | null;
-  observedScopeText: string | null;
+  /** Compact description of the observed scope (scopeMessage), null when none was observed. */
+  observedScopeText: SystemMessage | null;
   generalization: GeneralizationResult | null;
   /** Strongest design level among admissible supporting evidence (null without evidence). */
   designLevel: ExperimentDesignLevel | null;
-  /** Language-gated one-sentence inference. */
-  inference: string;
+  /** Language-gated one-sentence inference (empty text for a claim without a claim type). */
+  inference: SystemMessage;
 }
 
 export function directionToSentiment(direction: EvidenceLinkDirection): EvidenceSentiment {
@@ -260,7 +263,7 @@ export function assessClaim(params: AssessClaimParams): ClaimAssessment {
           score: confidence,
           explanation: [
             ...all.explanation,
-            `Low-fit evidence capped: ${all.score} → ${confidence} (evidence with low fit for this claim informs but cannot establish it).`,
+            msg("frontier.epistemic.lowFitCapped", { before: all.score, after: confidence }),
           ],
         };
 
@@ -338,7 +341,7 @@ export function assessClaim(params: AssessClaimParams): ClaimAssessment {
   }
 
   // Generalization and observed scope from the supporting observations.
-  const statement = claimType ? CLAIM_STATEMENTS[claimType] : "the claim holds";
+  const statement = claimStatement(claimType ?? "OTHER");
   const generalization =
     params.hasStatement && admissible.length > 0
       ? assessGeneralization(
@@ -354,7 +357,7 @@ export function assessClaim(params: AssessClaimParams): ClaimAssessment {
         )
       : null;
   const observedScope = generalization?.observedScope ?? null;
-  const observedScopeText = observedScope ? describeScope(observedScope) : null;
+  const observedScopeText = observedScope ? scopeMessage(observedScope) : null;
 
   const designLevel =
     admissible
@@ -368,16 +371,18 @@ export function assessClaim(params: AssessClaimParams): ClaimAssessment {
       .filter((d): d is ExperimentDesignLevel => d !== null && d !== undefined)
       .sort((a, b) => designIndex(b) - designIndex(a))[0] ?? (signals.length ? "ANECDOTAL" : null);
 
-  const inference = claimType
+  // The language gate takes the scope as English text for now; once
+  // `inferenceSentence` accepts a LocalizedText scope, pass observedScopeText itself.
+  const inference: SystemMessage = claimType
     ? inferenceSentence({
         claimType,
         status,
-        scopeText: observedScopeText,
+        scopeText: observedScopeText ?? null,
         generalization: generalization?.status ?? null,
         bestFitBand: fitness.bestBand,
         designLevel,
       })
-    : "";
+    : msg("frontier.inference.none");
 
   return {
     status,

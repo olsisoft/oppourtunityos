@@ -58,7 +58,7 @@ export const opportunityInclude = {
   assumptions: { include: { links: true } },
   evidence: true,
   valueChainNodes: {
-    orderBy: { causalDistance: "asc" as const },
+    orderBy: [{ causalDistance: "asc" as const }, { createdAt: "asc" as const }],
     include: {
       evidenceLinks: { include: { evidence: { select: evidenceSummarySelect } } },
       assumptions: { include: { links: true } },

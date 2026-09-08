@@ -13,7 +13,9 @@
  *   - no high-fit contradiction (MIXED) and no contradiction across contexts
  *
  * The frontier has a level AND a scope: what was reached, and where it was
- * observed. The result names the exact blocker — never a black box.
+ * observed. The result names the exact blocker — never a black box. Every
+ * sentence and label it produces is a SystemMessage (section "frontier" of
+ * the dictionaries), so the persisted frontier renders in any locale.
  */
 import type {
   Criticality,
@@ -21,11 +23,11 @@ import type {
   GeneralizationStatus,
   ValueChainLevel,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import type { CommercialLadderResult } from "./commercial-ladder";
 import { isEvidenceBacked, type ClaimAssessment } from "./epistemic";
 import { fitBand, type FitBand } from "./evidence-fit";
-import { DESIGN_LEVEL_LABELS, designAtLeast } from "./experimental-validity";
-import { GENERALIZATION_LABELS } from "./language-gate";
+import { designAtLeast } from "./experimental-validity";
 import type { Scope } from "./scope";
 
 export const PROOF_RUNGS = [
@@ -57,6 +59,16 @@ export const PROOF_RUNG_LABELS: Record<FrontierPosition, string> = {
   STRATEGIC_OUTCOME: "Strategic outcome",
   BUSINESS_OUTCOME: "Business outcome",
 };
+
+/** The rung label as a message ("labels.proofRung.<rung>"). */
+export function rungLabel(rung: FrontierPosition): SystemMessage {
+  return msg(`labels.proofRung.${rung}`);
+}
+
+/** The "From → To" label of a causal link between two rungs. */
+export function linkLabel(from: ProofRung, to: ProofRung): SystemMessage {
+  return msg("frontier.linkLabel", { from: rungLabel(from), to: rungLabel(to) });
+}
 
 /**
  * Minimum claim confidence (0–100) required at each rung. Problem and
@@ -168,7 +180,7 @@ export interface FrontierBlocker {
   kind: FrontierBlockerKind;
   subject: "RUNG" | "LINK";
   /** Rung or "From → To" label. */
-  label: string;
+  label: SystemMessage;
   statement?: string;
   confidence?: number;
   required?: number;
@@ -177,7 +189,7 @@ export interface FrontierBlocker {
   designLevel?: ExperimentDesignLevel | null;
   requiredDesign?: ExperimentDesignLevel;
   assumption?: string;
-  message: string;
+  message: SystemMessage;
 }
 
 /** Fitness and scope summary of a claim, as shown on the frontier. */
@@ -191,11 +203,11 @@ export interface FrontierClaimSummary {
   observed: boolean;
   generalization: GeneralizationStatus | null;
   scope: Scope | null;
-  scopeText: string | null;
+  scopeText: SystemMessage | null;
   designLevel: ExperimentDesignLevel | null;
-  inference: string;
-  nextGeneralizationQuestion: string | null;
-  generalizationGap: string | null;
+  inference: SystemMessage;
+  nextGeneralizationQuestion: SystemMessage | null;
+  generalizationGap: SystemMessage | null;
 }
 
 export interface FrontierLinkState {
@@ -205,21 +217,21 @@ export interface FrontierLinkState {
   required: number;
   criticality: Criticality;
   eligible: boolean;
-  reasons: string[];
+  reasons: SystemMessage[];
   blockers: FrontierBlocker[];
   summary: FrontierClaimSummary;
 }
 
 export interface FrontierRungState {
   rung: ProofRung;
-  label: string;
+  label: SystemMessage;
   present: boolean;
   status: ClaimAssessment["status"];
   confidence: number;
   required: number;
   requiredFit: number;
   eligible: boolean;
-  reasons: string[];
+  reasons: SystemMessage[];
   blockers: FrontierBlocker[];
   linkFromPrevious: FrontierLinkState | null;
   summary: FrontierClaimSummary | null;
@@ -228,28 +240,29 @@ export interface FrontierRungState {
 export interface FrontierScope {
   /** Scope of the observations at the frontier rung. */
   scope: Scope | null;
-  text: string;
+  /** Compact description of that scope, or why there is none. */
+  text: SystemMessage;
   generalization: GeneralizationStatus | null;
-  generalizationLabel: string | null;
+  generalizationLabel: SystemMessage | null;
   observed: boolean;
 }
 
 export interface ProofFrontierResult {
   frontier: FrontierPosition;
-  frontierLabel: string;
+  frontierLabel: SystemMessage;
   /** Where the frontier holds: the scope of what was observed at that level. */
   frontierScope: FrontierScope;
   rungs: FrontierRungState[];
   /** The first rung that could not be reached, with the reasons. */
   blockedAt: {
     rung: ProofRung;
-    label: string;
-    reasons: string[];
+    label: SystemMessage;
+    reasons: SystemMessage[];
     blockers: FrontierBlocker[];
   } | null;
   /** One sentence: why the frontier stops here. */
-  whyStops: string;
-  explanation: string[];
+  whyStops: SystemMessage;
+  explanation: SystemMessage[];
   /** The commercial ladder, attached by the recompute (each rung its own claim). */
   commercial?: CommercialLadderResult;
 }
@@ -277,7 +290,7 @@ export function summarizeClaim(a: ClaimAssessment): FrontierClaimSummary {
 function claimBlockers(
   a: ClaimAssessment,
   subject: "RUNG" | "LINK",
-  label: string,
+  label: SystemMessage,
   rung: ProofRung,
   statement?: string,
 ): FrontierBlocker[] {
@@ -285,14 +298,15 @@ function claimBlockers(
   const required = FRONTIER_THRESHOLDS[rung];
   const requiredFit = FRONTIER_FIT_THRESHOLDS[rung];
   const isLink = subject === "LINK";
+  // Link sentences quote the statement; rung sentences do not.
+  const variant = isLink ? "link" : "rung";
+  const named = isLink ? { label, statement } : { label };
   const base = { subject, label, statement, confidence: a.confidence, required };
   if (a.fitness.total === 0) {
     blockers.push({
       ...base,
       kind: "NO_EVIDENCE",
-      message: isLink
-        ? `${label}: causal link "${statement}" has no linked evidence (${a.status}).`
-        : `${label} has no linked evidence (${a.status}).`,
+      message: msg(`frontier.blocker.noEvidence.${variant}`, { ...named, status: a.status }),
     });
     return blockers;
   }
@@ -302,7 +316,10 @@ function claimBlockers(
       kind: "NOT_ADMISSIBLE",
       fit: 0,
       requiredFit,
-      message: `${label}: ${a.fitness.total} linked item${a.fitness.total === 1 ? " is" : "s are"} not admissible evidence for this claim${isLink ? ` ("${statement}")` : ""}.`,
+      message: msg(`frontier.blocker.notAdmissible.${variant}`, {
+        ...named,
+        count: a.fitness.total,
+      }),
     });
     return blockers;
   }
@@ -310,13 +327,13 @@ function claimBlockers(
     blockers.push({
       ...base,
       kind: "CONTRADICTION",
-      message: `${label}: contradictory evidence outweighs support; it blocks advancement.`,
+      message: msg("frontier.blocker.contradicted", { label }),
     });
   } else if (a.status === "MIXED" || a.unresolvedContradiction) {
     blockers.push({
       ...base,
       kind: "CONTRADICTION",
-      message: `${label}: mixed evidence — high-fit evidence both supports and contradicts it; contradictory evidence blocks advancement until it is resolved, never averaged away.`,
+      message: msg("frontier.blocker.mixed", { label }),
     });
   }
   if (a.fitness.best < requiredFit) {
@@ -325,9 +342,12 @@ function claimBlockers(
       kind: "LOW_FIT",
       fit: a.fitness.best,
       requiredFit,
-      message: a.fitness.lowFitOnly
-        ? `${label}: only low-fit evidence is linked (best fit ${a.fitness.best}/100, required ${requiredFit}) — the sources are low-admissibility for this claim${isLink ? ` ("${statement}")` : ""}; they inform it but cannot establish it.`
-        : `${label}: best evidence fit ${a.fitness.best}/100, required ${requiredFit} — the evidence exists but does not fit this claim${isLink ? ` ("${statement}")` : ""}.`,
+      message: msg(
+        a.fitness.lowFitOnly
+          ? `frontier.blocker.lowFitOnly.${variant}`
+          : `frontier.blocker.lowFit.${variant}`,
+        { ...named, fit: a.fitness.best, requiredFit },
+      ),
     });
   } else if (
     (!isEvidenceBacked(a.status) || a.confidence < required) &&
@@ -339,7 +359,12 @@ function claimBlockers(
       kind: "BELOW_THRESHOLD",
       fit: a.fitness.best,
       requiredFit,
-      message: `${label}: confidence ${a.confidence}, required threshold ${required} (${a.status}).`,
+      message: msg("frontier.blocker.belowThreshold", {
+        label,
+        confidence: a.confidence,
+        required,
+        status: a.status,
+      }),
     });
   }
   const gen = a.generalization?.status ?? null;
@@ -347,13 +372,16 @@ function claimBlockers(
     blockers.push({
       ...base,
       kind: "SCOPE_MISMATCH",
-      message: `${label}: supported in one context and contradicted in another; the frontier cannot rest on it.`,
+      message: msg("frontier.blocker.contradictedAcrossContexts", { label }),
     });
   } else if (gen === "BROADER_HYPOTHESIS") {
     blockers.push({
       ...base,
       kind: "SCOPE_MISMATCH",
-      message: `${label}: observed in ${a.observedScopeText ?? "a different scope"}, but the claim is made for a broader scope; the broader claim is a hypothesis.`,
+      message: msg("frontier.blocker.broaderHypothesis", {
+        label,
+        scope: a.observedScopeText ?? msg("frontier.blocker.differentScope"),
+      }),
     });
   }
   for (const s of a.untestedCriticalAssumptions) {
@@ -361,9 +389,7 @@ function claimBlockers(
       ...base,
       kind: "UNTESTED_ASSUMPTION",
       assumption: s,
-      message: isLink
-        ? `${label}: critical causal assumption remains untested: "${s}".`
-        : `${label}: critical assumption is completely untested: "${s}".`,
+      message: msg(`frontier.blocker.untestedAssumption.${variant}`, { label, assumption: s }),
     });
   }
   return blockers;
@@ -372,7 +398,7 @@ function claimBlockers(
 function assessLink(link: FrontierLinkInput): FrontierLinkState {
   const a = link.assessment;
   const required = FRONTIER_THRESHOLDS[link.to];
-  const label = `${PROOF_RUNG_LABELS[link.from]} → ${PROOF_RUNG_LABELS[link.to]}`;
+  const label = linkLabel(link.from, link.to);
   const blockers = claimBlockers(a, "LINK", label, link.to, link.statement);
   const requiredDesign = FRONTIER_DESIGN_REQUIRED[link.to];
   if (
@@ -390,7 +416,13 @@ function assessLink(link: FrontierLinkInput): FrontierLinkState {
       required,
       designLevel: a.designLevel,
       requiredDesign,
-      message: `${label}: strongest design is ${a.designLevel ? DESIGN_LEVEL_LABELS[a.designLevel].toLowerCase() : "none"}; attributing ${PROOF_RUNG_LABELS[link.to].toLowerCase()} requires at least a ${DESIGN_LEVEL_LABELS[requiredDesign].toLowerCase()} design.`,
+      message: msg("frontier.blocker.weakDesign", {
+        label,
+        hasDesign: a.designLevel !== null,
+        design: msg(`frontier.design.${a.designLevel ?? "none"}`),
+        rung: msg(`frontier.rung.inSentence.${link.to}`),
+        requiredDesign: msg(`frontier.design.${requiredDesign}`),
+      }),
     });
   }
   const gating = link.criticality === "CRITICAL";
@@ -404,7 +436,7 @@ function assessLink(link: FrontierLinkInput): FrontierLinkState {
     eligible: gating ? blockers.length === 0 : true,
     reasons: gating
       ? reasons
-      : reasons.map((r) => `${r} (non-critical link, does not gate the frontier)`),
+      : reasons.map((reason) => msg("frontier.blocker.nonCritical", { reason })),
     blockers: gating ? blockers : [],
     summary: summarizeClaim(a),
   };
@@ -425,7 +457,7 @@ export function computeProofFrontier(
   for (const rung of PROOF_RUNGS) {
     const assessment = byRung.get(rung) ?? null;
     const present = assessment !== null;
-    const label = PROOF_RUNG_LABELS[rung];
+    const label = rungLabel(rung);
     const required = FRONTIER_THRESHOLDS[rung];
     const requiredFit = FRONTIER_FIT_THRESHOLDS[rung];
     const blockers: FrontierBlocker[] = [];
@@ -439,8 +471,8 @@ export function computeProofFrontier(
         required,
         message:
           rung === "BUSINESS_OUTCOME"
-            ? "Optional level, not stated."
-            : `${label}: this level of the value argument has not been stated.`,
+            ? msg("frontier.blocker.optionalNotStated")
+            : msg("frontier.blocker.notStated", { label }),
       };
       states.push({
         rung,
@@ -473,9 +505,12 @@ export function computeProofFrontier(
         blockers.push({
           kind: "MISSING_LINK",
           subject: "LINK",
-          label: `${PROOF_RUNG_LABELS[previousPresent]} → ${label}`,
+          label: linkLabel(previousPresent, rung),
           required,
-          message: `No causal link stated from ${PROOF_RUNG_LABELS[previousPresent]} to ${label}.`,
+          message: msg("frontier.blocker.missingLink", {
+            from: rungLabel(previousPresent),
+            to: label,
+          }),
         });
       }
     }
@@ -494,9 +529,7 @@ export function computeProofFrontier(
       requiredFit,
       eligible,
       reasons:
-        chainBroken && reasons.length === 0
-          ? ["Reachable only once the earlier gap is closed."]
-          : reasons,
+        chainBroken && reasons.length === 0 ? [msg("frontier.blocker.reachableLater")] : reasons,
       blockers,
       linkFromPrevious: linkState,
       summary: summarizeClaim(assessment),
@@ -513,39 +546,45 @@ export function computeProofFrontier(
   }
 
   const whyStops = blockedAt
-    ? (blockedAt.blockers[0]?.message ?? blockedAt.reasons[0] ?? "Unknown blocker.")
+    ? (blockedAt.blockers[0]?.message ?? blockedAt.reasons[0] ?? msg("frontier.blocker.unknown"))
     : frontier === "NONE"
-      ? "No claim is supported by evidence yet."
-      : "Every stated level is supported; state the next level to go further.";
+      ? msg("frontier.whyStops.none")
+      : msg("frontier.whyStops.complete");
 
   const gen = frontierAssessment?.generalization?.status ?? null;
   const frontierScope: FrontierScope = {
     scope: frontierAssessment?.observedScope ?? null,
     text:
       frontier === "NONE"
-        ? "no scope: nothing is supported"
+        ? msg("frontier.frontierScope.none")
         : (frontierAssessment?.observedScopeText ??
           (frontierAssessment?.observed
-            ? "scope not recorded"
-            : "not observed directly; supported by reported evidence")),
+            ? msg("frontier.scope.notRecorded")
+            : msg("frontier.frontierScope.reported"))),
     generalization: gen,
-    generalizationLabel: gen ? GENERALIZATION_LABELS[gen] : null,
+    generalizationLabel: gen ? msg(`labels.generalization.${gen}`) : null,
     observed: frontierAssessment?.observed ?? false,
   };
 
-  const explanation: string[] = [
+  const explanation: SystemMessage[] = [
     frontier === "NONE"
-      ? "No claim is supported by evidence yet. Everything is a hypothesis."
-      : `Current Proof Frontier: ${PROOF_RUNG_LABELS[frontier]} · scope: ${frontierScope.text}${gen ? ` (${GENERALIZATION_LABELS[gen]})` : ""}. Everything beyond this point remains a product or causal hypothesis.`,
-    `Why the frontier stops here: ${whyStops}`,
+      ? msg("frontier.explanation.none")
+      : msg("frontier.explanation.current", {
+          level: rungLabel(frontier),
+          scope: frontierScope.text,
+          hasGeneralization: gen !== null,
+          ...(gen ? { generalization: msg(`labels.generalization.${gen}`) } : {}),
+        }),
+    msg("frontier.explanation.whyStops", { reason: whyStops }),
   ];
   if (blockedAt && blockedAt.blockers.length > 1) {
-    for (const b of blockedAt.blockers.slice(1)) explanation.push(`Also: ${b.message}`);
+    for (const b of blockedAt.blockers.slice(1))
+      explanation.push(msg("frontier.explanation.also", { reason: b.message }));
   }
 
   return {
     frontier,
-    frontierLabel: PROOF_RUNG_LABELS[frontier],
+    frontierLabel: rungLabel(frontier),
     frontierScope,
     rungs: states,
     blockedAt,

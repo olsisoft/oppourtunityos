@@ -9,6 +9,7 @@ import type {
   EvidenceSentiment,
   ExperimentOutcome,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 
 export interface OutcomeInputs {
   observedValue: number | null | undefined;
@@ -20,7 +21,7 @@ export interface ThresholdOutcome {
   outcome: ExperimentOutcome;
   source: "THRESHOLD";
   higherIsBetter: boolean;
-  explanation: string;
+  explanation: SystemMessage;
 }
 
 /**
@@ -54,7 +55,11 @@ export function classifyOutcome(input: OutcomeInputs): ThresholdOutcome | null {
       outcome: "SUPPORTED",
       source: "THRESHOLD",
       higherIsBetter,
-      explanation: `Observed ${observedValue} ${higherIsBetter ? "≥" : "≤"} success threshold ${successThreshold}.`,
+      explanation: msg("nextAction.outcome.supported", {
+        observed: observedValue,
+        higherIsBetter,
+        threshold: successThreshold,
+      }),
     };
   }
   if (contradicted) {
@@ -62,14 +67,22 @@ export function classifyOutcome(input: OutcomeInputs): ThresholdOutcome | null {
       outcome: "CONTRADICTED",
       source: "THRESHOLD",
       higherIsBetter,
-      explanation: `Observed ${observedValue} ${higherIsBetter ? "≤" : "≥"} failure threshold ${failureThreshold}.`,
+      explanation: msg("nextAction.outcome.contradicted", {
+        observed: observedValue,
+        higherIsBetter,
+        threshold: failureThreshold,
+      }),
     };
   }
   return {
     outcome: "INCONCLUSIVE",
     source: "THRESHOLD",
     higherIsBetter,
-    explanation: `Observed ${observedValue} lies between the failure threshold ${failureThreshold} and the success threshold ${successThreshold}.`,
+    explanation: msg("nextAction.outcome.inconclusive", {
+      observed: observedValue,
+      failure: failureThreshold,
+      success: successThreshold,
+    }),
   };
 }
 
@@ -111,44 +124,28 @@ export interface ExperimentPlanLike {
 
 export interface ExperimentWarning {
   level: "warning" | "info";
-  message: string;
+  message: SystemMessage;
 }
 
 /** Advisory checks on an experiment plan (Part 3.2). */
 export function experimentWarnings(plan: ExperimentPlanLike): ExperimentWarning[] {
   const out: ExperimentWarning[] = [];
   if (!plan.decisionQuestion?.trim()) {
-    out.push({
-      level: "warning",
-      message:
-        "No decision question. Every experiment must say what decision becomes easier after it runs.",
-    });
+    out.push({ level: "warning", message: msg("nextAction.outcome.warning.noDecisionQuestion") });
   }
   if (!plan.assumptionId && !plan.causalLinkId && !plan.valueChainNodeId) {
-    out.push({
-      level: "warning",
-      message:
-        "The experiment targets nothing: attach it to an assumption, a causal link or a value chain level so its result can move a claim.",
-    });
+    out.push({ level: "warning", message: msg("nextAction.outcome.warning.noTarget") });
   }
   const hasSuccess = plan.successThreshold !== null && plan.successThreshold !== undefined;
   const hasFailure = plan.failureThreshold !== null && plan.failureThreshold !== undefined;
   if (hasSuccess !== hasFailure) {
-    out.push({
-      level: "info",
-      message:
-        "Only one threshold is set. Both a success and a failure threshold are needed for the outcome to be decided deterministically; otherwise you will classify it yourself.",
-    });
+    out.push({ level: "info", message: msg("nextAction.outcome.warning.singleThreshold") });
   }
   if (!hasSuccess && !hasFailure) {
-    out.push({
-      level: "info",
-      message:
-        "No thresholds: the outcome will have to be classified explicitly, or it stays INCONCLUSIVE.",
-    });
+    out.push({ level: "info", message: msg("nextAction.outcome.warning.noThresholds") });
   }
   if ((hasSuccess || hasFailure) && !plan.unit?.trim()) {
-    out.push({ level: "info", message: "Thresholds without a unit are hard to interpret later." });
+    out.push({ level: "info", message: msg("nextAction.outcome.warning.noUnit") });
   }
   return out;
 }

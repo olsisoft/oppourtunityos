@@ -11,7 +11,7 @@ import type {
   GeneralizationStatus,
   InternalValidity,
 } from "@/generated/prisma/enums";
-import { msg, type SystemMessage } from "@/i18n/messages";
+import { msg, type SystemMessage, type LocalizedText } from "@/i18n/messages";
 import { claimNature, CLAIM_STATEMENTS } from "./claim-taxonomy";
 import { designAtLeast } from "./experimental-validity";
 
@@ -182,7 +182,8 @@ export const GENERALIZATION_DESCRIPTIONS: Record<GeneralizationStatus, string> =
 export function inferenceSentence(params: {
   claimType: ClaimType;
   status: EpistemicStatus;
-  scopeText?: string | null;
+  /** Where the claim was observed — a rendered string or a scope message. */
+  scopeText?: LocalizedText | null;
   generalization?: GeneralizationStatus | null;
   bestFitBand?: "HIGH" | "MEDIUM" | "LOW" | "NONE" | null;
   designLevel?: ExperimentDesignLevel | null;
@@ -194,7 +195,10 @@ export function inferenceSentence(params: {
   const whatCap = known
     ? msg(`validity.claimStatementCap.${params.claimType}`)
     : msg("validity.inference.defaultClaimCap");
-  const scope = params.scopeText?.trim() || null;
+  const scope =
+    typeof params.scopeText === "string"
+      ? params.scopeText.trim() || null
+      : (params.scopeText ?? null);
   const gen = params.generalization ?? null;
   const tail = gen && gen !== "UNTESTED" ? msg(`validity.inference.tail.${gen}`) : null;
   const common = {

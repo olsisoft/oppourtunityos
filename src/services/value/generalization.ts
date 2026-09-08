@@ -6,14 +6,16 @@
  * there is no automatic promotion.
  */
 import type { GeneralizationStatus } from "@/generated/prisma/enums";
+import { msg, type LocalizedText, type SystemMessage } from "@/i18n/messages";
 import { fitBand } from "./evidence-fit";
 import {
   configurationDiversity,
-  describeScope,
+  dimensionInSentence,
   isEmptyScope,
+  listMessage,
   mergeScopes,
-  SCOPE_LABELS,
   scopeMatch,
+  scopeMessage,
   type Scope,
   type ScopeDimension,
 } from "./scope";
@@ -48,20 +50,25 @@ export interface GeneralizationResult {
   independentOrigins: number;
   configurations: number;
   observedScope: Scope | null;
-  observedScopeText: string;
+  /** Compact description of the observed scope (scopeMessage). */
+  observedScopeText: SystemMessage;
   /** Average scope match of the observations with the claim scope (null when no claim scope). */
   scopeMatch: number | null;
   /** Dimensions of the claim scope the observations did not cover. */
   uncovered: ScopeDimension[];
-  gap: string;
-  nextQuestion: string | null;
-  explanation: string[];
+  gap: SystemMessage;
+  nextQuestion: SystemMessage | null;
+  explanation: SystemMessage[];
 }
 
+/**
+ * `claimStatement` is the clause the questions are built around ("the
+ * mechanism is feasible"): a claim-statement message or a plain string.
+ */
 export function assessGeneralization(
   observations: ObservationInput[],
   claimScope: Scope | null | undefined,
-  claimStatement = "the claim holds",
+  claimStatement: LocalizedText = msg("labels.claimStatement.OTHER"),
 ): GeneralizationResult {
   const counted = observations.filter(
     (o) => fitBand(o.fitScore) !== "LOW" && fitBand(o.fitScore) !== "NONE",
@@ -108,31 +115,57 @@ export function assessGeneralization(
   else if (origins.size >= GENERALIZATION_THRESHOLDS.sampleMinOrigins) status = "SAMPLE_SUPPORTED";
   else status = "CASE_ONLY";
 
-  const observedScopeText = describeScope(observedScope);
+  const observedScopeText = scopeMessage(observedScope);
   const t = GENERALIZATION_THRESHOLDS;
+  const claim = claimStatement;
+  const scope = observedScopeText;
   const gap =
     status === "UNTESTED"
-      ? `Nothing with medium or high fit supports that ${claimStatement}.`
+      ? msg("frontier.generalization.gap.untested", { claim })
       : status === "CASE_ONLY"
-        ? `Observed in one independent case (${observedScopeText}); ${t.sampleMinOrigins - origins.size} more independent case${t.sampleMinOrigins - origins.size === 1 ? "" : "s"} would make it sample-supported.`
+        ? msg("frontier.generalization.gap.caseOnly", {
+            scope,
+            missing: t.sampleMinOrigins - origins.size,
+          })
         : status === "SAMPLE_SUPPORTED"
-          ? `Observed across ${origins.size} independent cases and ${configurations} configuration${configurations === 1 ? "" : "s"} (${observedScopeText}); segment support needs ≥ ${t.segmentMinOrigins} cases across ≥ ${t.segmentMinConfigurations} configurations${uncovered.length ? ` and coverage of ${uncovered.map((k) => SCOPE_LABELS[k].toLowerCase()).join(", ")}` : ""}.`
+          ? msg("frontier.generalization.gap.sampleSupported", {
+              origins: origins.size,
+              configurations,
+              scope,
+              minOrigins: t.segmentMinOrigins,
+              minConfigurations: t.segmentMinConfigurations,
+              hasUncovered: uncovered.length > 0,
+              ...(uncovered.length
+                ? { dimensions: listMessage(uncovered.map(dimensionInSentence)) }
+                : {}),
+            })
           : status === "SEGMENT_SUPPORTED"
-            ? `Observed across ${origins.size} independent cases and ${configurations} configurations within the claim's scope. Still not the whole market.`
+            ? msg("frontier.generalization.gap.segmentSupported", {
+                origins: origins.size,
+                configurations,
+              })
             : status === "BROADER_HYPOTHESIS"
-              ? `Observed in ${observedScopeText}, but the claim is made for a broader scope (match ${Math.round((avgMatch ?? 0) * 100)}%): the broader claim is a hypothesis.`
-              : `Supported in ${observedScopeText} and contradicted in another context.`;
+              ? msg("frontier.generalization.gap.broaderHypothesis", {
+                  scope,
+                  match: Math.round((avgMatch ?? 0) * 100),
+                })
+              : msg("frontier.generalization.gap.contradictedAcrossContexts", { scope });
   const nextQuestion =
     status === "UNTESTED" || status === "SEGMENT_SUPPORTED"
       ? null
       : status === "CONTRADICTED_ACROSS_CONTEXTS"
-        ? `What differs between the contexts where ${claimStatement} and the context where it does not?`
+        ? msg("frontier.generalization.nextQuestion.contradicted", { claim })
         : uncovered.length
-          ? `Does it still hold that ${claimStatement} for ${uncovered
-              .slice(0, 2)
-              .map((k) => `other ${SCOPE_LABELS[k].toLowerCase()}`)
-              .join(" and ")}${claimScope ? " within the target scope" : ""}?`
-          : `Does it still hold that ${claimStatement} in ${status === "CASE_ONLY" ? "other organizations" : "other configurations"} (${observedScopeText} so far)?`;
+          ? msg("frontier.generalization.nextQuestion.uncovered", {
+              claim,
+              dimensions: msg("frontier.generalization.otherDimensions", {
+                count: Math.min(uncovered.length, 2),
+                first: dimensionInSentence(uncovered[0]),
+                ...(uncovered.length > 1 ? { second: dimensionInSentence(uncovered[1]) } : {}),
+              }),
+              targetScope: Boolean(claimScope),
+            })
+          : msg("frontier.generalization.nextQuestion.elsewhere", { claim, status, scope });
 
   return {
     status,
@@ -145,7 +178,13 @@ export function assessGeneralization(
     gap,
     nextQuestion,
     explanation: [
-      `Generalization: ${status} — ${origins.size} independent origin${origins.size === 1 ? "" : "s"}, ${configurations} configuration${configurations === 1 ? "" : "s"}${avgMatch !== null ? `, scope match ${Math.round(avgMatch * 100)}%` : ", claim scope undeclared"}.`,
+      msg("frontier.generalization.summary", {
+        status,
+        origins: origins.size,
+        configurations,
+        hasMatch: avgMatch !== null,
+        ...(avgMatch !== null ? { match: Math.round(avgMatch * 100) } : {}),
+      }),
       gap,
     ],
   };

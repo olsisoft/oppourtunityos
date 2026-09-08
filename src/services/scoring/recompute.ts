@@ -20,7 +20,6 @@
  */
 import { prisma } from "@/db/prisma";
 import { logger } from "@/lib/logger";
-import { VALUE_CHAIN_LEVEL_LABELS } from "@/domain/enums";
 import { Prisma } from "@/generated/prisma/client";
 import type {
   ClaimType,
@@ -31,6 +30,7 @@ import type {
   KnowledgeTrigger,
 } from "@/generated/prisma/client";
 import type { EpistemicStatus, ValueChainLevel } from "@/generated/prisma/enums";
+import { textOf, type SystemMessage, msg } from "@/i18n/messages";
 import { computeOpportunityScore } from "./opportunity-score";
 import { computeEvidenceScore, type EvidenceSignal } from "./evidence-score";
 import { computeVerdict } from "./verdict";
@@ -73,15 +73,16 @@ import {
 } from "@/services/value/knowledge-change";
 import {
   computeProofFrontier,
-  PROOF_RUNG_LABELS,
   rungForLevel,
   type FrontierLinkInput,
   type FrontierPosition,
   type FrontierRungInput,
   type ProofFrontierResult,
   type ProofRung,
+  rungLabel,
+  linkLabel,
 } from "@/services/value/proof-frontier";
-import { describeScope, parseScope, scopeFromContext, type Scope } from "@/services/value/scope";
+import { parseScope, scopeFromContext, scopeMessage, type Scope } from "@/services/value/scope";
 import { computeValueStrength, type ValueStrengthResult } from "@/services/value/value-strength";
 import { extendVerdict } from "@/services/value/verdict-extension";
 import { computeValueActions } from "@/services/value/next-value-action";
@@ -227,12 +228,34 @@ function serializeNullable(value: unknown): Prisma.InputJsonValue | typeof Prism
   return value === null || value === undefined ? Prisma.JsonNull : serialize(value);
 }
 
-function linkKey(from: ValueChainLevel, to: ValueChainLevel): string {
-  return `link:${from}->${to}`;
+/** JSON with sorted keys, to compare a message with its stored (jsonb) copy. */
+function canonicalJson(value: unknown): string {
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sort)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, sort((v as Record<string, unknown>)[k])]),
+          )
+        : v;
+  return JSON.stringify(sort(JSON.parse(JSON.stringify(value ?? null))));
 }
 
-function linkLabel(from: ValueChainLevel, to: ValueChainLevel): string {
-  return `${VALUE_CHAIN_LEVEL_LABELS[from]} → ${VALUE_CHAIN_LEVEL_LABELS[to]}`;
+/** The inference sentence and its stored descriptor differ from the row. */
+function inferenceChanged(
+  row: { inference: string | null; inferenceMessage: Prisma.JsonValue | null },
+  inference: SystemMessage,
+): boolean {
+  return (
+    row.inference !== inference.text ||
+    canonicalJson(row.inferenceMessage) !== canonicalJson(inference)
+  );
+}
+
+function linkKey(from: ValueChainLevel, to: ValueChainLevel): string {
+  return `link:${from}->${to}`;
 }
 
 export interface RecomputeContext {
@@ -314,18 +337,19 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
         .filter((r) => PROBLEM_RUNGS.includes(r.rung) && r.present)
         .map<KnowledgeClaim>((r) => ({
           key: `rung:${r.rung}`,
-          label: PROOF_RUNG_LABELS[r.rung],
+          label: rungLabel(r.rung),
           status: r.status,
           confidence: r.confidence,
+          // Rows written before the bilingual pass hold a plain string here.
           scope: r.summary?.scopeText ?? null,
           generalization: r.summary?.generalization ?? null,
         })),
       ...opportunity.valueChainNodes.map<KnowledgeClaim>((n) => ({
         key: `node:${n.level}`,
-        label: VALUE_CHAIN_LEVEL_LABELS[n.level],
+        label: msg(`labels.valueChainLevel.${n.level}`),
         status: n.status,
         confidence: n.confidence,
-        scope: n.observedScope ? describeScope(parseScope(n.observedScope)) : null,
+        scope: n.observedScope ? scopeMessage(parseScope(n.observedScope)) : null,
         generalization: n.generalization,
       })),
       ...opportunity.causalLinks.map<KnowledgeClaim>((l) => ({
@@ -333,7 +357,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
         label: linkLabel(l.fromNode.level, l.toNode.level),
         status: l.status,
         confidence: l.confidence,
-        scope: l.observedScope ? describeScope(parseScope(l.observedScope)) : null,
+        scope: l.observedScope ? scopeMessage(parseScope(l.observedScope)) : null,
         generalization: l.generalization,
       })),
     ],
@@ -479,7 +503,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
       node.confidence !== assessment.confidence ||
       node.causalDistance !== causalDistance ||
       node.generalization !== generalization ||
-      node.inference !== assessment.inference ||
+      inferenceChanged(node, assessment.inference) ||
       (node.observedScope ? JSON.stringify(node.observedScope) : null) !== observedScopeJson
     ) {
       await prisma.valueChainNode.update({
@@ -490,7 +514,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           causalDistance,
           generalization,
           observedScope: serializeNullable(assessment.observedScope),
-          inference: assessment.inference,
+          inference: assessment.inference.text,
+          inferenceMessage: serialize(assessment.inference),
         },
       });
     }
@@ -528,7 +553,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
       link.status !== assessment.status ||
       link.confidence !== assessment.confidence ||
       link.generalization !== generalization ||
-      link.inference !== assessment.inference ||
+      inferenceChanged(link, assessment.inference) ||
       (link.observedScope ? JSON.stringify(link.observedScope) : null) !== observedScopeJson
     ) {
       await prisma.causalLink.update({
@@ -538,7 +563,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           confidence: assessment.confidence,
           generalization,
           observedScope: serializeNullable(assessment.observedScope),
-          inference: assessment.inference,
+          inference: assessment.inference.text,
+          inferenceMessage: serialize(assessment.inference),
         },
       });
     }
@@ -733,12 +759,13 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
   });
 
   // ---- Snapshot after, diff and audit trail ----------------------------------------------
+  const observedScopeText = (a: ClaimAssessment) => a.observedScopeText ?? null;
   const problemClaim = (rung: ProofRung, a: ClaimAssessment): KnowledgeClaim => ({
     key: `rung:${rung}`,
-    label: PROOF_RUNG_LABELS[rung],
+    label: rungLabel(rung),
     status: a.status,
     confidence: a.confidence,
-    scope: a.observedScopeText,
+    scope: observedScopeText(a),
     generalization: a.generalization?.status ?? null,
   });
   const after: KnowledgeSnapshot = {
@@ -758,10 +785,10 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
         const a = nodeAssessments.get(n.id)!;
         return {
           key: `node:${n.level}`,
-          label: VALUE_CHAIN_LEVEL_LABELS[n.level],
+          label: msg(`labels.valueChainLevel.${n.level}`),
           status: a.status,
           confidence: a.confidence,
-          scope: a.observedScopeText,
+          scope: observedScopeText(a),
           generalization: a.generalization?.status ?? "UNTESTED",
         };
       }),
@@ -772,7 +799,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           label: linkLabel(l.fromNode.level, l.toNode.level),
           status: a.status,
           confidence: a.confidence,
-          scope: a.observedScopeText,
+          scope: observedScopeText(a),
           generalization: a.generalization?.status ?? "UNTESTED",
         };
       }),
@@ -801,7 +828,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
         claimsStrengthened: serialize(diff.strengthened),
         claimsWeakened: serialize(diff.weakened),
         claimsContradicted: serialize(diff.contradicted),
-        summary: diff.summary,
+        summary: textOf(diff.summary),
+        summaryMessage: serialize(diff.summary),
       },
     });
     knowledgeChangeId = change.id;

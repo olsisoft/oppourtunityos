@@ -20,7 +20,13 @@ import type {
   ValueChainLevel,
 } from "@/generated/prisma/enums";
 import type { ClaimType } from "@/generated/prisma/enums";
-import { EVIDENCE_SOURCE_TYPE_LABELS } from "@/domain/enums";
+import {
+  isSystemMessage,
+  msg,
+  type LocalizedText,
+  type MessageParam,
+  type SystemMessage,
+} from "@/i18n/messages";
 import type { EvidenceScoreResult } from "@/services/scoring/evidence-score";
 import { highAdmissibilitySources } from "./admissibility";
 import type { CausalConfidenceResult } from "./causal-confidence";
@@ -32,14 +38,13 @@ import {
 } from "./claim-taxonomy";
 import type { CommercialLadderResult } from "./commercial-ladder";
 import type { ClaimAssessment } from "./epistemic";
-import { GENERALIZATION_LABELS } from "./language-gate";
 import {
   isLadderRung,
-  PROOF_RUNG_LABELS,
+  type FrontierPosition,
   type ProofFrontierResult,
   type ProofRung,
 } from "./proof-frontier";
-import { VALUE_DIMENSION_LABELS, type ValueStrengthResult } from "./value-strength";
+import type { ValueStrengthResult } from "./value-strength";
 
 export type ValueActionType =
   | "COLLAPSE_ASSUMPTION"
@@ -85,16 +90,16 @@ export interface ValueAction {
   priorityScore: number;
   scoring: ActionScoring;
   /** "Why this test now?" */
-  whyNow: string;
+  whyNow: SystemMessage;
   uncertainty: UncertaintyClass;
   /** "What this could change": the decision consequence if supported / contradicted. */
-  whatThisCouldChange: string;
-  what: string;
-  why: string;
-  affects: string;
-  ifFalse: string;
-  evidenceToMove: string;
-  experiment: string | null;
+  whatThisCouldChange: SystemMessage;
+  what: SystemMessage;
+  why: SystemMessage;
+  affects: SystemMessage;
+  ifFalse: SystemMessage;
+  evidenceToMove: SystemMessage;
+  experiment: SystemMessage | null;
   /** Ids that let the UI deep-link the action. */
   assumptionId?: string;
   causalLinkId?: string;
@@ -107,7 +112,8 @@ export interface ValueActionAssumption {
   status: AssumptionStatus;
   importance: number;
   evidenceCount: number;
-  linkedTo: string | null;
+  /** Label of the link or level the assumption is attached to (another engine's text). */
+  linkedTo: LocalizedText | null;
 }
 
 export interface ValueActionLink {
@@ -156,48 +162,23 @@ export interface ValueActionInput {
   commercial?: CommercialLadderResult | null;
 }
 
-const EVIDENCE_BY_KIND: Record<AssumptionKind, string> = {
-  CAUSAL:
-    "A controlled comparison (with vs without the intervention) on comparable cases, with the variable measured before and after.",
-  VALUE:
-    "Quantified before/after numbers from real operations: how much the variable moved and what that was worth.",
-  FEASIBILITY:
-    "A technical spike or data audit proving the required inputs exist and can be obtained.",
-  WTP: "Observed purchase behaviour: paid pilots, deposits, signed letters of intent or existing spend on partial solutions.",
-  ACCESS:
-    "An outreach test: how many target buyers could actually be reached and would talk within two weeks.",
-  GENERIC: "Direct customer evidence (interviews, quotes, surveys) that speaks to the statement.",
-};
+/** Wrap another engine's sentence (or a legacy string) so every field is a SystemMessage. */
+function asMessage(text: LocalizedText): SystemMessage {
+  return isSystemMessage(text) ? text : msg("nextAction.verbatim", { text });
+}
 
-const EXPERIMENT_BY_KIND: Record<AssumptionKind, string> = {
-  CAUSAL:
-    "Run a controlled pilot: apply the intervention to half of comparable cases and compare the variable across both groups.",
-  VALUE:
-    "Instrument five customers for one month; measure the variable and translate the movement into money or hours.",
-  FEASIBILITY:
-    "Build the thinnest possible prototype of the data path and check the inputs on real customer data.",
-  WTP: "Offer a paid concierge version (or a deposit-backed waitlist) to ten target customers and count who pays.",
-  ACCESS:
-    "Contact twenty target buyers through the intended channel and measure reply and meeting rates.",
-  GENERIC:
-    "Interview five target customers about the last time this happened and capture their statements as evidence.",
-};
+const rungLabel = (rung: FrontierPosition) => msg(`labels.proofRung.${rung}`);
+const rungLower = (rung: FrontierPosition) => msg(`nextAction.lower.rung.${rung}`);
+const linkLabel = (from: FrontierPosition, to: FrontierPosition) =>
+  msg("nextAction.link", { from: rungLabel(from), to: rungLabel(to) });
+const evidenceByKind = (kind: AssumptionKind) => msg(`nextAction.evidence.${kind}`);
+const experimentByKind = (kind: AssumptionKind) => msg(`nextAction.experiment.${kind}`);
+const collapseText = (kind: AssumptionKind) => msg(`nextAction.collapse.ifFalse.${kind}`);
 
-function collapseText(kind: AssumptionKind): string {
-  switch (kind) {
-    case "CAUSAL":
-      return "The product hypothesis collapses: the mechanism would not move the variable.";
-    case "VALUE":
-      return "The opportunity collapses: moving the variable would not create enough value to justify a product.";
-    case "FEASIBILITY":
-      return "The mechanism cannot be built as imagined; a different mechanism is needed.";
-    case "WTP":
-      return "The problem may be real but nobody pays to remove it; the business case collapses.";
-    case "ACCESS":
-      return "The buyers cannot be reached efficiently; go-to-market collapses even if the product works.";
-    default:
-      return "A load-bearing belief is false and the opportunity must be re-examined.";
-  }
+/** Up to four items as one comma-separated list message. */
+function listMessage(items: SystemMessage[]): SystemMessage {
+  const [a, b, c, d] = items;
+  return msg("nextAction.list", { count: items.length, a, b, c, d });
 }
 
 type ActionDraft = Omit<
@@ -205,7 +186,7 @@ type ActionDraft = Omit<
   "priority" | "priorityScore" | "scoring" | "whyNow" | "uncertainty" | "whatThisCouldChange"
 > & {
   uncertaintyClass?: UncertaintyClass;
-  whatThisCouldChange?: string;
+  whatThisCouldChange?: SystemMessage;
   /** Ordinal hints set by the drafting step. */
   impact: number;
   uncertainty: number;
@@ -281,16 +262,16 @@ function scoreAction(draft: ActionDraft, experiments: ValueActionExperiment[]): 
   const cheap = burden <= 4;
   const whyNow =
     draft.type === "COLLAPSE_ASSUMPTION"
-      ? `This is the ${cheap ? "cheapest" : "most tractable"} test capable of resolving the highest-impact uncertainty: if this assumption is false the opportunity collapses, so nothing else is worth testing first.`
+      ? msg("nextAction.whyNow.collapse", { cheap })
       : draft.type === "CAUSAL_LINK"
-        ? `This is the ${cheap ? "cheapest" : "most tractable"} test that can move the Proof Frontier: it targets the first unproven critical link, and everything downstream depends on it.`
+        ? msg("nextAction.whyNow.causalLink", { cheap })
         : draft.type === "WTP_EVIDENCE"
-          ? "Willingness to pay stays an independent assumption until tested; a strong problem and a working mechanism do not prove anyone pays."
+          ? msg("nextAction.whyNow.wtp")
           : draft.type === "ECONOMIC_MAGNITUDE"
-            ? "Without the economic magnitude, Value Strength stays INCOMPLETE and the business case cannot be sized."
+            ? msg("nextAction.whyNow.economicMagnitude")
             : draft.type === "MECHANISM_FEASIBILITY"
-              ? "If the mechanism cannot be built, every downstream claim is moot; this is the cheapest way to find out."
-              : `Resolves the highest-impact uncertainty currently reachable at ${cheap ? "low" : "moderate"} cost.`;
+              ? msg("nextAction.whyNow.mechanismFeasibility")
+              : msg("nextAction.whyNow.other", { cheap });
   const { impact, uncertainty, frontier, criticality, targetAssumptionId, targetLinkId, ...rest } =
     draft;
   void impact;
@@ -326,20 +307,16 @@ function defaultUncertainty(type: ValueActionType): UncertaintyClass {
   }
 }
 
-function defaultChange(type: ValueActionType): string {
+function defaultChange(type: ValueActionType): SystemMessage {
   switch (type) {
     case "CAUSAL_LINK":
-      return "If supported, the Proof Frontier moves one level and Causal Confidence gains a validated link; if contradicted, the value argument breaks here and everything downstream stays a hypothesis.";
     case "WTP_EVIDENCE":
-      return "If supported, the commercial ladder moves one rung and the business case gains an evidence-backed price signal; if contradicted, the problem may be real but not worth money to the buyer.";
     case "ECONOMIC_MAGNITUDE":
-      return "If measured, Value Strength stops being INCOMPLETE and the verdict can size the business case; if small, the opportunity may not justify a product.";
     case "MECHANISM_FEASIBILITY":
-      return "If feasible, the mechanism becomes OBSERVED within the tested scope; if not, the mechanism must change before anything else is tested.";
     case "EVIDENCE_GAP":
-      return "Closing the gap raises Evidence Confidence; failing to close it means the problem is weaker than believed.";
+      return msg(`nextAction.change.${type}`);
     default:
-      return "Resolves one open dimension of the value argument without moving the Proof Frontier by itself.";
+      return msg("nextAction.change.other");
   }
 }
 
@@ -384,9 +361,9 @@ function claimTypeForRung(rung: ProofRung, links: ValueActionLink[]): ClaimType 
 
 export function computeValueActions(input: ValueActionInput): ValueAction[] {
   const actions: ActionDraft[] = [];
-  const icp = input.icpName?.trim() || "target customers";
-  const variable = input.variableName?.trim() || "the variable";
-  const frontierLabel = PROOF_RUNG_LABELS[input.frontier.frontier];
+  const icp: MessageParam = input.icpName?.trim() || msg("nextAction.fallback.icp");
+  const variable: MessageParam = input.variableName?.trim() || msg("nextAction.fallback.variable");
+  const frontierLabel = rungLabel(input.frontier.frontier);
 
   // 1. Assumption that could collapse the opportunity (untested, critical).
   const collapse = [...input.assumptions]
@@ -410,13 +387,24 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       targetAssumptionId: collapse.id,
       type: "COLLAPSE_ASSUMPTION",
       uncertaintyClass: uncertaintyForKind(collapse.kind),
-      whatThisCouldChange: `If supported, the highest-importance untested belief becomes evidence-backed; if false: ${collapseText(collapse.kind).replace(/^The /, "the ")}`,
-      what: `Validate the ${collapse.kind === "GENERIC" ? "" : `${collapse.kind.toLowerCase()} `}assumption: "${collapse.statement}"`,
-      why: `Importance ${collapse.importance}/10 with ${collapse.evidenceCount} linked evidence item${collapse.evidenceCount === 1 ? "" : "s"}. It is the highest-importance untested belief. Current Proof Frontier: ${frontierLabel}.`,
-      affects: collapse.linkedTo ?? "The whole opportunity",
+      whatThisCouldChange: msg("nextAction.draft.COLLAPSE_ASSUMPTION.change", {
+        consequence: msg(`nextAction.collapse.consequence.${collapse.kind}`),
+      }),
+      what: msg("nextAction.draft.COLLAPSE_ASSUMPTION.what", {
+        kind: collapse.kind,
+        statement: collapse.statement,
+      }),
+      why: msg("nextAction.draft.COLLAPSE_ASSUMPTION.why", {
+        importance: collapse.importance,
+        count: collapse.evidenceCount,
+        frontier: frontierLabel,
+      }),
+      affects: collapse.linkedTo
+        ? asMessage(collapse.linkedTo)
+        : msg("nextAction.fallback.wholeOpportunity"),
       ifFalse: collapseText(collapse.kind),
-      evidenceToMove: EVIDENCE_BY_KIND[collapse.kind],
-      experiment: EXPERIMENT_BY_KIND[collapse.kind],
+      evidenceToMove: evidenceByKind(collapse.kind),
+      experiment: experimentByKind(collapse.kind),
       assumptionId: collapse.id,
     });
   }
@@ -434,6 +422,7 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
           l.assessment.status !== "SUPPORTED",
       ) ?? input.links.find((l) => l.to === blocked.rung);
     if (link) {
+      const target = rungLabel(blocked.rung);
       actions.push({
         tier: 2,
         impact: 8,
@@ -449,14 +438,29 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
           link.to === "BUSINESS_OUTCOME"
             ? "VALUE"
             : "MECHANISM",
-        whatThisCouldChange: `If supported, the Proof Frontier moves from ${frontierLabel} to ${blocked.label}; if contradicted, the value argument breaks at ${PROOF_RUNG_LABELS[link.from]} → ${PROOF_RUNG_LABELS[link.to]} and the verdict is re-examined.`,
-        what: `Test the causal link: "${link.statement}"`,
-        why: `${blocked.label} is the first level beyond the Proof Frontier (${frontierLabel}); this link into it is ${link.assessment.status.toLowerCase()} with ${link.assessment.evidence.counts.total} evidence item${link.assessment.evidence.counts.total === 1 ? "" : "s"}.`,
-        affects: `${PROOF_RUNG_LABELS[link.from]} → ${PROOF_RUNG_LABELS[link.to]}`,
-        ifFalse:
-          "The value argument breaks at this link: everything downstream, including the economic value, stays a hypothesis.",
-        evidenceToMove: `Evidence that ${link.statement.charAt(0).toLowerCase()}${link.statement.slice(1)} in real conditions, ideally a before/after or with/without comparison; enough to reach the supported threshold (40/100) with no unresolved contradiction.`,
-        experiment: `Run a controlled pilot with ${icp}: compare comparable cases with and without ${input.mechanism ?? "the intervention"} and measure ${variable}.`,
+        whatThisCouldChange: msg("nextAction.draft.CAUSAL_LINK.change", {
+          frontier: frontierLabel,
+          target,
+          from: rungLabel(link.from),
+          to: rungLabel(link.to),
+        }),
+        what: msg("nextAction.draft.CAUSAL_LINK.what", { statement: link.statement }),
+        why: msg("nextAction.draft.CAUSAL_LINK.why", {
+          target,
+          frontier: frontierLabel,
+          status: msg(`nextAction.lower.status.${link.assessment.status}`),
+          count: link.assessment.evidence.counts.total,
+        }),
+        affects: linkLabel(link.from, link.to),
+        ifFalse: msg("nextAction.draft.CAUSAL_LINK.ifFalse"),
+        evidenceToMove: msg("nextAction.draft.CAUSAL_LINK.evidenceToMove", {
+          statement: `${link.statement.charAt(0).toLowerCase()}${link.statement.slice(1)}`,
+        }),
+        experiment: msg("nextAction.draft.CAUSAL_LINK.experiment", {
+          icp,
+          mechanism: input.mechanism ?? msg("nextAction.fallback.intervention"),
+          variable,
+        }),
         causalLinkId: link.id,
       });
     }
@@ -478,11 +482,14 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
                 : claimTypeForRung(blocked.rung, input.links);
             })()
           : claimTypeForRung(blocked.rung, input.links);
-      const sources = highAdmissibilitySources(claimType)
-        .slice(0, 4)
-        .map((s) => EVIDENCE_SOURCE_TYPE_LABELS[s].toLowerCase());
+      const sourceTypes = highAdmissibilitySources(claimType).slice(0, 4);
+      const sources = sourceTypes.length
+        ? listMessage(sourceTypes.map((s) => msg(`nextAction.lower.sourceType.${s}`)))
+        : null;
       const link =
         fitBlocker.subject === "LINK" ? input.links.find((x) => x.to === blocked.rung) : null;
+      const level = rungLabel(blocked.rung);
+      const levelLower = rungLower(blocked.rung);
       actions.push({
         tier: 2,
         impact: 8,
@@ -492,25 +499,43 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
         targetLinkId: link?.id,
         type: "EVIDENCE_FITNESS",
         uncertaintyClass: uncertaintyForClaim(claimType),
-        whatThisCouldChange: `If fitting evidence supports it, ${blocked.label} becomes evidence-backed and the Proof Frontier can move; the existing evidence stays as context, it never becomes proof by accumulation.`,
+        whatThisCouldChange: msg("nextAction.draft.EVIDENCE_FITNESS.change", { level }),
         what:
           fitBlocker.kind === "WEAK_DESIGN"
-            ? `Get evidence of a stronger design for ${blocked.label}: ${fitBlocker.message.replace(/^[^:]+: /, "")}`
-            : `Get evidence that fits ${blocked.label}: ${sources.length ? sources.join(", ") : "a high-admissibility source for this claim"}`,
+            ? fitBlocker.requiredDesign
+              ? msg("nextAction.draft.EVIDENCE_FITNESS.whatWeakDesign", {
+                  level,
+                  design: fitBlocker.designLevel
+                    ? msg(`nextAction.lower.design.${fitBlocker.designLevel}`)
+                    : msg("nextAction.fallback.designNone"),
+                  levelLower,
+                  required: msg(`nextAction.lower.design.${fitBlocker.requiredDesign}`),
+                })
+              : msg("nextAction.draft.EVIDENCE_FITNESS.whatWeakDesignDetail", {
+                  level,
+                  detail: withoutLabelPrefix(fitBlocker.message),
+                })
+            : msg("nextAction.draft.EVIDENCE_FITNESS.whatSources", {
+                level,
+                sources: sources ?? msg("nextAction.fallback.admissibleSource"),
+              }),
         why:
           fitBlocker.kind === "NOT_ADMISSIBLE"
-            ? `The evidence linked to ${blocked.label} is not admissible for this claim: it exists, but it cannot establish it.`
+            ? msg("nextAction.draft.EVIDENCE_FITNESS.whyNotAdmissible", { level })
             : fitBlocker.kind === "WEAK_DESIGN"
-              ? `The linked evidence is admissible but its design is too weak to attribute ${blocked.label.toLowerCase()}.`
-              : `The best evidence fit for ${blocked.label} is ${fitBlocker.fit ?? 0}/100; the frontier requires ${fitBlocker.requiredFit ?? 40}. More of the same evidence will not help.`,
-        affects: blocked.label,
-        ifFalse:
-          "The claim stays unproven whatever the volume of low-fit evidence; the frontier does not move.",
-        evidenceToMove: sources.length
-          ? `High-admissibility evidence for this claim: ${sources.join(", ")}.`
-          : "Evidence whose source type is admissible for this claim.",
+              ? msg("nextAction.draft.EVIDENCE_FITNESS.whyWeakDesign", { levelLower })
+              : msg("nextAction.draft.EVIDENCE_FITNESS.whyLowFit", {
+                  level,
+                  fit: fitBlocker.fit ?? 0,
+                  required: fitBlocker.requiredFit ?? 40,
+                }),
+        affects: level,
+        ifFalse: msg("nextAction.draft.EVIDENCE_FITNESS.ifFalse"),
+        evidenceToMove: sources
+          ? msg("nextAction.draft.EVIDENCE_FITNESS.evidenceToMoveSources", { sources })
+          : msg("nextAction.draft.EVIDENCE_FITNESS.evidenceToMoveGeneric"),
         experiment: link
-          ? `Design a test whose result is admissible for "${link.statement}" at the required design level.`
+          ? msg("nextAction.draft.EVIDENCE_FITNESS.experiment", { statement: link.statement })
           : null,
         causalLinkId: link?.id,
       });
@@ -527,6 +552,8 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
     (gen === "CASE_ONLY" || gen === "SAMPLE_SUPPORTED" || gen === "BROADER_HYPOTHESIS")
   ) {
     const question = frontierState.summary.nextGeneralizationQuestion;
+    const level = rungLabel(frontierState.rung);
+    const scope: LocalizedText | null = frontierState.summary.scopeText ?? null;
     actions.push({
       tier: 4,
       impact: 6,
@@ -535,17 +562,27 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       criticality: 5,
       type: "GENERALIZATION",
       uncertaintyClass: "GENERALIZATION",
-      whatThisCouldChange: `If it holds in other contexts, ${frontierState.label} moves from ${GENERALIZATION_LABELS[gen]} towards segment support and the verdict can rely on it for ${icp}; if it does not, the observation stays a case and the target scope narrows.`,
-      what:
-        question ??
-        `Test whether ${frontierState.label.toLowerCase()} holds beyond ${frontierState.summary.scopeText ?? "the observed scope"}`,
-      why: `${frontierState.label} is ${GENERALIZATION_LABELS[gen].toLowerCase()} (${frontierState.summary.independentOrigins} independent origin${frontierState.summary.independentOrigins === 1 ? "" : "s"}, scope: ${frontierState.summary.scopeText ?? "not recorded"}). Observed in a sample does not mean proven for the market.`,
-      affects: `${frontierState.label} — scope of generalization`,
-      ifFalse:
-        "The claim holds only in the observed context; the target scope must narrow or the mechanism must adapt.",
-      evidenceToMove:
-        "The same observation repeated in other organizations and configurations (different systems, sizes or conditions) with the scope recorded.",
-      experiment: `Repeat the observation in ${gen === "CASE_ONLY" ? "two more" : "five"} organizations with different configurations and record the scope of each run.`,
+      whatThisCouldChange: msg("nextAction.draft.GENERALIZATION.change", {
+        level,
+        generalization: msg(`labels.generalization.${gen}`),
+        icp,
+      }),
+      what: question
+        ? asMessage(question)
+        : msg("nextAction.draft.GENERALIZATION.what", {
+            levelLower: rungLower(frontierState.rung),
+            scope: scope ?? msg("nextAction.fallback.observedScope"),
+          }),
+      why: msg("nextAction.draft.GENERALIZATION.why", {
+        level,
+        generalization: msg(`nextAction.lower.generalization.${gen}`),
+        count: frontierState.summary.independentOrigins,
+        scope: scope ?? msg("common.notRecorded"),
+      }),
+      affects: msg("nextAction.draft.GENERALIZATION.affects", { level }),
+      ifFalse: msg("nextAction.draft.GENERALIZATION.ifFalse"),
+      evidenceToMove: msg("nextAction.draft.GENERALIZATION.evidenceToMove"),
+      experiment: msg("nextAction.draft.GENERALIZATION.experiment", { generalization: gen }),
     });
   }
 
@@ -560,12 +597,27 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
     ladder?.highestSupported === "ACTUAL_PURCHASE";
   if ((ladder ? !wtpReached : (component("purchaseIntent")?.itemCount ?? 0) === 0) || wtpUntested) {
     const ladderText = ladder
-      ? ladder.rungs
-          .map(
-            (r) => `${r.label.toLowerCase()} ${r.supported ? "supported" : r.status.toLowerCase()}`,
-          )
-          .join(" · ")
+      ? msg(
+          "nextAction.draft.WTP_EVIDENCE.ladder",
+          Object.fromEntries(
+            ladder.rungs.map((r) => [
+              r.claimType,
+              msg("nextAction.draft.WTP_EVIDENCE.rung", {
+                label: msg(`nextAction.lower.commercialRung.${r.claimType}`),
+                state: r.supported
+                  ? msg("nextAction.lower.status.SUPPORTED")
+                  : msg(`nextAction.lower.status.${r.status}`),
+              }),
+            ]),
+          ),
+        )
       : null;
+    const note =
+      ladder?.highestSupported === "EXISTING_SPEND"
+        ? "EXISTING_SPEND"
+        : ladder?.highestSupported === "PURCHASE_INTENT"
+          ? "PURCHASE_INTENT"
+          : "other";
     actions.push({
       tier: 3,
       impact: 8,
@@ -577,15 +629,24 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       type: "WTP_EVIDENCE",
       uncertaintyClass: "COMMERCIAL",
       what: ladderNext
-        ? `${ladderNext.question.replace(/\?$/, "")} — establish ${ladderNext.label.toLowerCase()} with ${icp}`
-        : `Find willingness-to-pay evidence from ${icp}`,
+        ? msg("nextAction.draft.WTP_EVIDENCE.whatNext", {
+            question: withoutQuestionMark(ladderNext.question),
+            rung: msg(`nextAction.lower.commercialRung.${ladderNext.claimType}`),
+            icp,
+          })
+        : msg("nextAction.draft.WTP_EVIDENCE.what", { icp }),
       why: ladderText
-        ? `Commercial ladder: ${ladderText}. ${ladder?.highestSupported === "EXISTING_SPEND" ? "Existing spend on an alternative is not willingness to pay for this." : ladder?.highestSupported === "PURCHASE_INTENT" ? "Stated intent is not a stated price, and neither is a purchase." : "No rung of the commercial ladder is evidence-backed yet."}`
-        : "No evidence shows anyone paying, or intending to pay, to move this variable.",
-      affects: "Commercial ladder → business case",
-      ifFalse: "The problem may be real but not worth money to the buyer.",
-      evidenceToMove: ladderNext?.evidenceToMove ?? EVIDENCE_BY_KIND.WTP,
-      experiment: EXPERIMENT_BY_KIND.WTP,
+        ? msg("nextAction.draft.WTP_EVIDENCE.whyLadder", {
+            ladder: ladderText,
+            note: msg(`nextAction.draft.WTP_EVIDENCE.note.${note}`),
+          })
+        : msg("nextAction.draft.WTP_EVIDENCE.why"),
+      affects: msg("nextAction.draft.WTP_EVIDENCE.affects"),
+      ifFalse: msg("nextAction.draft.WTP_EVIDENCE.ifFalse"),
+      evidenceToMove: ladderNext?.evidenceToMove
+        ? asMessage(ladderNext.evidenceToMove)
+        : evidenceByKind("WTP"),
+      experiment: experimentByKind("WTP"),
     });
   }
 
@@ -601,16 +662,16 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       frontier: 3,
       criticality: 6,
       type: "ECONOMIC_MAGNITUDE",
-      what: `Quantify the economic magnitude of ${input.painDescription?.trim() || "the problem"}`,
+      what: msg("nextAction.draft.ECONOMIC_MAGNITUDE.what", {
+        pain: input.painDescription?.trim() || msg("nextAction.fallback.problemOf"),
+      }),
       why: input.valueStrength.missing.includes("magnitude")
-        ? "The Magnitude dimension of Value Strength is UNKNOWN, so Value Strength is INCOMPLETE."
-        : "No evidence quantifies what the problem costs.",
-      affects: "Economic pain and Value Strength (magnitude)",
-      ifFalse: "The value may be too small to matter even if the mechanism works.",
-      evidenceToMove:
-        "Customer statements or records with numbers: money, hours or capacity lost per week or month.",
-      experiment:
-        "Ask five customers what the last occurrence cost them and collect one month of their own records.",
+        ? msg("nextAction.draft.ECONOMIC_MAGNITUDE.whyMissing")
+        : msg("nextAction.draft.ECONOMIC_MAGNITUDE.why"),
+      affects: msg("nextAction.draft.ECONOMIC_MAGNITUDE.affects"),
+      ifFalse: msg("nextAction.draft.ECONOMIC_MAGNITUDE.ifFalse"),
+      evidenceToMove: msg("nextAction.draft.ECONOMIC_MAGNITUDE.evidenceToMove"),
+      experiment: msg("nextAction.draft.ECONOMIC_MAGNITUDE.experiment"),
     });
   }
 
@@ -633,12 +694,17 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
         (a) => a.kind === "FEASIBILITY" && a.status === "UNKNOWN",
       )?.id,
       type: "MECHANISM_FEASIBILITY",
-      what: `Establish whether the mechanism is feasible: ${mechanismNode?.statement ?? input.mechanism ?? "the proposed mechanism"}`,
-      why: "Nothing shows the required data, integrations or behaviours exist.",
-      affects: "Mechanism → Capability",
-      ifFalse: "The mechanism must change before anything else is worth testing.",
-      evidenceToMove: EVIDENCE_BY_KIND.FEASIBILITY,
-      experiment: EXPERIMENT_BY_KIND.FEASIBILITY,
+      what: msg("nextAction.draft.MECHANISM_FEASIBILITY.what", {
+        mechanism:
+          mechanismNode?.statement ??
+          input.mechanism ??
+          msg("nextAction.fallback.proposedMechanism"),
+      }),
+      why: msg("nextAction.draft.MECHANISM_FEASIBILITY.why"),
+      affects: msg("nextAction.draft.MECHANISM_FEASIBILITY.affects"),
+      ifFalse: msg("nextAction.draft.MECHANISM_FEASIBILITY.ifFalse"),
+      evidenceToMove: evidenceByKind("FEASIBILITY"),
+      experiment: experimentByKind("FEASIBILITY"),
     });
   }
 
@@ -651,11 +717,11 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       frontier: 3,
       criticality: 5,
       type: "EVIDENCE_GAP",
-      what: input.evidence.gaps[0].replace(/\.$/, ""),
-      why: "This gap keeps Evidence Confidence low.",
-      affects: "Problem evidence",
-      ifFalse: "The problem itself may be weaker than believed.",
-      evidenceToMove: "Direct customer evidence that closes the gap.",
+      what: asMessage(withoutTrailingPeriod(input.evidence.gaps[0])),
+      why: msg("nextAction.draft.EVIDENCE_GAP.why"),
+      affects: msg("nextAction.draft.EVIDENCE_GAP.affects"),
+      ifFalse: msg("nextAction.draft.EVIDENCE_GAP.ifFalse"),
+      evidenceToMove: msg("nextAction.draft.EVIDENCE_GAP.evidenceToMove"),
       experiment: null,
     });
   }
@@ -669,11 +735,15 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       frontier: 1,
       criticality: 3,
       type: "SECONDARY",
-      what: `Validate the ${VALUE_DIMENSION_LABELS[dim].toLowerCase()} dimension of Value Strength`,
-      why: `${VALUE_DIMENSION_LABELS[dim]} is UNKNOWN; Value Strength stays INCOMPLETE until it is validated, never estimated silently.`,
-      affects: "Value Strength",
-      ifFalse: "Value Strength may be lower than hoped.",
-      evidenceToMove: "Customer or operational data that establishes this dimension.",
+      what: msg("nextAction.draft.SECONDARY.what", {
+        dimension: msg(`nextAction.lower.dimension.${dim}`),
+      }),
+      why: msg("nextAction.draft.SECONDARY.why", {
+        dimension: msg(`labels.valueDimension.${dim}`),
+      }),
+      affects: msg("nextAction.draft.SECONDARY.affects"),
+      ifFalse: msg("nextAction.draft.SECONDARY.ifFalse"),
+      evidenceToMove: msg("nextAction.draft.SECONDARY.evidenceToMove"),
       experiment: null,
     });
   }
@@ -692,12 +762,17 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
       criticality: 5,
       targetLinkId: input.links.find((l) => l.statement === input.causal?.weakest?.statement)?.id,
       type: "SECONDARY",
-      what: `Strengthen the weakest causal link: "${input.causal.weakest.statement}"`,
-      why: `Causal Confidence equals its weakest critical link (${input.causal.weakest.effective}/100).`,
-      affects: `${input.causal.weakest.from} → ${input.causal.weakest.to}`,
-      ifFalse: "Causal Confidence stays capped by this link.",
-      evidenceToMove: "Additional controlled evidence on this link.",
-      experiment: EXPERIMENT_BY_KIND.CAUSAL,
+      what: msg("nextAction.draft.WEAKEST_LINK.what", {
+        statement: input.causal.weakest.statement,
+      }),
+      why: msg("nextAction.draft.WEAKEST_LINK.why", { score: input.causal.weakest.effective }),
+      affects: msg("nextAction.link", {
+        from: input.causal.weakest.from,
+        to: input.causal.weakest.to,
+      }),
+      ifFalse: msg("nextAction.draft.WEAKEST_LINK.ifFalse"),
+      evidenceToMove: msg("nextAction.draft.WEAKEST_LINK.evidenceToMove"),
+      experiment: experimentByKind("CAUSAL"),
     });
   }
 
@@ -705,6 +780,19 @@ export function computeValueActions(input: ValueActionInput): ValueAction[] {
     .map((d) => scoreAction(d, input.experiments ?? []))
     .sort((a, b) => b.priorityScore - a.priorityScore || a.tier - b.tier);
   return scored.map((a, i) => ({ ...a, priority: i + 1 }));
+}
+
+/** Another engine's sentence with its "Label: " prefix removed — only possible on a plain string. */
+function withoutLabelPrefix(text: LocalizedText): LocalizedText {
+  return typeof text === "string" ? text.replace(/^[^:]+: /, "") : text;
+}
+
+function withoutQuestionMark(text: LocalizedText): LocalizedText {
+  return typeof text === "string" ? text.replace(/\?$/, "") : text;
+}
+
+function withoutTrailingPeriod(text: LocalizedText): LocalizedText {
+  return typeof text === "string" ? text.replace(/\.$/, "") : text;
 }
 
 export function primaryValueAction(input: ValueActionInput): ValueAction | null {

@@ -59,7 +59,7 @@ describe("generalization status", () => {
   it("one case is CASE_ONLY; several independent cases are SAMPLE_SUPPORTED", () => {
     const one = assessGeneralization([obs("a", salon(1))], claimScope, "the mechanism is feasible");
     expect(one.status).toBe("CASE_ONLY");
-    expect(one.nextQuestion).toMatch(/other organizations|still hold/);
+    expect(one.nextQuestion?.text).toMatch(/other organizations|still hold/);
     const three = assessGeneralization(
       [obs("a", salon(1)), obs("b", salon(1)), obs("c", salon(1))],
       claimScope,
@@ -88,7 +88,7 @@ describe("generalization status", () => {
       population: "independent hair salons",
     });
     expect(r.status).toBe("BROADER_HYPOTHESIS");
-    expect(r.gap).toMatch(/broader scope/);
+    expect(r.gap.text).toMatch(/broader scope/);
   });
 
   it("contradiction in another context is reported, low-fit observations do not count", () => {
@@ -124,10 +124,10 @@ describe("generalization status", () => {
     });
     expect(a.status).toBe("OBSERVED");
     expect(a.observed).toBe(true);
-    expect(a.observedScopeText).toMatch(/5 organizations/);
+    expect(a.observedScopeText?.text).toMatch(/5 organizations/);
     expect(a.generalization?.status).toBe("CASE_ONLY");
-    expect(a.inference).toMatch(/observed within/);
-    expect(a.inference).toMatch(/One case/);
+    expect(a.inference.text).toMatch(/observed within/);
+    expect(a.inference.text).toMatch(/One case/);
     // The same claim supported by interviews only is SUPPORTED at most, never OBSERVED.
     const reported = assessClaim({
       hasStatement: true,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { renderMessage } from "@/i18n/messages";
 import { assessClaim, type ClaimAssessment } from "@/services/value/epistemic";
 import {
   computeProofFrontier,
@@ -138,7 +139,7 @@ describe("computeProofFrontier", () => {
     );
     expect(r.frontier).toBe("ECONOMIC_PAIN");
     expect(r.blockedAt?.rung).toBe("MECHANISM");
-    expect(r.explanation[0]).toMatch(/Current Proof Frontier: Economic pain/);
+    expect(r.explanation[0].text).toMatch(/Current Proof Frontier: Economic pain/);
   });
 
   it("cannot jump over an unsupported causal link even if a later node has evidence", () => {
@@ -180,7 +181,7 @@ describe("computeProofFrontier", () => {
       links({ "MECHANISM->CAPABILITY": hypothesis() }),
     );
     expect(r.frontier).toBe("MECHANISM");
-    expect(r.blockedAt?.reasons.join(" ")).toMatch(/no linked evidence/);
+    expect(r.blockedAt?.reasons.map((m) => m.text).join(" ")).toMatch(/no linked evidence/);
   });
 
   it("an unresolved contradiction caps the frontier", () => {
@@ -190,7 +191,7 @@ describe("computeProofFrontier", () => {
     );
     expect(r.frontier).toBe("VARIABLE_IMPORTANCE");
     expect(r.blockedAt?.rung).toBe("PAIN");
-    expect(r.blockedAt?.reasons.join(" ")).toMatch(/CONTRADICTED|contradictory/);
+    expect(r.blockedAt?.reasons.map((m) => m.text).join(" ")).toMatch(/CONTRADICTED|contradictory/);
   });
 
   it("a completely untested critical assumption blocks the rung it sits on", () => {
@@ -203,7 +204,7 @@ describe("computeProofFrontier", () => {
       links({}),
     );
     expect(r.frontier).toBe("PAIN");
-    expect(r.blockedAt?.reasons.join(" ")).toMatch(/completely untested/);
+    expect(r.blockedAt?.reasons.map((m) => m.text).join(" ")).toMatch(/completely untested/);
   });
 
   it("non-critical links do not gate the frontier", () => {
@@ -221,5 +222,29 @@ describe("computeProofFrontier", () => {
       l,
     );
     expect(r.frontier).toBe("CAPABILITY");
+  });
+
+  it("explains itself with system messages that render in both languages", () => {
+    const r = computeProofFrontier(
+      rungs({
+        VARIABLE_IMPORTANCE: supported(),
+        PAIN: proven(),
+        ECONOMIC_PAIN: proven(),
+        MECHANISM: proven(),
+        CAPABILITY: proven(),
+      }),
+      links({ "MECHANISM->CAPABILITY": hypothesis() }),
+    );
+    const blocker = r.blockedAt!.blockers[0];
+    expect(blocker.kind).toBe("NO_EVIDENCE");
+    expect(blocker.message.key).toBe("frontier.blocker.noEvidence.link");
+    expect(blocker.message.text).toBe(
+      'Mechanism → Capability: causal link "MECHANISM->CAPABILITY" has no linked evidence (HYPOTHESIS).',
+    );
+    expect(renderMessage(blocker.message, "fr")).toMatch(
+      /^.+ → .+ : le lien causal « MECHANISM->CAPABILITY » n’a aucune preuve liée \(HYPOTHESIS\)\.$/,
+    );
+    expect(renderMessage(r.explanation[0], "fr")).toMatch(/^Frontière de preuve actuelle : /);
+    expect(r.whyStops).toEqual(blocker.message);
   });
 });

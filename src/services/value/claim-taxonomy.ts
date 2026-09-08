@@ -10,6 +10,7 @@
  * quality and method matter relative to admissibility.
  */
 import type { ClaimType, ValueChainLevel } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import type { ProofRung } from "./proof-frontier";
 
 export type ClaimGroup =
@@ -153,6 +154,11 @@ export const CLAIM_STATEMENTS: Record<ClaimType, string> = {
   PROCUREMENT_FEASIBILITY: "procurement is feasible",
   OTHER: "the claim holds",
 };
+
+/** The claim statement as a message, to nest inside engine sentences ("… that the pain exists"). */
+export function claimStatement(type: ClaimType): SystemMessage {
+  return msg(`labels.claimStatement.${type}`);
+}
 
 export const CLAIM_TYPES: ClaimType[] = Object.keys(CLAIM_GROUP) as ClaimType[];
 

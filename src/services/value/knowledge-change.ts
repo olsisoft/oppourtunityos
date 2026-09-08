@@ -4,24 +4,18 @@
  * audit trail of how the workspace came to believe what it believes.
  */
 import type { EpistemicStatus, GeneralizationStatus, Verdict } from "@/generated/prisma/enums";
-import { EPISTEMIC_LABELS } from "@/domain/enums";
+import { msg, type LocalizedText, type MessageParam, type SystemMessage } from "@/i18n/messages";
 import { EPISTEMIC_RANK, isEvidenceBacked } from "./epistemic";
-import { GENERALIZATION_LABELS } from "./language-gate";
-import {
-  frontierMovement,
-  PROOF_RUNG_LABELS,
-  type FrontierMovement,
-  type FrontierPosition,
-} from "./proof-frontier";
+import { frontierMovement, type FrontierMovement, type FrontierPosition } from "./proof-frontier";
 
 export interface KnowledgeClaim {
   /** Stable key, e.g. "rung:PAIN", "node:CAPABILITY", "link:MECHANISM->CAPABILITY". */
   key: string;
-  label: string;
+  label: LocalizedText;
   status: EpistemicStatus;
   confidence: number;
   /** Scope in which the claim was observed (OBSERVED), if any. */
-  scope?: string | null;
+  scope?: LocalizedText | null;
   generalization?: GeneralizationStatus | null;
 }
 
@@ -38,7 +32,7 @@ export interface KnowledgeSnapshot {
 
 export interface ClaimDelta {
   key: string;
-  label: string;
+  label: LocalizedText;
   before: {
     status: EpistemicStatus;
     confidence: number;
@@ -47,10 +41,10 @@ export interface ClaimDelta {
   after: {
     status: EpistemicStatus;
     confidence: number;
-    scope?: string | null;
+    scope?: LocalizedText | null;
     generalization?: GeneralizationStatus | null;
   };
-  text: string;
+  text: SystemMessage;
 }
 
 export interface KnowledgeDiff {
@@ -59,19 +53,32 @@ export interface KnowledgeDiff {
   strengthened: ClaimDelta[];
   weakened: ClaimDelta[];
   contradicted: ClaimDelta[];
-  summary: string;
-  lines: string[];
+  summary: SystemMessage;
+  lines: SystemMessage[];
 }
 
 const STATUS_RANK = EPISTEMIC_RANK;
 
-function fmt(status: EpistemicStatus, confidence: number): string {
-  const label = (EPISTEMIC_LABELS as Record<string, string>)[status] ?? status;
-  return `${label}${isEvidenceBacked(status) || confidence > 0 ? ` ${confidence}` : ""}`;
+/** "SUPPORTED 64", "HYPOTHESIS" — tolerates legacy statuses (e.g. "PROVEN") kept as plain text. */
+function fmt(status: EpistemicStatus, confidence: number): SystemMessage {
+  const label: MessageParam =
+    status in STATUS_RANK ? msg(`labels.epistemic.${status}`) : (status as string);
+  return isEvidenceBacked(status) || confidence > 0
+    ? msg("nextAction.knowledge.state.withConfidence", { status: label, confidence })
+    : msg("nextAction.knowledge.state.statusOnly", { status: label });
 }
 
-function scoreText(n: number | null, completeness?: string): string {
-  return n === null ? `INCOMPLETE${completeness ? ` · ${completeness}` : ""}` : String(n);
+function scoreText(n: number | null, completeness?: string): MessageParam {
+  if (n !== null) return n;
+  return completeness
+    ? msg("nextAction.knowledge.score.incomplete", { completeness })
+    : msg("nextAction.knowledge.score.incompleteBare");
+}
+
+function generalizationLabel(status: GeneralizationStatus | null | undefined): SystemMessage {
+  return status
+    ? msg(`labels.generalization.${status}`)
+    : msg("nextAction.fallback.generalizationNone");
 }
 
 export function diffKnowledge(before: KnowledgeSnapshot, after: KnowledgeSnapshot): KnowledgeDiff {
@@ -89,12 +96,38 @@ export function diffKnowledge(before: KnowledgeSnapshot, after: KnowledgeSnapsho
     };
     const genChanged = (b.generalization ?? null) !== (claim.generalization ?? null);
     if (b.status === claim.status && b.confidence === claim.confidence && !genChanged) continue;
-    const scopeText =
-      claim.status === "OBSERVED" && claim.scope ? ` (in tested scope: ${claim.scope})` : "";
-    const genText =
-      genChanged && claim.generalization
-        ? ` · generalization ${b.generalization ? GENERALIZATION_LABELS[b.generalization] : "—"} → ${GENERALIZATION_LABELS[claim.generalization]}`
-        : "";
+    const scope = claim.status === "OBSERVED" && claim.scope ? claim.scope : null;
+    const withGeneralization = genChanged && Boolean(claim.generalization);
+    const text =
+      scope && withGeneralization
+        ? msg("nextAction.knowledge.delta.scopedGeneralized", {
+            label: claim.label,
+            before: fmt(b.status, b.confidence),
+            after: fmt(claim.status, claim.confidence),
+            scope,
+            genBefore: generalizationLabel(b.generalization),
+            genAfter: generalizationLabel(claim.generalization),
+          })
+        : scope
+          ? msg("nextAction.knowledge.delta.scoped", {
+              label: claim.label,
+              before: fmt(b.status, b.confidence),
+              after: fmt(claim.status, claim.confidence),
+              scope,
+            })
+          : withGeneralization
+            ? msg("nextAction.knowledge.delta.generalized", {
+                label: claim.label,
+                before: fmt(b.status, b.confidence),
+                after: fmt(claim.status, claim.confidence),
+                genBefore: generalizationLabel(b.generalization),
+                genAfter: generalizationLabel(claim.generalization),
+              })
+            : msg("nextAction.knowledge.delta.plain", {
+                label: claim.label,
+                before: fmt(b.status, b.confidence),
+                after: fmt(claim.status, claim.confidence),
+              });
     const delta: ClaimDelta = {
       key: claim.key,
       label: claim.label,
@@ -109,7 +142,7 @@ export function diffKnowledge(before: KnowledgeSnapshot, after: KnowledgeSnapsho
         scope: claim.scope ?? null,
         generalization: claim.generalization ?? null,
       },
-      text: `${claim.label}: ${fmt(b.status, b.confidence)} → ${fmt(claim.status, claim.confidence)}${scopeText}${genText}`,
+      text,
     };
     if (claim.status === "CONTRADICTED" && b.status !== "CONTRADICTED") contradicted.push(delta);
     else if (
@@ -121,42 +154,67 @@ export function diffKnowledge(before: KnowledgeSnapshot, after: KnowledgeSnapsho
   }
 
   const movement = frontierMovement(before.frontier, after.frontier);
-  const lines: string[] = [];
+  const lines: SystemMessage[] = [];
   if (movement !== "NONE") {
     lines.push(
-      `Proof Frontier ${movement === "FORWARD" ? "moved forward" : "moved back"}: ${PROOF_RUNG_LABELS[before.frontier]} → ${PROOF_RUNG_LABELS[after.frontier]}`,
+      msg(
+        movement === "FORWARD"
+          ? "nextAction.knowledge.frontier.forward"
+          : "nextAction.knowledge.frontier.backward",
+        {
+          before: msg(`labels.proofRung.${before.frontier}`),
+          after: msg(`labels.proofRung.${after.frontier}`),
+        },
+      ),
     );
   }
   if (before.evidenceConfidence !== after.evidenceConfidence)
-    lines.push(`Evidence Confidence ${before.evidenceConfidence} → ${after.evidenceConfidence}`);
+    lines.push(
+      msg("nextAction.knowledge.line.evidenceConfidence", {
+        before: before.evidenceConfidence,
+        after: after.evidenceConfidence,
+      }),
+    );
   if (
     before.valueStrength !== after.valueStrength ||
     before.valueCompleteness !== after.valueCompleteness
   )
     lines.push(
-      `Value Strength ${scoreText(before.valueStrength, before.valueCompleteness)} → ${scoreText(after.valueStrength, after.valueCompleteness)}`,
+      msg("nextAction.knowledge.line.valueStrength", {
+        before: scoreText(before.valueStrength, before.valueCompleteness),
+        after: scoreText(after.valueStrength, after.valueCompleteness),
+      }),
     );
   if (
     before.causalConfidence !== after.causalConfidence ||
     before.causalCompleteness !== after.causalCompleteness
   )
     lines.push(
-      `Causal Confidence ${scoreText(before.causalConfidence, before.causalCompleteness)} → ${scoreText(after.causalConfidence, after.causalCompleteness)}`,
+      msg("nextAction.knowledge.line.causalConfidence", {
+        before: scoreText(before.causalConfidence, before.causalCompleteness),
+        after: scoreText(after.causalConfidence, after.causalCompleteness),
+      }),
     );
-  if (before.verdict !== after.verdict) lines.push(`Verdict ${before.verdict} → ${after.verdict}`);
+  if (before.verdict !== after.verdict)
+    lines.push(
+      msg("nextAction.knowledge.line.verdict", { before: before.verdict, after: after.verdict }),
+    );
   for (const d of [...contradicted, ...strengthened, ...weakened]) lines.push(d.text);
 
   const changed = lines.length > 0;
   const summary = !changed
-    ? "Nothing changed."
+    ? msg("nextAction.knowledge.summary.nothing")
     : movement !== "NONE"
       ? lines[0]
       : contradicted.length
-        ? `${contradicted.length} claim${contradicted.length === 1 ? "" : "s"} contradicted: ${contradicted[0].label}`
+        ? msg("nextAction.knowledge.summary.contradicted", {
+            count: contradicted.length,
+            label: contradicted[0].label,
+          })
         : strengthened.length
-          ? `${strengthened[0].text}`
+          ? strengthened[0].text
           : weakened.length
-            ? `${weakened[0].text}`
+            ? weakened[0].text
             : lines[0];
 
   return {

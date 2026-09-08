@@ -25,6 +25,7 @@ import { getLocale, getT } from "@/i18n/server";
 import type { T } from "@/i18n/t";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import type { LocalizedText } from "@/i18n/messages";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT();
@@ -281,7 +282,7 @@ export default async function DashboardPage({
                             </div>
                             <p className="text-muted-foreground text-xs">
                               {t("dashboard.learning.meta", {
-                                summary: t(c.summary),
+                                summary: t((c.summaryMessage as LocalizedText | null) ?? c.summary),
                                 reason,
                                 date: formatDate(c.createdAt, locale),
                               })}

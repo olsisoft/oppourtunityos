@@ -1,17 +1,19 @@
 /**
  * Turn a value action into a prefilled experiment plan. Pure: usable from
  * server components and client components alike. The user still edits it —
- * the decision question in particular.
+ * the decision question in particular. Text fields are localized values:
+ * the form renders them with t() in the current language.
  */
 import type { ExperimentType } from "@/generated/prisma/enums";
+import { msg, type LocalizedText } from "@/i18n/messages";
 import type { ValueAction } from "./next-value-action";
 
 export interface PlanPrefill {
-  title?: string;
-  hypothesis?: string;
-  decisionQuestion?: string;
-  design?: string;
-  successMetric?: string;
+  title?: LocalizedText;
+  hypothesis?: LocalizedText;
+  decisionQuestion?: LocalizedText;
+  design?: LocalizedText;
+  successMetric?: LocalizedText;
   experimentType?: ExperimentType;
   causalLinkId?: string | null;
   assumptionId?: string | null;
@@ -30,11 +32,13 @@ export function prefillFromAction(action: ValueAction, opportunityTitle: string)
             ? "CUSTOMER_INTERVIEW"
             : "OTHER";
   return {
-    title: action.what
-      .replace(/^(Validate|Test|Find|Quantify|Establish|Strengthen)\s/, "")
-      .slice(0, 120),
+    title: action.what,
     hypothesis: action.what,
-    decisionQuestion: `Should we keep investing in "${opportunityTitle}" given ${action.affects.toLowerCase()}? If false: ${action.ifFalse}`,
+    decisionQuestion: msg("nextAction.prefill.decisionQuestion", {
+      title: opportunityTitle,
+      affects: action.affects,
+      ifFalse: action.ifFalse,
+    }),
     design: action.experiment ?? undefined,
     successMetric: undefined,
     experimentType: type,

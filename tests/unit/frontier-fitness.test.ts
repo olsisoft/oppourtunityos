@@ -78,7 +78,7 @@ describe("Proof Frontier requires fitting evidence, not evidence quantity", () =
     expect(blocked.frontier).toBe("PAIN");
     expect(blocked.blockedAt?.rung).toBe("ECONOMIC_PAIN");
     expect(blocked.blockedAt?.blockers.map((b) => b.kind)).toContain("LOW_FIT");
-    expect(blocked.whyStops).toMatch(/cannot establish|does not fit/);
+    expect(blocked.whyStops.text).toMatch(/cannot establish|does not fit/);
 
     const advanced = computeProofFrontier(rungs({ ...problem, ECONOMIC_PAIN: threeRecords }), []);
     expect(advanced.frontier).toBe("ECONOMIC_PAIN");
@@ -104,9 +104,9 @@ describe("Proof Frontier requires fitting evidence, not evidence quantity", () =
     expect(mechanism.status).toBe("OBSERVED");
     expect(r.frontier).toBe("MECHANISM");
     expect(r.frontierScope.observed).toBe(true);
-    expect(r.frontierScope.text).toMatch(/5 organizations/);
+    expect(r.frontierScope.text.text).toMatch(/5 organizations/);
     expect(r.frontierScope.generalization).toBe("CASE_ONLY");
-    expect(r.explanation[0]).toMatch(/scope: 5 organizations/);
+    expect(r.explanation[0].text).toMatch(/scope: 5 organizations/);
   });
 
   it("a high-fit contradiction blocks advancement (MIXED), a low-fit one does not", () => {
@@ -123,7 +123,7 @@ describe("Proof Frontier requires fitting evidence, not evidence quantity", () =
     );
     expect(r.frontier).toBe("ECONOMIC_PAIN");
     expect(r.blockedAt?.blockers.map((b) => b.kind)).toContain("CONTRADICTION");
-    expect(r.whyStops).toMatch(/mixed evidence/);
+    expect(r.whyStops.text).toMatch(/mixed evidence/);
     // A forum post contradicting feasibility is not admissible: it changes nothing.
     const withForum = claim("MECHANISM_FEASIBLE", [
       { item: study() },
@@ -293,7 +293,7 @@ describe("PROVEN migration", () => {
       },
     );
     expect(diff.changed).toBe(true);
-    expect(diff.lines.join(" ")).toMatch(
+    expect(diff.lines.map((l) => l.text).join(" ")).toMatch(
       /PROVEN 80 → OBSERVED 80 \(in tested scope: 5 organizations\)/,
     );
   });

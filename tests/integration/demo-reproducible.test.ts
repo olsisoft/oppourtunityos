@@ -88,7 +88,7 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
     expect(leakage?.verdict).toBe("TEST");
     const leakageFrontier = leakage?.proofFrontier as unknown as {
       blockedAt: { rung: string; blockers: Array<{ kind: string }> } | null;
-      frontierScope: { text: string; generalization: string | null };
+      frontierScope: { text: { text: string }; generalization: string | null };
       commercial: {
         highestSupported: string | null;
         rungs: Array<{ claimType: string; status: string }>;
@@ -96,7 +96,7 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
     };
     expect(leakageFrontier.blockedAt?.rung).toBe("MECHANISM");
     expect(leakageFrontier.blockedAt?.blockers.map((b) => b.kind)).toContain("LOW_FIT");
-    expect(leakageFrontier.frontierScope.text).toMatch(/independent hair salon/);
+    expect(leakageFrontier.frontierScope.text.text).toMatch(/independent hair salon/);
     const mechanism = leakage?.valueChainNodes.find((n) => n.level === "MECHANISM");
     expect(mechanism?.status).toBe("UNPROVEN");
     expect(mechanism?.generalization).toBe("UNTESTED");

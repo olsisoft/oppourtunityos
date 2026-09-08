@@ -61,12 +61,14 @@ describe("experiment outcome — deterministic thresholds", () => {
 describe("experiment planning warnings", () => {
   it("an experiment without a decision question generates a warning", () => {
     const w = experimentWarnings({ decisionQuestion: "", causalLinkId: "l1" });
-    expect(w.some((x) => x.level === "warning" && /decision question/i.test(x.message))).toBe(true);
+    expect(w.some((x) => x.level === "warning" && /decision question/i.test(x.message.text))).toBe(
+      true,
+    );
   });
 
   it("an experiment that targets nothing generates a warning", () => {
     const w = experimentWarnings({ decisionQuestion: "Can we build it?" });
-    expect(w.some((x) => /targets nothing/.test(x.message))).toBe(true);
+    expect(w.some((x) => /targets nothing/.test(x.message.text))).toBe(true);
   });
 
   it("a complete plan has no warnings, only optional info", () => {
@@ -197,13 +199,13 @@ describe("knowledge change diff (history)", () => {
     );
     expect(d.changed).toBe(true);
     expect(d.frontierMovement).toBe("FORWARD");
-    expect(d.summary).toMatch(/Proof Frontier moved forward: Economic pain → Mechanism/);
+    expect(d.summary.text).toMatch(/Proof Frontier moved forward: Economic pain → Mechanism/);
     expect(d.strengthened.map((c) => c.key)).toEqual([
       "node:MECHANISM",
       "link:MECHANISM->CAPABILITY",
     ]);
     expect(
-      d.lines.some((l) => /Causal Confidence INCOMPLETE · 0\/5 → INCOMPLETE · 1\/5/.test(l)),
+      d.lines.some((l) => /Causal Confidence INCOMPLETE · 0\/5 → INCOMPLETE · 1\/5/.test(l.text)),
     ).toBe(true);
   });
 

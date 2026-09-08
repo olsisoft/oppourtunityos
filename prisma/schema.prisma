@@ -1033,6 +1033,8 @@ model KnowledgeChange {
   claimsWeakened             Json
   claimsContradicted         Json
   summary                    String
+  /// Structured form of `summary` (dictionary key + params) rendered in the user's language.
+  summaryMessage             Json?
   createdAt                  DateTime         @default(now())
 
   opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
