@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { cloneElement, isValidElement, useId, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -192,7 +192,7 @@ export function ExperimentResultDialog({
               nextAction={done.nextAction?.what ?? null}
             />
             <DialogFooter>
-              <Button onClick={() => onOpenChange(false)}>Close</Button>
+              <Button onClick={() => onOpenChange(false)}>Done</Button>
             </DialogFooter>
           </div>
         ) : (
@@ -447,10 +447,18 @@ export function ExperimentResultDialog({
 }
 
 function L({ label, children }: { label: string; children: React.ReactNode }) {
+  // Associate the label with the control so assistive tech (and tests) can
+  // find the field by its label.
+  const id = useId();
+  const control = isValidElement<{ id?: string }>(children)
+    ? cloneElement(children, { id: children.props.id ?? id })
+    : children;
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
+      <Label htmlFor={id} className="text-xs">
+        {label}
+      </Label>
+      {control}
     </div>
   );
 }

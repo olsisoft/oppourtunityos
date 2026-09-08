@@ -126,7 +126,7 @@ test("the learning loop: plan an experiment, record a result, see the frontier m
   // The knowledge update is shown: before → after.
   await expect(page.getByText("What the last test changed")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/Proof frontier/).first()).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Done" }).click();
 
   // The result is now evidence and appears in the learning history.
   await expect(page.getByText(/Experiment: Concierge reconciliation/).first()).toBeVisible({
