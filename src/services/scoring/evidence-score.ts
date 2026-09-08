@@ -6,9 +6,14 @@
  * no explicit pain does not increase the "explicit pain" component). Every
  * component saturates so many weak items cannot outweigh one strong, direct
  * customer statement. Contradictory evidence subtracts.
+ *
+ * Component labels, explanation lines and gaps are SystemMessages (see
+ * src/i18n/messages.ts) so they render in the reader's language; `text`
+ * holds the canonical English.
  */
 import { clamp } from "@/lib/utils";
 import type { EvidenceSentiment, EvidenceSourceType, EvidenceType } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { fitFactor } from "@/services/value/evidence-fit";
 import {
   isDirectSource,
@@ -106,7 +111,7 @@ const RECENT_MONTHS = 12;
 
 export interface EvidenceComponentResult {
   key: EvidenceComponentKey;
-  label: string;
+  label: SystemMessage;
   weight: number;
   /** 0–1 saturation of this component. */
   fill: number;
@@ -126,8 +131,27 @@ export interface EvidenceScoreResult {
     neutral: number;
     direct: number;
   };
-  explanation: string[];
-  gaps: string[];
+  explanation: SystemMessage[];
+  gaps: SystemMessage[];
+}
+
+function componentLabel(key: EvidenceComponentKey): SystemMessage {
+  return msg(`labels.evidenceComponent.${key}`);
+}
+
+/** "{label}: 63% of 20 pts → 12.6 pts (3 items)" */
+function componentLine(c: EvidenceComponentResult): SystemMessage {
+  return msg("scoring.evidence.componentLine", {
+    label: c.label,
+    fill: Math.round(c.fill * 100),
+    weight: c.weight,
+    points: c.points,
+    count: c.itemCount,
+  });
+}
+
+function contradictionLine(count: number, penalty: number): SystemMessage {
+  return msg("scoring.evidence.contradiction", { count, penalty });
 }
 
 export function saturate(x: number, k = SATURATION_K): number {
@@ -214,7 +238,7 @@ export function computeEvidenceScore(
     r: { fill: number; count: number },
   ): EvidenceComponentResult => ({
     key,
-    label: EVIDENCE_COMPONENT_LABELS[key],
+    label: componentLabel(key),
     weight: EVIDENCE_WEIGHTS[key],
     fill: round2(r.fill),
     points: round1(r.fill * EVIDENCE_WEIGHTS[key]),
@@ -237,35 +261,27 @@ export function computeEvidenceScore(
   const raw = components.reduce((s, c) => s + c.points, 0) - penaltyPoints;
   const score = items.length === 0 ? 0 : Math.round(clamp(raw, 0, 100));
 
-  const explanation: string[] = [];
+  const explanation: SystemMessage[] = [];
   if (items.length === 0) {
-    explanation.push(
-      "No evidence captured. Everything about this opportunity is still a hypothesis.",
-    );
+    explanation.push(msg("scoring.evidence.noEvidence"));
   } else {
     for (const c of components) {
-      explanation.push(
-        `${c.label}: ${Math.round(c.fill * 100)}% of ${c.weight} pts → ${c.points} pts (${c.itemCount} item${c.itemCount === 1 ? "" : "s"})`,
-      );
+      explanation.push(componentLine(c));
     }
     if (contradicting.length > 0) {
-      explanation.push(
-        `Contradictory evidence: ${contradicting.length} item${contradicting.length === 1 ? "" : "s"} → −${penaltyPoints} pts`,
-      );
+      explanation.push(contradictionLine(contradicting.length, penaltyPoints));
     }
-    explanation.push(`Total: ${score}/100`);
+    explanation.push(msg("scoring.total", { score }));
   }
 
-  const gaps: string[] = [];
-  if (direct.count === 0) gaps.push("No direct customer evidence (interview, quote or survey).");
-  if (pain.count === 0) gaps.push("No source states the pain explicitly.");
-  if (economic.count === 0)
-    gaps.push("No evidence of economic impact (money, time or capacity lost).");
-  if (workaround.count === 0)
-    gaps.push("No evidence of workaround behavior (people already trying to solve it).");
-  if (intent.count === 0) gaps.push("No willingness-to-pay or purchase-intent evidence.");
+  const gaps: SystemMessage[] = [];
+  if (direct.count === 0) gaps.push(msg("scoring.evidence.gap.noDirect"));
+  if (pain.count === 0) gaps.push(msg("scoring.evidence.gap.noPain"));
+  if (economic.count === 0) gaps.push(msg("scoring.evidence.gap.noEconomic"));
+  if (workaround.count === 0) gaps.push(msg("scoring.evidence.gap.noWorkaround"));
+  if (intent.count === 0) gaps.push(msg("scoring.evidence.gap.noIntent"));
   if (contradictingWeight > totalSupportWeight && items.length > 0) {
-    gaps.push("Contradictory evidence outweighs supporting evidence.");
+    gaps.push(msg("scoring.evidence.gap.contradictionOutweighs"));
   }
 
   return {
@@ -331,7 +347,7 @@ export function computeSupportScore(
     count: number,
   ): EvidenceComponentResult => ({
     key,
-    label: EVIDENCE_COMPONENT_LABELS[key],
+    label: componentLabel(key),
     weight,
     fill: round2(fill),
     points: round1(fill * weight),
@@ -353,29 +369,24 @@ export function computeSupportScore(
   const raw = components.reduce((s, c) => s + c.points, 0) - penaltyPoints;
   const score = items.length === 0 ? 0 : Math.round(clamp(raw, 0, 100));
 
-  const explanation: string[] = [];
+  const explanation: SystemMessage[] = [];
   if (items.length === 0) {
-    explanation.push("No admissible evidence linked to this claim.");
+    explanation.push(msg("scoring.evidence.noAdmissible"));
   } else {
     for (const c of components) {
-      explanation.push(
-        `${c.label}: ${Math.round(c.fill * 100)}% of ${c.weight} pts → ${c.points} pts (${c.itemCount} item${c.itemCount === 1 ? "" : "s"})`,
-      );
+      explanation.push(componentLine(c));
     }
     if (contradicting.length > 0)
-      explanation.push(
-        `Contradictory evidence: ${contradicting.length} item${contradicting.length === 1 ? "" : "s"} → −${penaltyPoints} pts`,
-      );
-    explanation.push(`Total: ${score}/100`);
+      explanation.push(contradictionLine(contradicting.length, penaltyPoints));
+    explanation.push(msg("scoring.total", { score }));
   }
-  const gaps: string[] = [];
-  if (supporting.length === 0) gaps.push("No supporting evidence.");
-  if (origins < 2 && supporting.length > 0)
-    gaps.push("A single independent source: no corroboration yet.");
+  const gaps: SystemMessage[] = [];
+  if (supporting.length === 0) gaps.push(msg("scoring.evidence.gap.noSupport"));
+  if (origins < 2 && supporting.length > 0) gaps.push(msg("scoring.evidence.gap.singleOrigin"));
   if (measurementWeight === 0 && supporting.length > 0)
-    gaps.push("Nothing measured or observed directly: the claim rests on reports.");
+    gaps.push(msg("scoring.evidence.gap.noMeasurement"));
   if (contradictingWeight > supportWeight && items.length > 0)
-    gaps.push("Contradictory evidence outweighs supporting evidence.");
+    gaps.push(msg("scoring.evidence.gap.contradictionOutweighs"));
 
   return {
     score,

@@ -3,7 +3,12 @@
  *
  * The LLM never produces this number. It may propose the six 0–10 inputs;
  * the user can edit them; this function converts them into a score.
+ *
+ * Component labels and explanation lines are SystemMessages (see
+ * src/i18n/messages.ts) so they render in the reader's language; `text`
+ * holds the canonical English.
  */
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { clamp } from "@/lib/utils";
 
 export interface OpportunityScoreInputs {
@@ -47,7 +52,7 @@ export const OPPORTUNITY_INPUT_HELP: Record<OpportunityInputKey, string> = {
 
 export interface OpportunityScoreComponent {
   key: OpportunityInputKey;
-  label: string;
+  label: SystemMessage;
   /** Normalized input, 0–10. */
   value: number;
   weight: number;
@@ -60,7 +65,7 @@ export interface OpportunityScoreResult {
   score: number;
   components: OpportunityScoreComponent[];
   /** Human-readable explanation lines shown in the UI. */
-  explanation: string[];
+  explanation: SystemMessage[];
   /** Inputs that hold the score back the most (lowest value first). */
   weakestInputs: OpportunityInputKey[];
 }
@@ -93,7 +98,7 @@ export function computeOpportunityScore(
     const value = inputs[key];
     return {
       key,
-      label: OPPORTUNITY_INPUT_LABELS[key],
+      label: msg(`labels.opportunityInput.${key}`),
       value,
       weight,
       points: round1(value * weight * 10),
@@ -106,10 +111,15 @@ export function computeOpportunityScore(
 
   const weakestInputs = [...keys].sort((a, b) => inputs[a] - inputs[b]).slice(0, 2);
 
-  const explanation = components.map(
-    (c) => `${c.label}: ${c.value}/10 × ${Math.round(c.weight * 100)}% → ${c.points} pts`,
+  const explanation = components.map((c) =>
+    msg("scoring.opportunity.componentLine", {
+      label: c.label,
+      value: c.value,
+      weight: Math.round(c.weight * 100),
+      points: c.points,
+    }),
   );
-  explanation.push(`Total: ${score}/100`);
+  explanation.push(msg("scoring.total", { score }));
 
   return { score, components, explanation, weakestInputs };
 }

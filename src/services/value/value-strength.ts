@@ -7,7 +7,12 @@
  * many dimensions are known (e.g. 4/5), names what is missing, carries the
  * provenance of every known dimension and asks the next value question.
  * UNKNOWN never becomes zero.
+ *
+ * Every sentence is a SystemMessage (see src/i18n/messages.ts) so it renders
+ * in the reader's language; `text` holds the canonical English.
  */
+import { msg, type MessageParams, type SystemMessage } from "@/i18n/messages";
+
 export const VALUE_DIMENSIONS = [
   "importance",
   "magnitude",
@@ -46,7 +51,7 @@ export interface ValueStrengthContext {
 
 export interface ValueStrengthDimension {
   key: ValueDimension;
-  label: string;
+  label: SystemMessage;
   value: number | null;
   normalized: number | null;
   /** Provenance of the value; "UNKNOWN" when the value is missing. */
@@ -65,8 +70,8 @@ export interface ValueStrengthResult {
   total: number;
   completeness: string;
   /** The question that would complete the score (first missing dimension). */
-  nextQuestion: string | null;
-  explanation: string[];
+  nextQuestion: SystemMessage | null;
+  explanation: SystemMessage[];
 }
 
 function normalize(value: number | null | undefined): number | null {
@@ -74,29 +79,40 @@ function normalize(value: number | null | undefined): number | null {
   return Math.min(10, Math.max(0, value)) / 10;
 }
 
+/** Display token per provenance key (mirrors labels.fieldStatus). */
 const PROVENANCE_LABEL: Record<string, string> = {
   USER: "USER",
   INTERVIEW: "INTERVIEW",
   EXTERNAL_EVIDENCE: "EVIDENCE",
   AI_HYPOTHESIS: "HYPOTHESIS",
   COMPUTED: "COMPUTED",
+  UNKNOWN: "UNKNOWN",
 };
 
-export function valueQuestion(dim: ValueDimension, ctx: ValueStrengthContext = {}): string {
-  const v = ctx.variableName?.trim() || "the variable";
-  const icp = ctx.icpName?.trim() || "the customer";
-  const mechanism = ctx.mechanism?.trim() || "the proposed mechanism";
+function dimensionLabel(dim: ValueDimension): SystemMessage {
+  return msg(`labels.valueDimension.${dim}`);
+}
+
+/** Localized provenance for a sentence; unknown keys pass through as text. */
+function provenanceLabel(key: string): SystemMessage | string {
+  return key in PROVENANCE_LABEL ? msg(`labels.fieldStatus.${key}`) : key;
+}
+
+export function valueQuestion(dim: ValueDimension, ctx: ValueStrengthContext = {}): SystemMessage {
+  const variable = ctx.variableName?.trim() || msg("scoring.valueStrength.defaultVariable");
+  const icp = ctx.icpName?.trim() || msg("scoring.valueStrength.defaultIcp");
+  const mechanism = ctx.mechanism?.trim() || msg("scoring.valueStrength.defaultMechanism");
   switch (dim) {
     case "population":
-      return `What share of ${icp}'s operation (capacity, revenue or transactions) is actually affected by ${v}?`;
+      return msg("scoring.valueStrength.question.population", { icp, variable });
     case "magnitude":
-      return `How much does ${v} move — or cost — per occurrence, in numbers (money, hours, capacity)?`;
+      return msg("scoring.valueStrength.question.magnitude", { variable });
     case "frequency":
-      return `How often does ${v} actually occur for ${icp} (per week or month)?`;
+      return msg("scoring.valueStrength.question.frequency", { variable, icp });
     case "importance":
-      return `How much does ${v} matter to ${icp} compared with their other problems?`;
+      return msg("scoring.valueStrength.question.importance", { variable, icp });
     case "attributability":
-      return `How directly could ${mechanism} cause the change in ${v}, versus other factors?`;
+      return msg("scoring.valueStrength.question.attributability", { mechanism, variable });
   }
 }
 
@@ -104,29 +120,37 @@ export function computeValueStrength(
   dims: ValueDimensions,
   ctx: ValueStrengthContext = {},
 ): ValueStrengthResult {
+  const provenanceKeys: Record<string, string> = {};
   const dimensions: ValueStrengthDimension[] = VALUE_DIMENSIONS.map((key) => {
     const raw = dims[key];
     const normalized = normalize(raw);
-    const prov = ctx.provenance?.[key];
+    const provKey = normalized === null ? "UNKNOWN" : ctx.provenance?.[key] || "AI_HYPOTHESIS";
+    provenanceKeys[key] = provKey;
     return {
       key,
-      label: VALUE_DIMENSION_LABELS[key],
+      label: dimensionLabel(key),
       value: normalized === null ? null : Math.min(10, Math.max(0, raw as number)),
       normalized,
-      provenance:
-        normalized === null ? "UNKNOWN" : prov ? (PROVENANCE_LABEL[prov] ?? prov) : "HYPOTHESIS",
+      provenance: PROVENANCE_LABEL[provKey] ?? provKey,
     };
   });
   const missing = dimensions.filter((d) => d.normalized === null).map((d) => d.key);
   const total = VALUE_DIMENSIONS.length;
   const known = total - missing.length;
   const completeness = `${known}/${total}`;
-  const dimLines = dimensions.map(
-    (d) => `${d.label}: ${d.value === null ? "UNKNOWN" : `${d.value}/10`} (${d.provenance})`,
-  );
+  const dimLines = dimensions.map((d) => {
+    const provenance = provenanceLabel(provenanceKeys[d.key] ?? "UNKNOWN");
+    return d.value === null
+      ? msg("scoring.valueStrength.dimensionUnknown", { label: d.label, provenance })
+      : msg("scoring.valueStrength.dimensionLine", { label: d.label, value: d.value, provenance });
+  });
 
   if (missing.length > 0) {
     const nextQuestion = valueQuestion(missing[0], ctx);
+    const missingParams: MessageParams = { count: missing.length };
+    missing.forEach((m, i) => {
+      missingParams[`d${i + 1}`] = dimensionLabel(m);
+    });
     return {
       status: "INCOMPLETE",
       score: null,
@@ -138,10 +162,10 @@ export function computeValueStrength(
       completeness,
       nextQuestion,
       explanation: [
-        `Value Strength is INCOMPLETE · ${completeness}: a required dimension is UNKNOWN and is never guessed (UNKNOWN ≠ 0).`,
-        `Missing: ${missing.map((m) => VALUE_DIMENSION_LABELS[m]).join(", ")}.`,
+        msg("scoring.valueStrength.incomplete", { known, total }),
+        msg("scoring.valueStrength.missing", missingParams),
         ...dimLines,
-        `Next value question: ${nextQuestion}`,
+        msg("scoring.valueStrength.nextQuestion", { question: nextQuestion }),
       ],
     };
   }
@@ -165,8 +189,10 @@ export function computeValueStrength(
     nextQuestion: null,
     explanation: [
       ...dimLines,
-      `Geometric mean of normalized dimensions × 100 = ${score}/100.`,
-      weakest ? `Weakest dimension: ${VALUE_DIMENSION_LABELS[weakest]}.` : "",
-    ].filter(Boolean),
+      msg("scoring.valueStrength.geometricMean", { score }),
+      ...(weakest
+        ? [msg("scoring.valueStrength.weakest", { label: dimensionLabel(weakest) })]
+        : []),
+    ],
   };
 }

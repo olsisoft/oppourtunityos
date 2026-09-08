@@ -13,7 +13,7 @@ describe("computeValueStrength", () => {
     expect(r.status).toBe("INCOMPLETE");
     expect(r.score).toBeNull();
     expect(r.missing).toEqual(["magnitude", "attributability"]);
-    expect(r.explanation.join(" ")).toMatch(/never guessed/);
+    expect(r.explanation.map((x) => x.text).join(" ")).toMatch(/never guessed/);
   });
 
   it("is deterministic and uses a geometric mean (9,8,9,7,6 → 77)", () => {

@@ -74,7 +74,7 @@ describe("computeOpportunityScore", () => {
     const a = computeOpportunityScore(inputs);
     const b = computeOpportunityScore(inputs);
     expect(a).toEqual(b);
-    expect(a.explanation.at(-1)).toBe(`Total: ${a.score}/100`);
+    expect(a.explanation.at(-1)?.text).toBe(`Total: ${a.score}/100`);
     expect(a.weakestInputs).toEqual(["gap", "alternativeWeakness"]);
   });
 });

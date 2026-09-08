@@ -7,6 +7,7 @@ import {
   frontierMovement,
 } from "@/services/value/proof-frontier";
 import { assessClaim, type ClaimEvidenceInput } from "@/services/value/epistemic";
+import { textOf } from "@/i18n/messages";
 
 function evidence(
   strength: number,
@@ -66,7 +67,7 @@ describe("Value Strength completeness", () => {
     expect(r.score).toBeNull();
     expect(r.completeness).toBe("4/5");
     expect(r.missing).toEqual(["population"]);
-    expect(r.nextQuestion).toMatch(/affected by no-show rate/);
+    expect(r.nextQuestion?.text).toMatch(/affected by no-show rate/);
     expect(r.dimensions.find((d) => d.key === "frequency")?.provenance).toBe("EVIDENCE");
     expect(r.dimensions.find((d) => d.key === "population")?.provenance).toBe("UNKNOWN");
     expect(r.dimensions.find((d) => d.key === "attributability")?.provenance).toBe("HYPOTHESIS");
@@ -90,7 +91,7 @@ describe("Value Strength completeness", () => {
     expect(incomplete.score).toBeNull();
     expect(zero.status).toBe("COMPLETE");
     expect(zero.score).toBe(0);
-    expect(incomplete.explanation.join(" ")).toMatch(/UNKNOWN ≠ 0/);
+    expect(incomplete.explanation.map((x) => x.text).join(" ")).toMatch(/UNKNOWN ≠ 0/);
   });
 
   it("complete dimensions give 5/5 and a score", () => {
@@ -139,10 +140,12 @@ describe("Causal Confidence completeness", () => {
     expect(r.total).toBe(4); // 3 stated + 1 missing scoring link; strategic link absent
     expect(r.completeness).toBe("2/4");
     expect(
-      r.missing.some((m) => /TRANSFORMATION → OPERATIONAL_VALUE: causal link not stated/.test(m)),
+      r.missing.some((m) =>
+        /TRANSFORMATION → OPERATIONAL_VALUE: causal link not stated/.test(m.text),
+      ),
     ).toBe(true);
-    expect(r.blocking?.label).toBe("Transformation → Operational value");
-    expect(r.nextQuestion).toMatch(/connects Transformation to Operational value/);
+    expect(r.blocking?.label.text).toBe("Transformation → Operational value");
+    expect(r.nextQuestion?.text).toMatch(/connects Transformation to Operational value/);
     expect(r.links.find((l) => l.from === "OPERATIONAL_VALUE")?.status).toBe("HYPOTHESIS");
   });
 
@@ -178,7 +181,7 @@ describe("Causal Confidence completeness", () => {
       },
     ]);
     expect(r.score).toBeNull();
-    expect(r.explanation[0]).toMatch(/UNKNOWN, not zero/);
+    expect(r.explanation[0].text).toMatch(/UNKNOWN, not zero/);
   });
 });
 
@@ -215,7 +218,7 @@ describe("Proof Frontier explanation", () => {
     const blocker = r.blockedAt?.blockers[0];
     expect(blocker?.kind).toBe("BELOW_THRESHOLD");
     expect(blocker?.required).toBe(FRONTIER_THRESHOLDS.TRANSFORMATION);
-    expect(r.whyStops).toMatch(/Transformation: confidence \d+, required threshold 50/);
+    expect(textOf(r.whyStops)).toMatch(/Transformation: confidence \d+, required threshold 50/);
   });
 
   it("an untested critical assumption on a link is named as the blocker", () => {
@@ -239,7 +242,7 @@ describe("Proof Frontier explanation", () => {
         (b) => b.kind === "UNTESTED_ASSUMPTION" && b.assumption === "POS exposes the data",
       ),
     ).toBe(true);
-    expect(r.whyStops).toMatch(/critical causal assumption remains untested/);
+    expect(textOf(r.whyStops)).toMatch(/critical causal assumption remains untested/);
   });
 
   it("contradictory evidence is named as the blocker", () => {

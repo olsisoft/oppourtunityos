@@ -19,8 +19,8 @@ describe("variable semantics — verb × variable type", () => {
   it("Reduce × Revenue does warn", () => {
     const c = checkVerbType("DECREASE", "Revenue");
     expect(c.level).toBe("warning");
-    expect(c.message).toMatch(/desirable thing smaller/);
-    expect(c.message).toMatch(/You may keep it/); // advisory, never blocking
+    expect(c.message?.text).toMatch(/desirable thing smaller/);
+    expect(c.message?.text).toMatch(/You may keep it/); // advisory, never blocking
   });
 
   it("accepts the documented GOOD pairs", () => {
@@ -81,7 +81,7 @@ describe("variable semantics — verb × variable type", () => {
   it("renders compact labels without the whole algebra", () => {
     expect(compactLabel("DECREASE", "No-show rate")).toBe("↓ No-show rate");
     expect(compactLabel("PROTECT", "Net revenue")).toBe("⇄ Net revenue");
-    expect(verbSentence("DECREASE", "No-show rate")).toBe("Reduce no-show rate");
+    expect(verbSentence("DECREASE", "No-show rate").text).toBe("Reduce no-show rate");
   });
 });
 

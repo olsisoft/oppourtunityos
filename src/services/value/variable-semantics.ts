@@ -12,9 +12,12 @@
  *
  * Per-field provenance: UNKNOWN is a first-class status — a field without a
  * value is UNKNOWN regardless of the record's overall provenance.
+ *
+ * Warnings and verb sentences are SystemMessages (see src/i18n/messages.ts)
+ * so they render in the reader's language; `text` holds the canonical English.
  */
 import type { DesiredDirection, Provenance, VariablePolarity } from "@/generated/prisma/enums";
-import { DIRECTION_LABELS } from "@/domain/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 
 export interface VariableTypeDef {
   name: string;
@@ -130,7 +133,11 @@ export type VerbTypeLevel = "ok" | "warning" | "unknown";
 export interface VerbTypeCheck {
   level: VerbTypeLevel;
   polarity: VariablePolarity | null;
-  message: string | null;
+  message: SystemMessage | null;
+}
+
+function verbLabel(verb: DesiredDirection): SystemMessage {
+  return msg(`labels.direction.${verb}`);
 }
 
 /**
@@ -143,38 +150,39 @@ export function checkVerbType(
   explicitPolarity?: VariablePolarity | null,
 ): VerbTypeCheck {
   const polarity = polarityOf(type, explicitPolarity);
-  const v = DIRECTION_LABELS[verb];
   if (!polarity) {
     return {
       level: "unknown",
       polarity: null,
-      message:
-        "Variable type is UNKNOWN, so the action verb cannot be checked. Choose a type (or set the polarity of a custom type).",
+      message: msg("scoring.semantics.unknownType"),
     };
   }
-  const t = type?.trim() || polarity.toLowerCase();
+  const typeName = type?.trim() || msg(`scoring.semantics.polarityWord.${polarity}`);
+  const [first, second, third] = suggestedVerbsFor(polarity).slice(0, 3).map(verbLabel);
   if (polarity === "POSITIVE" && DECREASING_VERBS.has(verb)) {
     return {
       level: "warning",
       polarity,
-      message: `"${v} × ${t}" reads as making a desirable thing smaller. Did you mean ${suggestedVerbsFor(
-        polarity,
-      )
-        .slice(0, 3)
-        .map((s) => DIRECTION_LABELS[s])
-        .join(", ")}? You may keep it if it is intended.`,
+      message: msg("scoring.semantics.decreasingPositive", {
+        verb: verbLabel(verb),
+        type: typeName,
+        first,
+        second,
+        third,
+      }),
     };
   }
   if (polarity === "NEGATIVE" && INCREASING_VERBS.has(verb)) {
     return {
       level: "warning",
       polarity,
-      message: `"${v} × ${t}" reads as making an undesirable thing bigger. Did you mean ${suggestedVerbsFor(
-        polarity,
-      )
-        .slice(0, 3)
-        .map((s) => DIRECTION_LABELS[s])
-        .join(", ")}? You may keep it if it is intended.`,
+      message: msg("scoring.semantics.increasingNegative", {
+        verb: verbLabel(verb),
+        type: typeName,
+        first,
+        second,
+        third,
+      }),
     };
   }
   return { level: "ok", polarity, message: null };
@@ -200,12 +208,15 @@ export function directionGlyph(verb: DesiredDirection): string {
 }
 
 /** "Reduce no-show rate" — the compact sentence used in lists (Part 1.5). */
-export function verbSentence(verb: DesiredDirection, name: string): string {
+export function verbSentence(verb: DesiredDirection, name: string): SystemMessage {
   const n = name.trim();
-  return `${DIRECTION_LABELS[verb]} ${n.charAt(0).toLowerCase()}${n.slice(1)}`;
+  return msg("scoring.semantics.verbSentence", {
+    verb: verbLabel(verb),
+    name: `${n.charAt(0).toLowerCase()}${n.slice(1)}`,
+  });
 }
 
-/** "↓ No-show rate" — the compact label used on nodes and tiles. */
+/** "↓ No-show rate" — the compact, language-neutral label used on nodes and tiles. */
 export function compactLabel(verb: DesiredDirection, name: string): string {
   return `${directionGlyph(verb)} ${name.trim()}`;
 }

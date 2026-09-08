@@ -22,7 +22,7 @@ describe("computeVerdict", () => {
   it("high potential with low evidence is RESEARCH, never a build-like verdict", () => {
     const r = computeVerdict(95, 10);
     expect(r.verdict).toBe("RESEARCH");
-    expect(r.reasons.join(" ")).toMatch(/never BUILD/);
+    expect(r.reasons.map((x) => x.text).join(" ")).toMatch(/never BUILD/);
   });
 
   it("is total: every score pair produces a verdict", () => {
@@ -54,8 +54,9 @@ describe("computeVerdict", () => {
 
   it("explains why", () => {
     const r = computeVerdict(88, 61);
-    expect(r.reasons).toContain("Opportunity Potential is 88/100.");
-    expect(r.reasons).toContain("Evidence Confidence is 61/100.");
-    expect(r.condition).toBe("Opportunity ≥ 70 and Evidence ≥ 60");
+    const reasons = r.reasons.map((x) => x.text);
+    expect(reasons).toContain("Opportunity Potential is 88/100.");
+    expect(reasons).toContain("Evidence Confidence is 61/100.");
+    expect(r.condition.text).toBe("Opportunity ≥ 70 and Evidence ≥ 60");
   });
 });

@@ -3,8 +3,12 @@
  * dimensions. Base rules are never replaced; documented extension rules may
  * change the verdict, and every change is explained. INCOMPLETE dimensions
  * (null) never fire a rule, so existing opportunities keep their verdicts.
+ *
+ * Every explanation is a SystemMessage (see src/i18n/messages.ts) so it
+ * renders in the reader's language; `text` holds the canonical English.
  */
 import type { Verdict } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import type { VerdictResult } from "@/services/scoring/verdict";
 import type { FrontierPosition } from "./proof-frontier";
 
@@ -27,16 +31,35 @@ export interface ExtendedVerdictResult extends VerdictResult {
   extension: { ruleId: string | null; focus: VerdictFocus; changed: boolean };
 }
 
-export const EXTENSION_RULES = {
-  LOW_VALUE_KILL:
-    "Value Strength < 40 with Evidence ≥ 60 → KILL (the problem is real but moving the variable is not worth much).",
-  CRITICAL_CONTRADICTION:
-    "Critical contradiction with a TEST/INTERVIEW base verdict → INVESTIGATE.",
-  TEST_MECHANISM:
-    "Problem validated (Evidence ≥ 60) and Causal Confidence < 40 → TEST, focused on the mechanism.",
-  CRITICAL_CUSTOMER_QUESTION:
-    "INTERVIEW with an untested critical customer assumption → INTERVIEW, focused on that question.",
-} as const;
+export const EXTENSION_RULE_IDS = [
+  "LOW_VALUE_KILL",
+  "CRITICAL_CONTRADICTION",
+  "TEST_MECHANISM",
+  "CRITICAL_CUSTOMER_QUESTION",
+] as const;
+
+export type ExtensionRuleId = (typeof EXTENSION_RULE_IDS)[number];
+
+/** Documented wording of an extension rule. */
+export function extensionRuleText(id: ExtensionRuleId): SystemMessage {
+  return msg(`scoring.verdict.extension.rule.${id}`);
+}
+
+/** The documented extension rules (getters keep the dictionary lookup lazy). */
+export const EXTENSION_RULES: Record<ExtensionRuleId, SystemMessage> = {
+  get LOW_VALUE_KILL() {
+    return extensionRuleText("LOW_VALUE_KILL");
+  },
+  get CRITICAL_CONTRADICTION() {
+    return extensionRuleText("CRITICAL_CONTRADICTION");
+  },
+  get TEST_MECHANISM() {
+    return extensionRuleText("TEST_MECHANISM");
+  },
+  get CRITICAL_CUSTOMER_QUESTION() {
+    return extensionRuleText("CRITICAL_CUSTOMER_QUESTION");
+  },
+};
 
 export function extendVerdict(
   base: VerdictResult,
@@ -44,7 +67,7 @@ export function extendVerdict(
 ): ExtendedVerdictResult {
   const reasons = [...base.reasons];
   let verdict: Verdict = base.verdict;
-  let ruleId: string | null = null;
+  let ruleId: ExtensionRuleId | null = null;
   let focus: VerdictFocus = null;
 
   if (
@@ -58,15 +81,16 @@ export function extendVerdict(
     ruleId = "LOW_VALUE_KILL";
     focus = "LOW_VALUE";
     reasons.push(
-      `Value Strength is ${ctx.valueStrength}/100 while Evidence Confidence is ${ctx.evidenceScore}/100: evidence supports the problem, but even a successful movement of the variable creates little value. Deprioritize.`,
+      msg("scoring.verdict.extension.lowValueKill", {
+        valueStrength: ctx.valueStrength,
+        evidenceScore: ctx.evidenceScore,
+      }),
     );
   } else if (ctx.criticalContradiction && (verdict === "TEST" || verdict === "INTERVIEW")) {
     verdict = "INVESTIGATE";
     ruleId = "CRITICAL_CONTRADICTION";
     focus = "RESOLVE_CONTRADICTION";
-    reasons.push(
-      "A critical claim is contradicted by evidence. Resolve the contradiction before customer discovery or testing.",
-    );
+    reasons.push(msg("scoring.verdict.extension.criticalContradiction"));
   } else if (
     ctx.evidenceScore >= 60 &&
     ctx.causalConfidence !== null &&
@@ -79,25 +103,22 @@ export function extendVerdict(
     ruleId = "TEST_MECHANISM";
     focus = "TEST_MECHANISM";
     reasons.push(
-      `The problem is validated (Evidence ${ctx.evidenceScore}/100) but the mechanism is not (Causal Confidence ${ctx.causalConfidence}/100). Test the mechanism, not the problem.`,
+      msg("scoring.verdict.extension.testMechanism", {
+        evidenceScore: ctx.evidenceScore,
+        causalConfidence: ctx.causalConfidence,
+      }),
     );
   } else if (verdict === "INTERVIEW" && ctx.openCriticalCustomerQuestion) {
     ruleId = "CRITICAL_CUSTOMER_QUESTION";
     focus = "CRITICAL_CUSTOMER_QUESTION";
-    reasons.push(
-      "A critical customer question (willingness to pay, access or value) remains untested: make it the centre of the interviews.",
-    );
+    reasons.push(msg("scoring.verdict.extension.criticalCustomerQuestion"));
   }
 
   if (ctx.causalConfidence === null) {
-    reasons.push(
-      "Causal Confidence is INCOMPLETE: the mechanism → value chain has untested links. Verdict rules that depend on it did not fire.",
-    );
+    reasons.push(msg("scoring.verdict.extension.causalIncomplete"));
   }
   if (ctx.valueStrength === null) {
-    reasons.push(
-      "Value Strength is INCOMPLETE: some value dimensions are UNKNOWN. Verdict rules that depend on it did not fire.",
-    );
+    reasons.push(msg("scoring.verdict.extension.valueIncomplete"));
   }
 
   return {

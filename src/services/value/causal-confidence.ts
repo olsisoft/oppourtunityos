@@ -7,6 +7,9 @@
  * link is missing or has no evidence, the result is INCOMPLETE and reports
  * chain coverage (validated / total), the blocking link and the next causal
  * question. UNKNOWN never becomes zero.
+ *
+ * Every sentence is a SystemMessage (see src/i18n/messages.ts) so it renders
+ * in the reader's language; `text` holds the canonical English.
  */
 import type {
   Criticality,
@@ -14,8 +17,9 @@ import type {
   ExperimentDesignLevel,
   ValueChainLevel,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { isEvidenceBacked, type ClaimAssessment } from "./epistemic";
-import { DESIGN_CAUSAL_CEILING, DESIGN_LEVEL_LABELS } from "./experimental-validity";
+import { DESIGN_CAUSAL_CEILING } from "./experimental-validity";
 
 /** Links that enter the score (up to the economic consequence). */
 export const CAUSAL_CHAIN_LINKS: Array<[ValueChainLevel, ValueChainLevel]> = [
@@ -34,15 +38,18 @@ export const DISPLAY_CHAIN_LINKS: Array<[ValueChainLevel, ValueChainLevel]> = [
 const CONTRADICTED_CAP = 25;
 const MIXED_CAP = 45;
 
-const LEVEL_LABEL: Record<ValueChainLevel, string> = {
-  MECHANISM: "Mechanism",
-  CAPABILITY: "Capability",
-  TRANSFORMATION: "Transformation",
-  OPERATIONAL_VALUE: "Operational value",
-  ECONOMIC_VALUE: "Economic value",
-  STRATEGIC_OUTCOME: "Strategic outcome",
-  BUSINESS_OUTCOME: "Business outcome",
-};
+function levelLabel(level: ValueChainLevel): SystemMessage {
+  return msg(`labels.valueChainLevel.${level}`);
+}
+
+/** "Mechanism → Capability" in the reader's language. */
+function linkLabel(from: ValueChainLevel, to: ValueChainLevel): SystemMessage {
+  return msg("scoring.causal.linkLabel", { from: levelLabel(from), to: levelLabel(to) });
+}
+
+function designWord(level: ExperimentDesignLevel): SystemMessage {
+  return msg(`scoring.causal.designWord.${level}`);
+}
 
 export interface CausalLinkInput {
   from: ValueChainLevel;
@@ -55,7 +62,7 @@ export interface CausalLinkInput {
 export interface CausalLinkResult {
   from: ValueChainLevel;
   to: ValueChainLevel;
-  label: string;
+  label: SystemMessage;
   statement: string;
   criticality: Criticality;
   status: EpistemicStatus;
@@ -63,7 +70,7 @@ export interface CausalLinkResult {
   /** Confidence after contradiction and design capping — the value that enters the min. */
   effective: number;
   /** Why the effective value is below the confidence, if it is. */
-  cappedBy: string | null;
+  cappedBy: SystemMessage | null;
   /** Strongest design level among the link's admissible supporting evidence. */
   designLevel: ExperimentDesignLevel | null;
   /** Best evidence fit for this causal claim. */
@@ -83,7 +90,7 @@ export interface CausalConfidenceResult {
   score: number | null;
   weakest: CausalLinkResult | null;
   /** Human-readable names of the links that block a score. */
-  missing: string[];
+  missing: SystemMessage[];
   links: CausalLinkResult[];
   /** Validated links over chain links, e.g. "2/5". */
   validated: number;
@@ -92,31 +99,33 @@ export interface CausalConfidenceResult {
   /** First chain link (in order) that is not validated. */
   blocking: CausalLinkResult | null;
   /** The question that would move the blocking link. */
-  nextQuestion: string | null;
-  explanation: string[];
+  nextQuestion: SystemMessage | null;
+  explanation: SystemMessage[];
 }
 
 function lowerFirst(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
-export function causalQuestion(link: CausalLinkResult): string {
+export function causalQuestion(link: CausalLinkResult): SystemMessage {
   if (link.missingLink) {
-    return `What is the causal assumption that connects ${LEVEL_LABEL[link.from]} to ${LEVEL_LABEL[link.to]}?`;
+    return msg("scoring.causal.question.missingLink", {
+      from: levelLabel(link.from),
+      to: levelLabel(link.to),
+    });
   }
   const stmt = link.statement.trim().replace(/\.$/, "");
-  return `Is it actually true that ${lowerFirst(stmt)}?`;
+  return msg("scoring.causal.question.verify", { statement: lowerFirst(stmt) });
 }
 
 export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfidenceResult {
   const results: CausalLinkResult[] = [];
-  const missing: string[] = [];
+  const missing: SystemMessage[] = [];
   const scoringKeys = new Set(CAUSAL_CHAIN_LINKS.map(([f, t]) => `${f}->${t}`));
 
   for (const [from, to] of DISPLAY_CHAIN_LINKS) {
     const link = links.find((l) => l.from === from && l.to === to);
-    const name = `${from} → ${to}`;
-    const label = `${LEVEL_LABEL[from]} → ${LEVEL_LABEL[to]}`;
+    const label = linkLabel(from, to);
     const inScoringChain = scoringKeys.has(`${from}->${to}`);
     if (!link) {
       results.push({
@@ -137,7 +146,7 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
         inScoringChain,
         missingLink: true,
       });
-      if (inScoringChain) missing.push(`${name}: causal link not stated`);
+      if (inScoringChain) missing.push(msg("scoring.causal.missing.notStated", { from, to }));
       continue;
     }
     const a = link.assessment;
@@ -145,19 +154,22 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
     // Design cap: interview-only (anecdotal) evidence cannot push a causal
     // link above 30, observational above 45, before/after above 60…
     let effective = a.confidence;
-    let cappedBy: string | null = null;
+    let cappedBy: SystemMessage | null = null;
     if (a.status === "CONTRADICTED" && effective > CONTRADICTED_CAP) {
       effective = CONTRADICTED_CAP;
-      cappedBy = "contradicted";
+      cappedBy = msg("scoring.causal.cappedBy.contradicted");
     } else if (a.status === "MIXED" && effective > MIXED_CAP) {
       effective = MIXED_CAP;
-      cappedBy = "mixed evidence";
+      cappedBy = msg("scoring.causal.cappedBy.mixed");
     }
     if (a.designLevel && a.evidence.counts.total > 0) {
       const ceiling = DESIGN_CAUSAL_CEILING[a.designLevel];
       if (effective > ceiling) {
         effective = ceiling;
-        cappedBy = `${DESIGN_LEVEL_LABELS[a.designLevel].toLowerCase()} design (ceiling ${ceiling})`;
+        cappedBy = msg("scoring.causal.cappedBy.design", {
+          design: designWord(a.designLevel),
+          ceiling,
+        });
       }
     }
     results.push({
@@ -180,9 +192,12 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
     });
     if (inScoringChain && link.criticality === "CRITICAL" && a.fitness.admissible === 0) {
       missing.push(
-        a.fitness.total === 0
-          ? `${name}: no evidence on a critical link ("${link.statement}")`
-          : `${name}: no admissible evidence on a critical link ("${link.statement}")`,
+        msg(
+          a.fitness.total === 0
+            ? "scoring.causal.missing.noEvidence"
+            : "scoring.causal.missing.noAdmissibleEvidence",
+          { from, to, statement: link.statement },
+        ),
       );
     }
   }
@@ -194,11 +209,18 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
   const completeness = `${validated}/${total}`;
   const blocking = results.find((r) => !r.validated) ?? null;
   const nextQuestion = blocking ? causalQuestion(blocking) : null;
-  const coverageLines = results.map(
-    (r) =>
-      `${r.label}: ${r.missingLink ? "UNKNOWN (not stated)" : `${r.status}${r.confidence ? ` ${r.confidence}` : ""}`}${
-        r.inScoringChain ? "" : " (informative, outside the score)"
-      }`,
+  const coverageLines = results.map((r) =>
+    r.missingLink
+      ? msg("scoring.causal.coverageMissing", {
+          label: r.label,
+          informative: !r.inScoringChain,
+        })
+      : msg("scoring.causal.coverageLine", {
+          label: r.label,
+          status: msg(`labels.epistemic.${r.status}`),
+          confidence: r.confidence,
+          informative: !r.inScoringChain,
+        }),
   );
 
   if (missing.length > 0) {
@@ -214,12 +236,12 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
       blocking,
       nextQuestion,
       explanation: [
-        `Causal Confidence is INCOMPLETE · ${completeness} critical links validated. A link without evidence is UNKNOWN, not zero; a number is not fabricated.`,
+        msg("scoring.causal.incomplete", { validated, total }),
         ...coverageLines,
-        blocking ? `Blocked by: ${blocking.label}.` : "",
-        nextQuestion ? `Next causal question: ${nextQuestion}` : "",
-        ...missing.map((m) => `Missing: ${m}`),
-      ].filter(Boolean),
+        ...(blocking ? [msg("scoring.causal.blockedBy", { label: blocking.label })] : []),
+        ...(nextQuestion ? [msg("scoring.causal.nextQuestion", { question: nextQuestion })] : []),
+        ...missing.map((reason) => msg("scoring.causal.missingLine", { reason })),
+      ],
     };
   }
 
@@ -242,13 +264,31 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
     blocking,
     nextQuestion,
     explanation: [
-      `${completeness} chain links validated.`,
-      ...results.map(
-        (r) =>
-          `${r.label}: ${r.status}, confidence ${r.confidence}/100${r.cappedBy ? ` → ${r.effective} capped by ${r.cappedBy}` : ""} (${r.evidenceCount} admissible evidence, best fit ${r.bestFit}${r.designLevel ? `, ${DESIGN_LEVEL_LABELS[r.designLevel].toLowerCase()}` : ""}${r.criticality !== "CRITICAL" ? `, ${r.criticality.toLowerCase()}` : ""}${r.inScoringChain ? "" : ", informative"})`,
+      msg("scoring.causal.validated", { validated, total }),
+      ...results.map((r) =>
+        msg("scoring.causal.linkLine", {
+          label: r.label,
+          status: msg(`labels.epistemic.${r.status}`),
+          confidence: r.confidence,
+          capped: r.cappedBy !== null,
+          effective: r.effective,
+          cappedBy: r.cappedBy,
+          evidenceCount: r.evidenceCount,
+          bestFit: r.bestFit,
+          hasDesign: r.designLevel !== null,
+          design: r.designLevel ? designWord(r.designLevel) : null,
+          critical: r.criticality === "CRITICAL",
+          criticality:
+            r.criticality === "CRITICAL"
+              ? null
+              : msg(`scoring.causal.criticalityWord.${r.criticality}`),
+          informative: !r.inScoringChain,
+        }),
       ),
-      weakest ? `Score = weakest critical link (${weakest.label}) = ${score}/100.` : "No links.",
-      nextQuestion ? `Next causal question: ${nextQuestion}` : "",
-    ].filter(Boolean),
+      weakest
+        ? msg("scoring.causal.score", { label: weakest.label, score })
+        : msg("scoring.causal.noLinks"),
+      ...(nextQuestion ? [msg("scoring.causal.nextQuestion", { question: nextQuestion })] : []),
+    ],
   };
 }

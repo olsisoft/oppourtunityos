@@ -51,7 +51,7 @@ describe("computeCausalConfidence", () => {
     ]);
     expect(r.status).toBe("INCOMPLETE");
     expect(r.score).toBeNull();
-    expect(r.missing[0]).toMatch(/CAPABILITY → TRANSFORMATION/);
+    expect(r.missing[0].text).toMatch(/CAPABILITY → TRANSFORMATION/);
   });
 
   it("is INCOMPLETE when a chain link is not stated", () => {
@@ -85,7 +85,7 @@ describe("computeCausalConfidence", () => {
     ]);
     expect(anecdotal.status).toBe("COMPLETE");
     expect(anecdotal.score as number).toBeLessThanOrEqual(30);
-    expect(anecdotal.weakest?.cappedBy).toMatch(/anecdotal/);
+    expect(anecdotal.weakest?.cappedBy?.text).toMatch(/anecdotal/);
     const beforeAfter = computeCausalConfidence([
       link("MECHANISM", "CAPABILITY", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
       link("CAPABILITY", "TRANSFORMATION", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
