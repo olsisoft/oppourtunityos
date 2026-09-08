@@ -11,8 +11,10 @@ import { OpportunityRadar } from "@/components/opportunity/opportunity-radar";
 import { ValuePanel } from "@/components/value/value-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { WorkspaceGraph } from "@/db/workspaces";
+import { useT } from "@/i18n/client";
 
 export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
+  const t = useT();
   const [selection, setSelection] = useState<MapSelection | null>(null);
   const evidenceCount = graph.evidence.length;
   const oppCount = graph.opportunities.length;
@@ -23,31 +25,31 @@ export function OpportunityPanel({ graph }: { graph: WorkspaceGraph }) {
       <Tabs defaultValue="map" className="flex h-full min-h-0 flex-col gap-0">
         <div className="border-b px-3 py-2">
           <TabsList className="w-full">
-            <TabsTrigger value="map">Map</TabsTrigger>
-            <TabsTrigger value="variables">Variables</TabsTrigger>
-            <TabsTrigger value="value">Value</TabsTrigger>
-            <TabsTrigger value="radar">Radar{oppCount ? ` ${oppCount}` : ""}</TabsTrigger>
+            <TabsTrigger value="map">{t("discovery.tabs.map")}</TabsTrigger>
+            <TabsTrigger value="variables">{t("discovery.tabs.variables")}</TabsTrigger>
+            <TabsTrigger value="value">{t("discovery.tabs.value")}</TabsTrigger>
+            <TabsTrigger value="radar">
+              {t("discovery.tabs.radar")}
+              {oppCount ? ` ${oppCount}` : ""}
+            </TabsTrigger>
             <TabsTrigger value="evidence">
-              Evidence{evidenceCount ? ` ${evidenceCount}` : ""}
+              {t("discovery.tabs.evidence")}
+              {evidenceCount ? ` ${evidenceCount}` : ""}
             </TabsTrigger>
             <TabsTrigger value="assumptions">
-              Assumptions{untested ? ` ${untested}` : ""}
+              {t("discovery.tabs.assumptions")}
+              {untested ? ` ${untested}` : ""}
             </TabsTrigger>
           </TabsList>
         </div>
         <div className="min-h-0 flex-1 scrollbar-thin overflow-y-auto p-3">
           <TabsContent value="map">
-            <p className="text-muted-foreground mb-3 text-xs">
-              Market → ICP → Variable → Pain → Opportunity → Mechanism → Value chain. Click a node
-              to inspect or edit it; expand an opportunity to see its ladder and Proof Frontier.
-              Badges show where each fact came from.
-            </p>
+            <p className="text-muted-foreground mb-3 text-xs">{t("discovery.tabs.mapHelp")}</p>
             <OpportunityMap graph={graph} onSelect={setSelection} />
           </TabsContent>
           <TabsContent value="variables">
             <p className="text-muted-foreground mb-3 text-xs">
-              Valuable variables ranked by importance (0–100 = importance × 10). Importance is a
-              hypothesis until evidence backs it.
+              {t("discovery.tabs.variablesHelp")}
             </p>
             <VariableMap
               graph={graph}

@@ -9,6 +9,7 @@ import {
   linkAssumptionEvidenceSchema,
   updateAssumptionSchema,
 } from "@/domain/schemas";
+import { getT } from "@/i18n/server";
 import { requireUserId } from "@/lib/session";
 import { deriveAssumptionStatus } from "@/services/scoring/assumption-status";
 import { recomputeOpportunity } from "@/services/scoring/recompute";
@@ -40,9 +41,10 @@ export async function createAssumptionAction(
 ): Promise<ActionResult<{ id: string }>> {
   const parsed = createAssumptionSchema.safeParse(input);
   if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the highlighted fields.",
+      error: t("validation.checkHighlighted"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   }
@@ -73,7 +75,10 @@ export async function createAssumptionAction(
 
 export async function updateAssumptionAction(input: unknown): Promise<ActionResult> {
   const parsed = updateAssumptionSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (!parsed.success) {
+    const t = await getT();
+    return { ok: false, error: t("validation.invalidInput") };
+  }
   const d = parsed.data;
   return safeAction("assumption.update", async () => {
     const userId = await requireUserId();
@@ -118,7 +123,10 @@ export async function deleteAssumptionAction(assumptionId: string): Promise<Acti
 
 export async function linkAssumptionEvidenceAction(input: unknown): Promise<ActionResult> {
   const parsed = linkAssumptionEvidenceSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (!parsed.success) {
+    const t = await getT();
+    return { ok: false, error: t("validation.invalidInput") };
+  }
   const d = parsed.data;
   return safeAction("assumption.link_evidence", async () => {
     const userId = await requireUserId();

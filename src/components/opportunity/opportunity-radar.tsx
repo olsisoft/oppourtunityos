@@ -18,8 +18,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
+import { useLocale, useT } from "@/i18n/client";
+import type { LocalizedText } from "@/i18n/messages";
+import type { T } from "@/i18n/t";
 import { frontierMovement, type FrontierPosition } from "@/services/value/proof-frontier";
+import { describeScope } from "@/services/value/scope";
 import type { OpportunityWithRelations, WorkspaceGraph } from "@/db/workspaces";
 import { cn } from "@/lib/utils";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
@@ -39,6 +42,10 @@ export function frontierMovedRecently(o: OpportunityWithRelations): boolean {
   );
 }
 
+function frontierLabel(t: T, rung: string | null | undefined): string {
+  return rung ? t(`labels.proofRung.${rung}`) : t("opportunity.score.notComputed");
+}
+
 export function OpportunityRadar({
   graph,
   compact = false,
@@ -46,6 +53,8 @@ export function OpportunityRadar({
   graph: WorkspaceGraph;
   compact?: boolean;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const rows = [...graph.opportunities].sort((a, b) => b.opportunityScore - a.opportunityScore);
   const pains = graph.markets.flatMap((m) =>
@@ -64,21 +73,18 @@ export function OpportunityRadar({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-muted-foreground text-xs">
-          Four independent questions, one deterministic verdict. Hover a score for its
-          decomposition; INCOMPLETE means an input is UNKNOWN, not zero.
-        </p>
+        <p className="text-muted-foreground text-xs">{t("opportunity.radar.intro")}</p>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          <Plus /> Opportunity
+          <Plus /> {t("opportunity.radar.add")}
         </Button>
       </div>
       {rows.length === 0 ? (
         <EmptyState
-          title="No opportunities yet"
-          description="Opportunities form once an ICP, a variable and a pain are known. You can also create one manually and set its inputs."
+          title={t("opportunity.radar.empty.title")}
+          description={t("opportunity.radar.empty.description")}
           action={
             <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus /> Create opportunity
+              <Plus /> {t("opportunity.radar.create")}
             </Button>
           }
         />
@@ -87,30 +93,51 @@ export function OpportunityRadar({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Opportunity</TableHead>
+                <TableHead>{t("opportunity.radar.column.opportunity")}</TableHead>
                 <ScoreHead
-                  label={compact ? "Pot." : "Potential"}
-                  question={SCORE_QUESTIONS.potential}
+                  label={
+                    compact
+                      ? t("opportunity.radar.column.potentialShort")
+                      : t("opportunity.radar.column.potential")
+                  }
+                  question={t("opportunity.radar.question.potential")}
                 />
                 <ScoreHead
-                  label={compact ? "Evid." : "Evidence"}
-                  question={SCORE_QUESTIONS.evidence}
+                  label={
+                    compact
+                      ? t("opportunity.radar.column.evidenceShort")
+                      : t("opportunity.radar.column.evidence")
+                  }
+                  question={t("opportunity.radar.question.evidence")}
                 />
-                <ScoreHead label="Value" question={SCORE_QUESTIONS.value} />
-                <ScoreHead label="Causal" question={SCORE_QUESTIONS.causal} />
+                <ScoreHead
+                  label={t("opportunity.radar.column.value")}
+                  question={t("opportunity.radar.question.value")}
+                />
+                <ScoreHead
+                  label={t("opportunity.radar.column.causal")}
+                  question={t("opportunity.radar.question.causal")}
+                />
                 {!compact && (
                   <ScoreHead
-                    label="Proof frontier"
-                    question="Where supported knowledge currently ends. Deterministic: derived from linked evidence and critical causal links, never from the analyst."
+                    label={t("opportunity.radar.column.frontier")}
+                    question={t("opportunity.radar.question.frontier")}
                     align="left"
                   />
                 )}
-                <TableHead>Verdict</TableHead>
+                <TableHead>{t("opportunity.radar.column.verdict")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map((o) => {
                 const insights = deriveOpportunityInsights(o, graph.mechanisms.length);
+                const frontier = frontierLabel(t, o.proofFrontierRung);
+                const frontierScope = insights.frontier?.frontierScope;
+                const scopeText = frontierScope
+                  ? frontierScope.scope
+                    ? describeScope(frontierScope.scope, locale)
+                    : t(frontierScope.text)
+                  : "";
                 return (
                   <TableRow key={o.id}>
                     <TableCell
@@ -132,42 +159,52 @@ export function OpportunityRadar({
                       )}
                       {frontierMovedRecently(o) && (
                         <span className="text-tone-positive text-[10px] font-medium">
-                          ↑ frontier moved recently
+                          {t("opportunity.radar.movedRecently")}
                         </span>
                       )}
                       {compact && (
                         <p className="text-muted-foreground truncate text-[10px] font-normal">
-                          frontier · {frontierText(o.proofFrontierRung)}
+                          {t("opportunity.radar.frontierLine", { frontier })}
                         </p>
                       )}
                     </TableCell>
                     <ScoreCell
                       value={o.opportunityScore}
                       lines={insights.scoreBreakdown?.explanation ?? []}
-                      question={SCORE_QUESTIONS.potential}
+                      question={t("opportunity.radar.question.potential")}
                     />
                     <ScoreCell
                       value={o.evidenceScore}
                       lines={insights.evidenceBreakdown?.explanation ?? []}
-                      question={SCORE_QUESTIONS.evidence}
+                      question={t("opportunity.radar.question.evidence")}
                     />
                     <ScoreCell
                       value={o.valueStrength}
                       lines={
                         insights.valueStrength
                           ? [
-                              ...insights.valueStrength.dimensions.map(
-                                (d) =>
-                                  `${d.label}: ${d.value === null ? "UNKNOWN" : `${d.value}/10`} · ${d.provenance}`,
+                              ...insights.valueStrength.dimensions.map((d) =>
+                                t("opportunity.radar.hover.dimension", {
+                                  label: t(d.label),
+                                  known: d.value !== null,
+                                  value: d.value,
+                                  provenance: d.provenance,
+                                }),
                               ),
-                              `Completeness: ${insights.valueStrength.completeness}`,
+                              t("opportunity.radar.hover.completeness", {
+                                completeness: insights.valueStrength.completeness,
+                              }),
                               ...(insights.valueStrength.nextQuestion
-                                ? [`Next: ${insights.valueStrength.nextQuestion}`]
+                                ? [
+                                    t("opportunity.radar.hover.next", {
+                                      question: t(insights.valueStrength.nextQuestion),
+                                    }),
+                                  ]
                                 : []),
                             ]
-                          : ["Not computed yet."]
+                          : [t("opportunity.score.notComputedYet")]
                       }
-                      question={SCORE_QUESTIONS.value}
+                      question={t("opportunity.radar.question.value")}
                       compact={compact}
                     />
                     <ScoreCell
@@ -175,23 +212,51 @@ export function OpportunityRadar({
                       lines={
                         insights.causal
                           ? [
-                              `Critical links: ${insights.causal.total} · validated: ${insights.causal.validated}`,
+                              t("opportunity.radar.hover.criticalLinks", {
+                                total: insights.causal.total,
+                                validated: insights.causal.validated,
+                              }),
                               ...(insights.causal.blocking
-                                ? [`Blocking: ${insights.causal.blocking.label}`]
+                                ? [
+                                    t("opportunity.radar.hover.blocking", {
+                                      label: t(insights.causal.blocking.label),
+                                    }),
+                                  ]
                                 : []),
-                              `Proof frontier: ${frontierText(o.proofFrontierRung)}${insights.frontier?.frontierScope?.text ? ` · scope: ${insights.frontier.frontierScope.text}` : ""}`,
-                              ...insights.causal.links.map(
-                                (l) =>
-                                  `${l.label}: ${l.missingLink ? "UNKNOWN" : `${l.status}${l.confidence ? ` ${l.confidence}` : ""}`}`,
+                              scopeText
+                                ? t("opportunity.radar.hover.frontierWithScope", {
+                                    frontier,
+                                    scope: scopeText,
+                                  })
+                                : t("opportunity.radar.hover.frontier", { frontier }),
+                              ...insights.causal.links.map((l) =>
+                                l.missingLink
+                                  ? t("opportunity.radar.hover.linkMissing", {
+                                      label: t(l.label),
+                                    })
+                                  : t(
+                                      l.confidence
+                                        ? "opportunity.radar.hover.linkWithConfidence"
+                                        : "opportunity.radar.hover.link",
+                                      {
+                                        label: t(l.label),
+                                        status: l.status,
+                                        statusLabel: t(`labels.epistemic.${l.status}`),
+                                        confidence: l.confidence,
+                                      },
+                                    ),
                               ),
                             ]
-                          : ["Not computed yet."]
+                          : [t("opportunity.score.notComputedYet")]
                       }
-                      question={SCORE_QUESTIONS.causal}
+                      question={t("opportunity.radar.question.causal")}
                       compact={compact}
                     />
                     {!compact && (
-                      <FrontierCell opportunity={o} lines={insights.frontier?.explanation ?? []} />
+                      <FrontierCell
+                        frontier={frontier}
+                        lines={insights.frontier?.explanation ?? []}
+                      />
                     )}
                     <TableCell>
                       <VerdictBadge verdict={o.verdict} />
@@ -243,10 +308,11 @@ function ScoreCell({
   compact = false,
 }: {
   value: number | null;
-  lines: string[];
+  lines: LocalizedText[];
   question: string;
   compact?: boolean;
 }) {
+  const t = useT();
   return (
     <TableCell className="text-right font-mono tabular-nums">
       <Tooltip>
@@ -254,9 +320,9 @@ function ScoreCell({
           {value === null ? (
             <span
               className="text-tone-warning cursor-help text-[10px] font-semibold tracking-wide"
-              aria-label="INCOMPLETE"
+              aria-label={t("opportunity.score.incomplete")}
             >
-              {compact ? "—" : "INCOMPLETE"}
+              {compact ? "—" : t("opportunity.score.incomplete")}
             </span>
           ) : (
             <span className={cn("cursor-help", scoreTone(value))}>{value}</span>
@@ -264,12 +330,10 @@ function ScoreCell({
         </TooltipTrigger>
         <TooltipContent className="max-w-sm">
           <p className="mb-1 font-medium">{question}</p>
-          {value === null && (
-            <p className="mb-1">INCOMPLETE — an input is UNKNOWN; this is not a zero.</p>
-          )}
+          {value === null && <p className="mb-1">{t("opportunity.radar.hover.incomplete")}</p>}
           <ul className="space-y-0.5">
             {lines.slice(0, 8).map((l, i) => (
-              <li key={i}>{l}</li>
+              <li key={i}>{t(l)}</li>
             ))}
           </ul>
         </TooltipContent>
@@ -278,25 +342,22 @@ function ScoreCell({
   );
 }
 
-function FrontierCell({
-  opportunity: o,
-  lines,
-}: {
-  opportunity: OpportunityWithRelations;
-  lines: string[];
-}) {
+function FrontierCell({ frontier, lines }: { frontier: string; lines: LocalizedText[] }) {
+  const t = useT();
   return (
     <TableCell className="text-xs">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="cursor-help whitespace-nowrap">{frontierText(o.proofFrontierRung)}</span>
+          <span className="cursor-help whitespace-nowrap">{frontier}</span>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm">
-          <p className="mb-1 font-medium">Proof Frontier</p>
+          <p className="mb-1 font-medium">{t("opportunity.radar.hover.frontierTitle")}</p>
           <ul className="space-y-0.5">
-            {(lines.length ? lines : ["Not computed yet."]).slice(0, 8).map((l, i) => (
-              <li key={i}>{l}</li>
-            ))}
+            {(lines.length ? lines : [t("opportunity.score.notComputedYet")])
+              .slice(0, 8)
+              .map((l, i) => (
+                <li key={i}>{t(l)}</li>
+              ))}
           </ul>
         </TooltipContent>
       </Tooltip>

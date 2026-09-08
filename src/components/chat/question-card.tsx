@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n/client";
 import type { QuestionCard as QuestionCardData } from "@/services/ai/schemas";
 
 export function QuestionCard({
@@ -12,6 +13,7 @@ export function QuestionCard({
   onAnswer: (answer: string) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   if (!card.options.length) return null;
   return (
     <div className="bg-muted/50 rounded-lg border p-3">
@@ -31,7 +33,7 @@ export function QuestionCard({
         ))}
       </div>
       {card.allowFreeText && (
-        <p className="text-muted-foreground mt-2 text-[11px]">Or type your own answer below.</p>
+        <p className="text-muted-foreground mt-2 text-[11px]">{t("chat.question.freeTextHint")}</p>
       )}
     </div>
   );

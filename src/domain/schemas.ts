@@ -28,7 +28,7 @@ import type { ValidityInputs } from "@/services/value/experimental-validity";
 import { parseScope, type Scope } from "@/services/value/scope";
 
 const score10 = z.coerce.number().int().min(0).max(10);
-const shortText = z.string().trim().min(1).max(200);
+const shortText = z.string().trim().min(1, "validation.required").max(200);
 const longText = z.string().trim().max(4000);
 const optionalLong = z
   .string()
@@ -43,15 +43,16 @@ const optionalId = z
   .or(z.literal(""))
   .transform((v) => v || undefined);
 
+// Messages are dictionary keys (validation.*); forms render them with t().
 export const registerSchema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(80),
-  email: z.string().trim().toLowerCase().email("Enter a valid email"),
-  password: z.string().min(8, "Use at least 8 characters").max(128),
+  name: z.string().trim().min(1, "validation.nameRequired").max(80),
+  email: z.string().trim().toLowerCase().email("validation.email"),
+  password: z.string().min(8, "validation.passwordMin").max(128),
 });
 
 export const loginSchema = z.object({
-  email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(1),
+  email: z.string().trim().toLowerCase().email("validation.email"),
+  password: z.string().min(1, "validation.passwordRequired"),
 });
 
 export const createWorkspaceSchema = z.object({
@@ -182,7 +183,7 @@ export const createEvidenceSchema = z.object({
     .optional()
     .or(z.literal(""))
     .transform((v) => v || undefined),
-  sourceExcerpt: longText.min(1, "Paste the quote, note or excerpt"),
+  sourceExcerpt: longText.min(1, "validation.excerptRequired"),
   sourceDate: z
     .string()
     .optional()
@@ -260,7 +261,7 @@ export const createAssumptionSchema = z.object({
   valueChainNodeId: optionalId,
   causalLinkId: optionalId,
   kind: z.nativeEnum(AssumptionKind).default(AssumptionKind.GENERIC),
-  statement: z.string().trim().min(3).max(500),
+  statement: z.string().trim().min(3, "validation.tooShort").max(500),
   importance: score10,
   status: z.nativeEnum(AssumptionStatus).default(AssumptionStatus.UNKNOWN),
   notes: optionalLong,
@@ -268,7 +269,7 @@ export const createAssumptionSchema = z.object({
 
 export const updateAssumptionSchema = z.object({
   assumptionId: z.string().min(1),
-  statement: z.string().trim().min(3).max(500).optional(),
+  statement: z.string().trim().min(3, "validation.tooShort").max(500).optional(),
   importance: score10.optional(),
   status: z.nativeEnum(AssumptionStatus).optional(),
   kind: z.nativeEnum(AssumptionKind).optional(),
@@ -288,7 +289,7 @@ export const linkAssumptionEvidenceSchema = z.object({
 export const upsertValueChainNodeSchema = z.object({
   opportunityId: z.string().min(1),
   level: z.nativeEnum(ValueChainLevel),
-  statement: z.string().trim().min(3).max(500),
+  statement: z.string().trim().min(3, "validation.tooShort").max(500),
   notes: optionalLong,
 });
 
@@ -296,7 +297,7 @@ export const upsertCausalLinkSchema = z.object({
   opportunityId: z.string().min(1),
   fromLevel: z.nativeEnum(ValueChainLevel),
   toLevel: z.nativeEnum(ValueChainLevel),
-  statement: z.string().trim().min(3).max(500),
+  statement: z.string().trim().min(3, "validation.tooShort").max(500),
   criticality: z.nativeEnum(Criticality).default(Criticality.CRITICAL),
   notes: optionalLong,
 });
@@ -365,7 +366,7 @@ const experimentFields = {
   assumptionId: optionalId,
   valueChainNodeId: optionalId,
   experimentType: z.nativeEnum(ExperimentType).optional(),
-  hypothesis: z.string().trim().min(3).max(1000).optional(),
+  hypothesis: z.string().trim().min(3, "validation.tooShort").max(1000).optional(),
   decisionQuestion: optionalLong,
   design: optionalLong,
   successMetric: optionalLong,
@@ -392,7 +393,7 @@ export const createExperimentSchema = z.object({
   opportunityId: z.string().min(1),
   title: shortText,
   ...experimentFields,
-  hypothesis: z.string().trim().min(3).max(1000),
+  hypothesis: z.string().trim().min(3, "validation.tooShort").max(1000),
 });
 
 export const updateExperimentSchema = z.object({
@@ -416,7 +417,7 @@ export const completeExperimentSchema = z.object({
   unit: optionalLong,
   sampleSize: nullableInt,
   measurementPeriod: optionalLong,
-  resultSummary: z.string().trim().min(3).max(4000),
+  resultSummary: z.string().trim().min(3, "validation.tooShort").max(4000),
   limitations: optionalLong,
   confounders: optionalLong,
   anomalies: optionalLong,
@@ -449,7 +450,7 @@ export const updateVariableSchema = z.object({
 
 export const updatePainSchema = z.object({
   painId: z.string().min(1),
-  description: longText.min(1).optional(),
+  description: longText.min(1, "validation.required").optional(),
   severityScore: score10.optional(),
   frequencyScore: score10.optional(),
   currentState: optionalLong,

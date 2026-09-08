@@ -6,6 +6,7 @@ import { Compass, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { EntryMode } from "@/generated/prisma/enums";
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
 export function EntryModeChooser({
@@ -17,6 +18,7 @@ export function EntryModeChooser({
   disabled?: boolean;
   defaultIntent?: "discover" | "validate";
 }) {
+  const t = useT();
   const [mode, setMode] = useState<EntryMode | null>(
     defaultIntent === "validate" ? "HAS_IDEA" : null,
   );
@@ -25,25 +27,22 @@ export function EntryModeChooser({
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 py-8">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">How do you want to start?</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Either way we start from a problem, never from a product. The conversation builds a
-          structured opportunity model on the right.
-        </p>
+        <h2 className="text-lg font-semibold tracking-tight">{t("chat.entry.title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("chat.entry.subtitle")}</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <ChoiceCard
           icon={<Compass className="size-5" />}
-          title="I don't know what to build"
-          description="Start from the industries you understand and the people you can reach. We map markets, ICPs and valuable variables before any solution."
+          title={t("chat.entry.noIdea.title")}
+          description={t("chat.entry.noIdea.description")}
           selected={mode === "NO_IDEA"}
           onClick={() => setMode("NO_IDEA")}
           disabled={disabled}
         />
         <ChoiceCard
           icon={<Lightbulb className="size-5" />}
-          title="I already have an idea"
-          description="We reverse-engineer it: product → intended outcome → variable → ICP → pain → trigger → evidence. The idea may turn out weak."
+          title={t("chat.entry.hasIdea.title")}
+          description={t("chat.entry.hasIdea.description")}
           selected={mode === "HAS_IDEA"}
           onClick={() => setMode("HAS_IDEA")}
           disabled={disabled}
@@ -54,7 +53,7 @@ export function EntryModeChooser({
           <Textarea
             value={idea}
             onChange={(e) => setIdea(e.target.value)}
-            placeholder='Describe the idea in one sentence, e.g. "AI receptionist for dental clinics"'
+            placeholder={t("chat.entry.hasIdea.placeholder")}
             rows={3}
             autoFocus
             disabled={disabled}
@@ -64,7 +63,7 @@ export function EntryModeChooser({
               onClick={() => onChoose("HAS_IDEA", idea.trim())}
               disabled={disabled || idea.trim().length < 5}
             >
-              Decompose the idea
+              {t("chat.entry.hasIdea.submit")}
             </Button>
           </div>
         </div>
@@ -72,10 +71,10 @@ export function EntryModeChooser({
       {mode === "NO_IDEA" && (
         <div className="flex justify-end">
           <Button
-            onClick={() => onChoose("NO_IDEA", "I don't know what to build")}
+            onClick={() => onChoose("NO_IDEA", t("chat.entry.noIdea.message"))}
             disabled={disabled}
           >
-            Start market discovery
+            {t("chat.entry.noIdea.submit")}
           </Button>
         </div>
       )}

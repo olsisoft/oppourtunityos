@@ -6,6 +6,7 @@ import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
 import { createEvidenceSchema, scopeFromFields } from "@/domain/schemas";
 import { sourceTypeForLegacy } from "@/services/value/evidence-sources";
+import { getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import { cleanText, cleanUrl } from "@/lib/sanitize";
 import { requireUserId } from "@/lib/session";
@@ -32,9 +33,10 @@ async function recomputeAfterEvidence(
 export async function createEvidenceAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   const parsed = createEvidenceSchema.safeParse(input);
   if (!parsed.success) {
+    const t = await getT();
     return {
       ok: false,
-      error: "Check the highlighted fields.",
+      error: t("validation.checkHighlighted"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   }

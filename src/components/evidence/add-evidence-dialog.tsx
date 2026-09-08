@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,18 +30,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { AdmissibilityBadge } from "@/components/value/fit-badge";
 import type { WorkspaceGraph } from "@/db/workspaces";
-import {
-  EVIDENCE_SOURCE_TYPE_LABELS,
-  EvidenceSourceType,
-  SENTIMENT_LABELS,
-  EvidenceSentiment,
-} from "@/domain/enums";
+import { EvidenceSourceType, EvidenceSentiment } from "@/domain/enums";
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 import { admissibilityLevel } from "@/services/value/admissibility";
 import {
   legacyTypeForSource,
   SOURCE_FAMILY,
-  SOURCE_FAMILY_LABELS,
   SOURCE_TYPES,
   type EvidenceSourceFamily,
 } from "@/services/value/evidence-sources";
@@ -57,6 +52,16 @@ const FAMILY_ORDER: EvidenceSourceFamily[] = [
   "UNKNOWN",
 ];
 
+/** Evidence signals the user confirms; labelled by `evidence.dialog.signal.<key>`. */
+const SIGNAL_KEYS = [
+  "isDirectCustomer",
+  "hasExplicitPain",
+  "hasEconomicImpact",
+  "hasWorkaround",
+  "hasPurchaseIntent",
+  "isInterview",
+] as const;
+
 export interface PainOption {
   id: string;
   label: string;
@@ -67,11 +72,16 @@ export interface OpportunityOption {
 }
 
 type ClaimDirection = "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
-const DIRECTION_LABEL: Record<ClaimDirection, string> = {
-  SUPPORTS: "supports",
-  CONTRADICTS: "contradicts",
-  NEUTRAL: "neutral",
-};
+const CLAIM_DIRECTIONS: ClaimDirection[] = ["SUPPORTS", "CONTRADICTS", "NEUTRAL"];
+
+/** Renders the *emphasized* segments of a dictionary string as <em>. */
+function withEmphasis(text: string): React.ReactNode {
+  const parts = text.split("*");
+  if (parts.length < 3) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? <em key={i}>{part}</em> : <Fragment key={i}>{part}</Fragment>,
+  );
+}
 
 export function AddEvidenceDialog({
   open,
@@ -95,6 +105,7 @@ export function AddEvidenceDialog({
   defaultOpportunityId?: string;
   hypothesis?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -133,26 +144,27 @@ export function AddEvidenceDialog({
     setForm((f) => ({ ...f, [k]: v }));
 
   const targets = useMemo(
-    () => (graph ? claimTargetsFor(graph, form.opportunityId || null) : []),
-    [graph, form.opportunityId],
+    () => (graph ? claimTargetsFor(graph, form.opportunityId || null, t) : []),
+    [graph, form.opportunityId, t],
   );
   const groups = useMemo(() => {
     const byGroup = new Map<ClaimTarget["group"], ClaimTarget[]>();
-    for (const t of targets) byGroup.set(t.group, [...(byGroup.get(t.group) ?? []), t]);
+    for (const target of targets)
+      byGroup.set(target.group, [...(byGroup.get(target.group) ?? []), target]);
     return [...byGroup.entries()];
   }, [targets]);
 
-  const toggleClaim = (t: ClaimTarget) =>
+  const toggleClaim = (target: ClaimTarget) =>
     setClaims((c) => {
       const next = { ...c };
-      if (next[t.key]) delete next[t.key];
-      else next[t.key] = form.sentiment === "NEGATIVE" ? "CONTRADICTS" : "SUPPORTS";
+      if (next[target.key]) delete next[target.key];
+      else next[target.key] = form.sentiment === "NEGATIVE" ? "CONTRADICTS" : "SUPPORTS";
       return next;
     });
 
   const suggest = async () => {
     if (form.sourceExcerpt.trim().length < 20) {
-      toast.error("Paste the excerpt first.");
+      toast.error(t("evidence.dialog.excerptFirst"));
       return;
     }
     setSuggesting(true);
@@ -164,7 +176,7 @@ export function AddEvidenceDialog({
     });
     setSuggesting(false);
     if (!r.ok) {
-      toast.error(r.error);
+      toast.error(t(r.error));
       return;
     }
     setForm((f) => ({
@@ -179,7 +191,7 @@ export function AddEvidenceDialog({
       relevanceScore: r.data.relevanceScore,
     }));
     setSuggestionNote(
-      `${r.data.isMock ? "Mock provider suggestion — " : "AI suggestion — "}${r.data.summary} Confirm every flag before saving.`,
+      t("evidence.dialog.suggestionNote", { mock: r.data.isMock, summary: r.data.summary }),
     );
   };
 
@@ -187,13 +199,13 @@ export function AddEvidenceDialog({
     e.preventDefault();
     setSaving(true);
     const claimInputs = targets
-      .filter((t) => claims[t.key])
-      .map((t) => ({
-        claimType: t.claimType,
+      .filter((target) => claims[target.key])
+      .map((target) => ({
+        claimType: target.claimType,
         opportunityId: form.opportunityId || undefined,
-        valueChainNodeId: t.valueChainNodeId,
-        causalLinkId: t.causalLinkId,
-        direction: claims[t.key],
+        valueChainNodeId: target.valueChainNodeId,
+        causalLinkId: target.causalLinkId,
+        direction: claims[target.key],
       }));
     const r = await createEvidenceAction({
       workspaceId,
@@ -203,13 +215,13 @@ export function AddEvidenceDialog({
     });
     setSaving(false);
     if (!r.ok) {
-      toast.error(r.error);
+      toast.error(t(r.error));
       return;
     }
     toast.success(
       claimInputs.length
-        ? `Evidence captured — ${claimInputs.length} claim${claimInputs.length === 1 ? "" : "s"} reassessed`
-        : "Evidence captured — scores recomputed",
+        ? t("evidence.dialog.savedClaims", { count: claimInputs.length })
+        : t("evidence.dialog.savedScores"),
     );
     onOpenChange(false);
     router.refresh();
@@ -222,17 +234,13 @@ export function AddEvidenceDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Add evidence</DialogTitle>
-            <DialogDescription>
-              Paste a customer quote, a forum post, a review, interview notes or a URL. Evidence is
-              external material — it is never generated by the analyst. Its content is treated as
-              data, never as instructions.
-            </DialogDescription>
+            <DialogTitle>{t("evidence.dialog.title")}</DialogTitle>
+            <DialogDescription>{t("evidence.dialog.description")}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Source type</Label>
+              <Label>{t("evidence.dialog.sourceType")}</Label>
               <Select
                 value={form.sourceType}
                 onValueChange={(v) => set("sourceType", v as EvidenceSourceType)}
@@ -244,11 +252,11 @@ export function AddEvidenceDialog({
                   {FAMILY_ORDER.map((family) => (
                     <div key={family}>
                       <p className="text-muted-foreground px-2 pt-1.5 pb-0.5 text-[10px] font-medium tracking-wider uppercase">
-                        {SOURCE_FAMILY_LABELS[family]}
+                        {t(`labels.sourceFamily.${family}`)}
                       </p>
-                      {SOURCE_TYPES.filter((t) => SOURCE_FAMILY[t] === family).map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {EVIDENCE_SOURCE_TYPE_LABELS[t]}
+                      {SOURCE_TYPES.filter((type) => SOURCE_FAMILY[type] === family).map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {t(`labels.evidenceSourceType.${type}`)}
                         </SelectItem>
                       ))}
                     </div>
@@ -256,22 +264,21 @@ export function AddEvidenceDialog({
                 </SelectContent>
               </Select>
               <p className="text-muted-foreground text-[11px]">
-                What the evidence <em>is</em> decides which claims it can establish. An interview
-                establishes a pain; it does not establish causality or a purchase.
+                {withEmphasis(t("evidence.dialog.sourceTypeHelp"))}
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ev-title">Source title</Label>
+              <Label htmlFor="ev-title">{t("evidence.dialog.sourceTitle")}</Label>
               <Input
                 id="ev-title"
                 value={form.sourceTitle}
                 onChange={(e) => set("sourceTitle", e.target.value)}
                 required
-                placeholder="e.g. Interview — salon owner, Lyon"
+                placeholder={t("evidence.dialog.sourceTitlePlaceholder")}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ev-url">URL (optional, http/https only)</Label>
+              <Label htmlFor="ev-url">{t("evidence.dialog.url")}</Label>
               <Input
                 id="ev-url"
                 value={form.sourceUrl}
@@ -281,7 +288,7 @@ export function AddEvidenceDialog({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="ev-date">Date</Label>
+                <Label htmlFor="ev-date">{t("evidence.dialog.date")}</Label>
                 <Input
                   id="ev-date"
                   type="date"
@@ -290,7 +297,7 @@ export function AddEvidenceDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="ev-author">Author</Label>
+                <Label htmlFor="ev-author">{t("evidence.dialog.author")}</Label>
                 <Input
                   id="ev-author"
                   value={form.sourceAuthor}
@@ -301,18 +308,18 @@ export function AddEvidenceDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="ev-excerpt">Excerpt / quote / notes</Label>
+            <Label htmlFor="ev-excerpt">{t("evidence.dialog.excerpt")}</Label>
             <Textarea
               id="ev-excerpt"
               rows={5}
               value={form.sourceExcerpt}
               onChange={(e) => set("sourceExcerpt", e.target.value)}
               required
-              placeholder="Verbatim quote or notes. Keep the customer's words."
+              placeholder={t("evidence.dialog.excerptPlaceholder")}
             />
             <div className="flex items-center justify-between gap-2">
               <p className="text-muted-foreground text-[11px]">
-                Signals below drive Evidence Confidence. Tick only what the source actually shows.
+                {t("evidence.dialog.signalsHelp")}
               </p>
               <Button
                 type="button"
@@ -321,7 +328,8 @@ export function AddEvidenceDialog({
                 onClick={suggest}
                 disabled={suggesting}
               >
-                {suggesting ? <Loader2 className="animate-spin" /> : <Sparkles />} Suggest signals
+                {suggesting ? <Loader2 className="animate-spin" /> : <Sparkles />}{" "}
+                {t("evidence.dialog.suggest")}
               </Button>
             </div>
             {suggestionNote && (
@@ -332,29 +340,20 @@ export function AddEvidenceDialog({
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2">
-            {(
-              [
-                ["isDirectCustomer", "Direct customer / user of the ICP"],
-                ["hasExplicitPain", "States the pain explicitly"],
-                ["hasEconomicImpact", "Quantifies economic impact"],
-                ["hasWorkaround", "Describes a workaround"],
-                ["hasPurchaseIntent", "Shows purchase intent / spend"],
-                ["isInterview", "This is an interview note"],
-              ] as Array<[keyof typeof form, string]>
-            ).map(([key, label]) => (
+            {SIGNAL_KEYS.map((key) => (
               <label key={key} className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={Boolean(form[key])}
-                  onCheckedChange={(v) => set(key, Boolean(v) as never)}
+                  onCheckedChange={(v) => set(key, Boolean(v))}
                 />
-                {label}
+                {t(`evidence.dialog.signal.${key}`)}
               </label>
             ))}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>Sentiment toward the hypothesis</Label>
+              <Label>{t("evidence.dialog.sentiment")}</Label>
               <Select
                 value={form.sentiment}
                 onValueChange={(v) => set("sentiment", v as EvidenceSentiment)}
@@ -365,14 +364,14 @@ export function AddEvidenceDialog({
                 <SelectContent>
                   {Object.values(EvidenceSentiment).map((s) => (
                     <SelectItem key={s} value={s}>
-                      {SENTIMENT_LABELS[s]}
+                      {t(`labels.sentiment.${s}`)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Strength {form.strengthScore}/10</Label>
+              <Label>{t("evidence.dialog.strength", { score: form.strengthScore })}</Label>
               <input
                 type="range"
                 min={0}
@@ -383,7 +382,7 @@ export function AddEvidenceDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Relevance {form.relevanceScore}/10</Label>
+              <Label>{t("evidence.dialog.relevance", { score: form.relevanceScore })}</Label>
               <input
                 type="range"
                 min={0}
@@ -397,16 +396,16 @@ export function AddEvidenceDialog({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Linked pain</Label>
+              <Label>{t("evidence.dialog.linkedPain")}</Label>
               <Select
                 value={form.painId || "none"}
                 onValueChange={(v) => set("painId", v === "none" ? "" : v)}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="None" />
+                  <SelectValue placeholder={t("common.none")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="none">{t("common.none")}</SelectItem>
                   {pains.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.label.slice(0, 80)}
@@ -416,7 +415,7 @@ export function AddEvidenceDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Linked opportunity</Label>
+              <Label>{t("evidence.dialog.linkedOpportunity")}</Label>
               <Select
                 value={form.opportunityId || "none"}
                 onValueChange={(v) => {
@@ -425,10 +424,10 @@ export function AddEvidenceDialog({
                 }}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="None" />
+                  <SelectValue placeholder={t("common.none")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="none">{t("common.none")}</SelectItem>
                   {opportunities.map((o) => (
                     <SelectItem key={o.id} value={o.id}>
                       {o.label.slice(0, 80)}
@@ -441,36 +440,33 @@ export function AddEvidenceDialog({
 
           <fieldset className="space-y-2 rounded-md border p-3">
             <legend className="px-1 text-xs font-semibold tracking-wider uppercase">
-              Where was this observed? (scope)
+              {t("evidence.dialog.scopeLegend")}
             </legend>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-muted-foreground text-xs">
-                Evidence counts within the scope it was observed in. Recording it lets the engine
-                judge scope match and how far a claim generalizes.
-              </p>
+              <p className="text-muted-foreground text-xs">{t("evidence.dialog.scopeHelp")}</p>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 onClick={() => setScopeOpen((v) => !v)}
               >
-                {scopeOpen ? "Hide" : "Record scope"}
+                {scopeOpen ? t("evidence.dialog.hideScope") : t("evidence.dialog.recordScope")}
               </Button>
             </div>
             {scopeOpen && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-origin">Source origin (lineage)</Label>
+                  <Label htmlFor="ev-origin">{t("evidence.dialog.origin")}</Label>
                   <Input
                     id="ev-origin"
                     value={form.sourceOriginId}
                     onChange={(e) => set("sourceOriginId", e.target.value)}
-                    placeholder="e.g. interview:owner-a — derivatives of one source count once"
+                    placeholder={t("evidence.dialog.originPlaceholder")}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label htmlFor="ev-orgs">Organizations</Label>
+                    <Label htmlFor="ev-orgs">{t("evidence.dialog.organizations")}</Label>
                     <Input
                       id="ev-orgs"
                       type="number"
@@ -480,7 +476,7 @@ export function AddEvidenceDialog({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="ev-n">Sample size</Label>
+                    <Label htmlFor="ev-n">{t("evidence.dialog.sampleSize")}</Label>
                     <Input
                       id="ev-n"
                       type="number"
@@ -491,43 +487,43 @@ export function AddEvidenceDialog({
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-pop">Population</Label>
+                  <Label htmlFor="ev-pop">{t("evidence.dialog.population")}</Label>
                   <Input
                     id="ev-pop"
                     value={form.scopePopulation}
                     onChange={(e) => set("scopePopulation", e.target.value)}
-                    placeholder="independent hair salons, 8–12 chairs"
+                    placeholder={t("evidence.dialog.populationPlaceholder")}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-systems">Systems / tools (comma-separated)</Label>
+                  <Label htmlFor="ev-systems">{t("evidence.dialog.systems")}</Label>
                   <Input
                     id="ev-systems"
                     value={form.scopeSystems}
                     onChange={(e) => set("scopeSystems", e.target.value)}
-                    placeholder="POS A, Booking tool B"
+                    placeholder={t("evidence.dialog.systemsPlaceholder")}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-env">Environment / conditions</Label>
+                  <Label htmlFor="ev-env">{t("evidence.dialog.environment")}</Label>
                   <Input
                     id="ev-env"
                     value={form.scopeEnvironment}
                     onChange={(e) => set("scopeEnvironment", e.target.value)}
-                    placeholder="founder-assisted, unassisted…"
+                    placeholder={t("evidence.dialog.environmentPlaceholder")}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-period">Time period</Label>
+                  <Label htmlFor="ev-period">{t("evidence.dialog.timePeriod")}</Label>
                   <Input
                     id="ev-period"
                     value={form.scopeTimePeriod}
                     onChange={(e) => set("scopeTimePeriod", e.target.value)}
-                    placeholder="one month, Q2 2026"
+                    placeholder={t("evidence.dialog.timePeriodPlaceholder")}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-geo">Geography</Label>
+                  <Label htmlFor="ev-geo">{t("evidence.dialog.geography")}</Label>
                   <Input
                     id="ev-geo"
                     value={form.scopeGeography}
@@ -535,7 +531,7 @@ export function AddEvidenceDialog({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="ev-cond">Other conditions</Label>
+                  <Label htmlFor="ev-cond">{t("evidence.dialog.conditions")}</Label>
                   <Input
                     id="ev-cond"
                     value={form.scopeConditions}
@@ -549,36 +545,32 @@ export function AddEvidenceDialog({
           {graph && (
             <fieldset className="space-y-2 rounded-md border p-3">
               <legend className="px-1 text-xs font-semibold tracking-wider uppercase">
-                What claim does this evidence affect?
+                {t("evidence.dialog.claimsLegend")}
               </legend>
               {!form.opportunityId ? (
                 <p className="text-muted-foreground text-xs">
-                  Choose a linked opportunity to attach this evidence to specific claims: the pain,
-                  its magnitude, willingness to pay, a value chain level or a causal link. One item
-                  may affect several claims.
+                  {t("evidence.dialog.claimsChooseOpportunity")}
                 </p>
               ) : targets.length === 0 ? (
-                <p className="text-muted-foreground text-xs">No claims available.</p>
+                <p className="text-muted-foreground text-xs">{t("evidence.dialog.noClaims")}</p>
               ) : (
                 <>
                   <p className="text-muted-foreground text-xs">
-                    Tick each claim and say whether the source supports, contradicts or is neutral
-                    about it. The badge shows how admissible a{" "}
-                    {EVIDENCE_SOURCE_TYPE_LABELS[form.sourceType].toLowerCase()} is for that claim;
-                    the engine computes the fit and reassesses the claim — nothing becomes proven
-                    automatically.
+                    {t("evidence.dialog.claimsHelp", {
+                      source: t(`labels.evidenceSourceType.${form.sourceType}`).toLowerCase(),
+                    })}
                   </p>
                   {groups.map(([group, items]) => (
                     <div key={group} className="space-y-1">
                       <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                        {group}
+                        {t(`evidence.claimTargets.group.${group}`)}
                       </p>
                       <ul className="grid gap-1 sm:grid-cols-2">
-                        {items.map((t) => {
-                          const dir = claims[t.key];
+                        {items.map((target) => {
+                          const dir = claims[target.key];
                           return (
                             <li
-                              key={t.key}
+                              key={target.key}
                               className={cn(
                                 "flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs",
                                 dir && "border-foreground",
@@ -587,28 +579,30 @@ export function AddEvidenceDialog({
                               <Checkbox
                                 className="mt-0.5"
                                 checked={Boolean(dir)}
-                                onCheckedChange={() => toggleClaim(t)}
-                                aria-label={`Affects ${t.label}`}
+                                onCheckedChange={() => toggleClaim(target)}
+                                aria-label={t("evidence.dialog.affectsClaim", {
+                                  claim: target.label,
+                                })}
                               />
                               <div className="min-w-0 flex-1">
                                 <p className="flex items-center gap-1.5 font-medium">
-                                  {t.label}
+                                  {target.label}
                                   <AdmissibilityBadge
-                                    level={admissibilityLevel(form.sourceType, t.claimType)}
+                                    level={admissibilityLevel(form.sourceType, target.claimType)}
                                   />
                                 </p>
-                                {t.detail && (
-                                  <p className="text-muted-foreground truncate">{t.detail}</p>
+                                {target.detail && (
+                                  <p className="text-muted-foreground truncate">{target.detail}</p>
                                 )}
                                 {dir && (
                                   <div className="mt-1 flex gap-1">
-                                    {(
-                                      ["SUPPORTS", "CONTRADICTS", "NEUTRAL"] as ClaimDirection[]
-                                    ).map((d) => (
+                                    {CLAIM_DIRECTIONS.map((d) => (
                                       <button
                                         key={d}
                                         type="button"
-                                        onClick={() => setClaims((c) => ({ ...c, [t.key]: d }))}
+                                        onClick={() =>
+                                          setClaims((c) => ({ ...c, [target.key]: d }))
+                                        }
                                         className={cn(
                                           "rounded border px-1.5 py-0.5 text-[10px]",
                                           dir === d
@@ -616,7 +610,7 @@ export function AddEvidenceDialog({
                                             : "text-muted-foreground hover:text-foreground",
                                         )}
                                       >
-                                        {DIRECTION_LABEL[d]}
+                                        {t(`shared.direction.${d}`)}
                                       </button>
                                     ))}
                                   </div>
@@ -635,17 +629,14 @@ export function AddEvidenceDialog({
 
           <DialogFooter className="items-center sm:justify-between">
             <Badge variant="muted" className="font-normal">
-              Stored as EXTERNAL EVIDENCE, never as hypothesis
-              {selectedCount
-                ? ` · affects ${selectedCount} claim${selectedCount === 1 ? "" : "s"}`
-                : ""}
+              {t("evidence.dialog.stored", { count: selectedCount })}
             </Badge>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={saving}>
-                {saving && <Loader2 className="animate-spin" />} Save evidence
+                {saving && <Loader2 className="animate-spin" />} {t("evidence.dialog.save")}
               </Button>
             </div>
           </DialogFooter>

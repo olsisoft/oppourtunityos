@@ -1,2 +1,148 @@
 /** English strings — section "opportunity". Keys are referenced as "opportunity.<key>". */
-export const opportunity = {} as const;
+export const opportunity = {
+  score: {
+    incomplete: "INCOMPLETE",
+    notComputed: "Not computed",
+    notComputedYet: "Not computed yet.",
+  },
+  report: {
+    copy: "Copy report as Markdown",
+    copied: "Copied",
+  },
+  guide: {
+    ready: "Interview guide ready",
+    empty: {
+      readyTitle: "Ready for customer discovery",
+      title: "No interview guide yet",
+      description:
+        "Questions focus on past behavior: the last time it happened, what it cost, what they bought. Never “would you pay for this?”. Save notes as evidence afterwards.",
+    },
+    generate: "Generate interview guide",
+    regenerate: "Regenerate",
+    source: {
+      ai: "AI-assisted",
+      template: "template",
+    },
+    listenFor: "Listen for",
+    avoid: "Avoid",
+  },
+  kill: {
+    none: "No kill criteria triggered.",
+    critical:
+      "{count, plural, one {# critical signal} other {# critical signals}} — resolve before trusting a positive verdict.",
+  },
+  new: {
+    created: "Opportunity created and scored",
+    title: "New opportunity",
+    description:
+      "An opportunity is ICP × variable × movement anchored on a pain. Scores are computed from the 0–10 inputs; evidence is scored separately.",
+    titleLabel: "Title",
+    titlePlaceholder: "e.g. Salon no-show prevention",
+    pain: "Pain",
+    selectPain: "Select a pain",
+    problemStatement: "Problem statement",
+    metric: "Metric that proves value",
+    metricPlaceholder: "e.g. no-show rate per month",
+    submit: "Create and score",
+  },
+  nextAction: {
+    none: "No recommendation yet.",
+    title: "Next best action",
+    effort: "effort {effort}",
+    type: {
+      KILL: "kill",
+      IGNORE: "ignore",
+      RESOLVE_WARNING: "resolve warning",
+      VALIDATE_ASSUMPTION: "validate assumption",
+      RESEARCH: "research",
+      COMPARE_ALTERNATIVES: "compare alternatives",
+      EXPLORE_MECHANISMS: "explore mechanisms",
+      INTERVIEW: "interview",
+      TEST: "test",
+      DEFINE: "define",
+    },
+  },
+  card: {
+    icp: "ICP",
+    variable: "Valuable variable",
+    pain: "Pain",
+    trigger: "Trigger",
+    alternative: "Alternative",
+    alternativeValue: "{name} — {failure}",
+    failureUnknown: "failure UNKNOWN",
+    mechanism: "Mechanism",
+    valueProposition: "Value proposition",
+    frontier: "Proof frontier",
+    frontierValue: "{frontier} — everything beyond it remains a hypothesis",
+    killCriteria: "Kill criteria",
+    assumptions: "Assumptions ({count})",
+    noAssumptions: "No assumptions recorded.",
+    nextStep: "Next step",
+  },
+  inputs: {
+    title: "Scoring inputs (0–10)",
+    preview: "Potential preview",
+    weight: "{value}%",
+    saved: "Inputs saved — scores recomputed",
+    note: "Editing inputs marks them as yours (provenance USER). The verdict is recomputed by the rule engine.",
+    save: "Save inputs",
+  },
+  radar: {
+    intro:
+      "Four independent questions, one deterministic verdict. Hover a score for its decomposition; INCOMPLETE means an input is UNKNOWN, not zero.",
+    add: "Opportunity",
+    empty: {
+      title: "No opportunities yet",
+      description:
+        "Opportunities form once an ICP, a variable and a pain are known. You can also create one manually and set its inputs.",
+    },
+    create: "Create opportunity",
+    column: {
+      opportunity: "Opportunity",
+      potential: "Potential",
+      potentialShort: "Pot.",
+      evidence: "Evidence",
+      evidenceShort: "Evid.",
+      value: "Value",
+      causal: "Causal",
+      frontier: "Proof frontier",
+      verdict: "Verdict",
+    },
+    question: {
+      potential: "Opportunity Potential — is the problem structurally attractive?",
+      evidence: "Evidence Confidence — do we have credible evidence that the problem is real?",
+      value: "Value Strength — if we move the variable, how much value could be created?",
+      causal: "Causal Confidence — do we know the proposed mechanism can actually move it?",
+      frontier:
+        "Where supported knowledge currently ends. Deterministic: derived from linked evidence and critical causal links, never from the analyst.",
+    },
+    movedRecently: "↑ frontier moved recently",
+    frontierLine: "frontier · {frontier}",
+    hover: {
+      dimension: "{label}: {known, select, true {{value}/10} other {UNKNOWN}} · {provenance}",
+      completeness: "Completeness: {completeness}",
+      next: "Next: {question}",
+      criticalLinks: "Critical links: {total} · validated: {validated}",
+      blocking: "Blocking: {label}",
+      frontier: "Proof frontier: {frontier}",
+      frontierWithScope: "Proof frontier: {frontier} · scope: {scope}",
+      linkMissing: "{label}: UNKNOWN",
+      link: "{label}: {status}",
+      linkWithConfidence: "{label}: {status} {confidence}",
+      incomplete: "INCOMPLETE — an input is UNKNOWN; this is not a zero.",
+      frontierTitle: "Proof Frontier",
+    },
+  },
+  breakdown: {
+    weight: "{value}/10 × {weight}%",
+    points: "{points} pts",
+    weakest: "Weakest inputs: {inputs}.",
+    noEvidence: "No evidence captured. Everything about this opportunity is still a hypothesis.",
+    fill: "{fill}% of {weight} · {count, plural, one {# item} other {# items}}",
+    contradictory:
+      "Contradictory evidence ({count, plural, one {# item} other {# items}}) −{points} pts",
+    gaps: "Evidence gaps",
+    fallback:
+      "This score pair falls between the primary rules; the documented fallback grid applied.",
+  },
+} as const;

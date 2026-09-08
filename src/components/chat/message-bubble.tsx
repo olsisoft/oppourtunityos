@@ -4,6 +4,8 @@ import { Bot, User } from "lucide-react";
 
 import { SimpleMarkdown } from "@/components/chat/simple-markdown";
 import { Badge } from "@/components/ui/badge";
+import { useT } from "@/i18n/client";
+import type { T } from "@/i18n/t";
 import { cn } from "@/lib/utils";
 
 export interface AppliedCounts {
@@ -21,28 +23,27 @@ export interface AppliedCounts {
   experiments?: number;
 }
 
-const APPLIED_LABELS: Array<[keyof AppliedCounts, string]> = [
-  ["markets", "market"],
-  ["icps", "ICP"],
-  ["variables", "variable"],
-  ["pains", "pain"],
-  ["triggers", "trigger"],
-  ["alternatives", "alternative"],
-  ["mechanisms", "mechanism"],
-  ["opportunities", "opportunity"],
-  ["valueChainNodes", "value chain level"],
-  ["causalLinks", "causal link"],
-  ["experiments", "experiment"],
-  ["assumptions", "assumption"],
+/** Display order of the applied counts; each key has a plural template under chat.applied. */
+const APPLIED_ORDER: Array<keyof AppliedCounts> = [
+  "markets",
+  "icps",
+  "variables",
+  "pains",
+  "triggers",
+  "alternatives",
+  "mechanisms",
+  "opportunities",
+  "valueChainNodes",
+  "causalLinks",
+  "experiments",
+  "assumptions",
 ];
 
-export function appliedSummaryText(applied: AppliedCounts | null | undefined): string | null {
+export function appliedSummaryText(t: T, applied: AppliedCounts | null | undefined): string | null {
   if (!applied) return null;
-  const parts = APPLIED_LABELS.filter(([k]) => (applied[k] ?? 0) > 0).map(([k, label]) => {
-    const n = applied[k] ?? 0;
-    if (n === 1) return `1 ${label}`;
-    return `${n} ${label === "opportunity" ? "opportunities" : `${label}s`}`;
-  });
+  const parts = APPLIED_ORDER.filter((k) => (applied[k] ?? 0) > 0).map((k) =>
+    t(`chat.applied.${k}`, { count: applied[k] ?? 0 }),
+  );
   if (!parts.length) return null;
   return parts.join(", ");
 }
@@ -60,8 +61,9 @@ export function MessageBubble({
   applied?: AppliedCounts | null;
   isMock?: boolean;
 }) {
+  const t = useT();
   const isUser = role === "USER";
-  const summary = appliedSummaryText(applied);
+  const summary = appliedSummaryText(t, applied);
   return (
     <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
       <div
@@ -94,12 +96,12 @@ export function MessageBubble({
           <div className="flex flex-wrap items-center gap-1.5">
             {summary && (
               <Badge variant="info" className="font-normal">
-                Added to workspace: {summary}
+                {t("chat.applied.summary", { summary })}
               </Badge>
             )}
             {isMock && (
               <Badge variant="muted" className="font-normal">
-                mock provider
+                {t("chat.mockBadge")}
               </Badge>
             )}
           </div>

@@ -9,6 +9,7 @@ import { ResearchDialog } from "@/components/evidence/research-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import type { WorkspaceGraph } from "@/db/workspaces";
+import { useT } from "@/i18n/client";
 
 export function painOptions(graph: WorkspaceGraph) {
   return graph.markets.flatMap((m) =>
@@ -30,6 +31,7 @@ export function EvidencePanel({
   /** Pre-selects the opportunity in the add dialog (used on the report page). */
   defaultOpportunityId?: string;
 }) {
+  const t = useT();
   const [addOpen, setAddOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const pains = painOptions(graph);
@@ -40,33 +42,35 @@ export function EvidencePanel({
 
   const emptyDescription =
     strongest && strongest.opportunityScore >= 60
-      ? `High-potential hypothesis (“${strongest.title}”, ${strongest.opportunityScore}/100), but nothing has been verified. Add evidence before moving this opportunity forward.`
-      : "Hypotheses are not evidence. Capture quotes, reviews, interviews and notes; Evidence Confidence is computed from them.";
+      ? t("evidence.panel.emptyStrong", {
+          title: strongest.title,
+          score: strongest.opportunityScore,
+        })
+      : t("evidence.panel.emptyDefault");
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-xs">
-          {graph.evidence.length} item{graph.evidence.length === 1 ? "" : "s"}. External material
-          only — hypotheses never appear here.
+          {t("evidence.panel.count", { count: graph.evidence.length })}
         </p>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => setResearchOpen(true)}>
-            <Search /> Research
+            <Search /> {t("evidence.panel.research")}
           </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus /> Add evidence
+            <Plus /> {t("evidence.panel.add")}
           </Button>
         </div>
       </div>
       {graph.evidence.length === 0 ? (
         <EmptyState
           icon={FileSearch}
-          title="No evidence yet."
+          title={t("evidence.panel.emptyTitle")}
           description={emptyDescription}
           action={
             <Button size="sm" onClick={() => setAddOpen(true)}>
-              <Plus /> Add the first evidence
+              <Plus /> {t("evidence.panel.addFirst")}
             </Button>
           }
         />

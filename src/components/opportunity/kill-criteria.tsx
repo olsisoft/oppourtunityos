@@ -1,5 +1,8 @@
+"use client";
+
 import { AlertOctagon, AlertTriangle, ShieldCheck } from "lucide-react";
 
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 import type { KillWarning } from "@/services/scoring/kill-criteria";
 
@@ -10,6 +13,7 @@ export function KillCriteria({
   warnings: KillWarning[];
   className?: string;
 }) {
+  const t = useT();
   if (warnings.length === 0) {
     return (
       <div
@@ -18,7 +22,7 @@ export function KillCriteria({
           className,
         )}
       >
-        <ShieldCheck className="size-4" /> No kill criteria triggered.
+        <ShieldCheck className="size-4" /> {t("opportunity.kill.none")}
       </div>
     );
   }
@@ -28,8 +32,7 @@ export function KillCriteria({
     <div className={cn("space-y-2", className)}>
       {critical.length > 0 && (
         <p className="text-tone-negative text-xs font-medium">
-          {critical.length} critical signal{critical.length === 1 ? "" : "s"} — resolve before
-          trusting a positive verdict.
+          {t("opportunity.kill.critical", { count: critical.length })}
         </p>
       )}
       <ul className="space-y-2">
@@ -50,8 +53,8 @@ export function KillCriteria({
                 <AlertTriangle className="text-tone-warning mt-0.5 size-4 shrink-0" />
               )}
               <div>
-                <p className="font-medium">{w.message}</p>
-                <p className="text-muted-foreground mt-0.5 text-xs">{w.suggestion}</p>
+                <p className="font-medium">{t(w.message)}</p>
+                <p className="text-muted-foreground mt-0.5 text-xs">{t(w.suggestion)}</p>
               </div>
             </div>
           </li>

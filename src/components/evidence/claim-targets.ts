@@ -1,10 +1,9 @@
 import type { WorkspaceGraph } from "@/db/workspaces";
-import { CLAIM_TYPE_LABELS, VALUE_CHAIN_LEVEL_LABELS } from "@/domain/enums";
 import type { ClaimType } from "@/generated/prisma/enums";
+import type { T } from "@/i18n/t";
 import { truncate } from "@/lib/utils";
 import {
   CLAIM_GROUP,
-  CLAIM_GROUP_LABELS,
   claimTypeForLevel,
   claimTypeForLink,
   SELECTABLE_CLAIM_TYPES,
@@ -16,7 +15,12 @@ import {
  * opportunity. Problem, commercial and access claims are typed claims on the
  * opportunity itself; ladder claims point at a value chain node or a causal
  * link and take the claim type of their level.
+ *
+ * Labels are rendered in the caller's locale: pass its `t`.
  */
+export type ClaimTargetGroup =
+  "PROBLEM" | "COMMERCIAL" | "ACCESS" | "VALUE_CHAIN" | "CAUSAL_LINKS" | "OTHER";
+
 export interface ClaimTarget {
   key: string;
   claimType: ClaimType;
@@ -24,23 +28,25 @@ export interface ClaimTarget {
   detail?: string;
   valueChainNodeId?: string;
   causalLinkId?: string;
-  group: "Problem" | "Commercial" | "Access" | "Value chain" | "Causal links" | "Other";
+  /** Stable id; rendered with `evidence.claimTargets.group.<id>`. */
+  group: ClaimTargetGroup;
 }
 
-const GROUP_OF: Record<ClaimGroup, ClaimTarget["group"]> = {
-  MARKET: "Problem",
-  PROBLEM: "Problem",
-  VALUE: "Problem",
-  PRODUCT: "Value chain",
-  CAUSAL: "Causal links",
-  COMMERCIAL: "Commercial",
-  ACCESS: "Access",
-  OTHER: "Other",
+const GROUP_OF: Record<ClaimGroup, ClaimTargetGroup> = {
+  MARKET: "PROBLEM",
+  PROBLEM: "PROBLEM",
+  VALUE: "PROBLEM",
+  PRODUCT: "VALUE_CHAIN",
+  CAUSAL: "CAUSAL_LINKS",
+  COMMERCIAL: "COMMERCIAL",
+  ACCESS: "ACCESS",
+  OTHER: "OTHER",
 };
 
 export function claimTargetsFor(
   graph: WorkspaceGraph,
   opportunityId: string | null | undefined,
+  t: T,
 ): ClaimTarget[] {
   const o = graph.opportunities.find((x) => x.id === opportunityId);
   if (!o) return [];
@@ -55,8 +61,8 @@ export function claimTargetsFor(
     targets.push({
       key: `problem:${claimType}`,
       claimType,
-      label: CLAIM_TYPE_LABELS[claimType],
-      detail: problemDetail(o, claimType),
+      label: t(`labels.claimType.${claimType}`),
+      detail: problemDetail(o, claimType, t),
       group: GROUP_OF[CLAIM_GROUP[claimType]],
     });
   }
@@ -64,42 +70,61 @@ export function claimTargetsFor(
     targets.push({
       key: `node:${node.id}`,
       claimType: claimTypeForLevel(node.level),
-      label: VALUE_CHAIN_LEVEL_LABELS[node.level],
+      label: t(`labels.valueChainLevel.${node.level}`),
       detail: truncate(node.statement, 90),
       valueChainNodeId: node.id,
-      group: "Value chain",
+      group: "VALUE_CHAIN",
     });
   }
   for (const link of o.causalLinks) {
     targets.push({
       key: `link:${link.id}`,
       claimType: claimTypeForLink(link.fromNode.level, link.toNode.level),
-      label: `${VALUE_CHAIN_LEVEL_LABELS[link.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[link.toNode.level]}`,
+      label: t("evidence.claimTargets.link", {
+        from: t(`labels.valueChainLevel.${link.fromNode.level}`),
+        to: t(`labels.valueChainLevel.${link.toNode.level}`),
+      }),
       detail: truncate(link.statement, 90),
       causalLinkId: link.id,
-      group: "Causal links",
+      group: "CAUSAL_LINKS",
     });
   }
   return targets;
 }
 
-export const CLAIM_TARGET_GROUP_ORDER: ClaimTarget["group"][] = [
-  "Problem",
-  "Value chain",
-  "Causal links",
-  "Commercial",
-  "Access",
-  "Other",
+export const CLAIM_TARGET_GROUP_ORDER: ClaimTargetGroup[] = [
+  "PROBLEM",
+  "VALUE_CHAIN",
+  "CAUSAL_LINKS",
+  "COMMERCIAL",
+  "ACCESS",
+  "OTHER",
 ];
 
-export function claimGroupLabel(claimType: ClaimType): string {
-  return CLAIM_GROUP_LABELS[CLAIM_GROUP[claimType]];
+export function claimTargetGroupLabel(group: ClaimTargetGroup, t: T): string {
+  return t(`evidence.claimTargets.group.${group}`);
 }
+
+export function claimGroupLabel(claimType: ClaimType, t: T): string {
+  return t(`labels.claimGroup.${CLAIM_GROUP[claimType]}`);
+}
+
+/** Commercial claims whose detail is a fixed explanation rather than workspace content. */
+const DETAIL_KEY: Partial<Record<ClaimType, string>> = {
+  EXISTING_SPEND: "evidence.claimTargets.detail.EXISTING_SPEND",
+  PURCHASE_INTENT: "evidence.claimTargets.detail.PURCHASE_INTENT",
+  WILLINGNESS_TO_PAY: "evidence.claimTargets.detail.WILLINGNESS_TO_PAY",
+  PRICE_ACCEPTANCE: "evidence.claimTargets.detail.PRICE_ACCEPTANCE",
+  ACTUAL_PURCHASE: "evidence.claimTargets.detail.ACTUAL_PURCHASE",
+};
 
 function problemDetail(
   o: WorkspaceGraph["opportunities"][number],
   claimType: ClaimType,
+  t: T,
 ): string | undefined {
+  const fixed = DETAIL_KEY[claimType];
+  if (fixed) return t(fixed);
   switch (claimType) {
     case "ICP_EXISTS":
     case "ICP_ACCESSIBLE":
@@ -123,16 +148,6 @@ function problemDetail(
       return o.pain?.triggers[0]?.description;
     case "ALTERNATIVE_EXISTS":
       return o.pain?.alternatives[0]?.name;
-    case "EXISTING_SPEND":
-      return "What buyers already pay to deal with this (not WTP for something new)";
-    case "PURCHASE_INTENT":
-      return "Buyers say they would buy";
-    case "WILLINGNESS_TO_PAY":
-      return "Buyers state a price they would pay (stated, not observed)";
-    case "PRICE_ACCEPTANCE":
-      return "Buyers accept a real price put in front of them";
-    case "ACTUAL_PURCHASE":
-      return "Money actually changed hands";
     default:
       return undefined;
   }

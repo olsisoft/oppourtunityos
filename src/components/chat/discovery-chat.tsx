@@ -12,8 +12,9 @@ import { QuestionCard, SuggestedReplies } from "@/components/chat/question-card"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { STAGE_LABELS } from "@/domain/enums";
 import type { DiscoveryStage, EntryMode } from "@/generated/prisma/enums";
+import { useT } from "@/i18n/client";
+import type { LocalizedText } from "@/i18n/messages";
 import type { QuestionCard as QuestionCardData } from "@/services/ai/schemas";
 import type { TurnEvent } from "@/services/discovery/turn";
 import type { DiscoveryProgress } from "@/services/scoring/discovery-progress";
@@ -33,7 +34,7 @@ export interface ChatMessage {
 export interface ProviderInfo {
   name: string;
   isMock: boolean;
-  error?: string | null;
+  error?: LocalizedText | null;
 }
 
 export function DiscoveryChat({
@@ -53,11 +54,12 @@ export function DiscoveryChat({
   provider: ProviderInfo;
   defaultIntent?: "discover" | "validate";
 }) {
+  const t = useT();
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LocalizedText | null>(null);
   const [currentStage, setCurrentStage] = useState<DiscoveryStage>(stage);
   const [progress, setProgress] = useState(initialProgress);
   const [pendingEntryMode, setPendingEntryMode] = useState<EntryMode | null>(entryMode);
@@ -121,13 +123,13 @@ export function DiscoveryChat({
         });
         if (!res.ok || !res.body) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? `Request failed (${res.status})`);
+          throw new Error(body.error ?? t("chat.error.requestFailed", { status: res.status }));
         }
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
         let content = "";
-        let failed: string | null = null;
+        let failed: LocalizedText | null = null;
 
         const handle = (event: TurnEvent) => {
           switch (event.type) {
@@ -193,16 +195,16 @@ export function DiscoveryChat({
         router.refresh();
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
-        const message = e instanceof Error ? e.message : "Something went wrong.";
+        const message = e instanceof Error ? e.message : t("chat.error.generic");
         setError(message);
         setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-        toast.error(message);
+        toast.error(t(message));
       } finally {
         setStreaming(false);
         abortRef.current = null;
       }
     },
-    [provider.isMock, router, streaming, workspaceId],
+    [provider.isMock, router, streaming, t, workspaceId],
   );
 
   const retry = () => {
@@ -228,22 +230,20 @@ export function DiscoveryChat({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Stage</span>
-          <Badge variant="outline">{STAGE_LABELS[currentStage]}</Badge>
+          <span className="text-muted-foreground">{t("chat.header.stage")}</span>
+          <Badge variant="outline">{t(`labels.stage.${currentStage}`)}</Badge>
           {pendingEntryMode && (
-            <Badge variant="muted">
-              {pendingEntryMode === "HAS_IDEA" ? "Reverse-engineering an idea" : "Market discovery"}
-            </Badge>
+            <Badge variant="muted">{t(`chat.header.entryMode.${pendingEntryMode}`)}</Badge>
           )}
         </div>
         <div className="flex items-center gap-2 text-xs">
           {provider.isMock ? (
             <Badge variant="warning" className="font-normal">
-              Mock AI provider — templated responses
+              {t("chat.header.mockProvider")}
             </Badge>
           ) : provider.error ? (
             <Badge variant="negative" className="font-normal">
-              {provider.error}
+              {t(provider.error)}
             </Badge>
           ) : (
             <span className="text-muted-foreground">{provider.name}</span>
@@ -291,10 +291,10 @@ export function DiscoveryChat({
           {error && (
             <div className="bg-tone-negative-bg text-tone-negative flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm">
               <span className="flex items-center gap-2">
-                <AlertTriangle className="size-4" /> {error}
+                <AlertTriangle className="size-4" /> {t(error)}
               </span>
               <Button size="sm" variant="outline" onClick={retry}>
-                <RotateCcw /> Retry
+                <RotateCcw /> {t("common.retry")}
               </Button>
             </div>
           )}
@@ -315,25 +315,24 @@ export function DiscoveryChat({
                 }
               }}
               placeholder={
-                streaming ? "Analyst is working…" : "Answer, add context, or ask the analyst…"
+                streaming ? t("chat.composer.placeholderWorking") : t("chat.composer.placeholder")
               }
               rows={1}
               className="max-h-40 min-h-10 resize-none"
               disabled={streaming || Boolean(provider.error)}
-              aria-label="Message"
+              aria-label={t("chat.composer.messageLabel")}
             />
             <Button
               type="submit"
               size="icon"
               disabled={streaming || !input.trim() || Boolean(provider.error)}
-              aria-label="Send"
+              aria-label={t("chat.composer.send")}
             >
               {streaming ? <Loader2 className="animate-spin" /> : <SendHorizontal />}
             </Button>
           </div>
           <p className="text-muted-foreground mx-auto mt-1.5 max-w-3xl text-[11px]">
-            Hypotheses stay labelled as hypotheses. Evidence is added through the Evidence tab,
-            never invented by the analyst.
+            {t("chat.composer.footer")}
           </p>
         </form>
       )}

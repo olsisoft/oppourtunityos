@@ -34,13 +34,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { GraphAssumption, WorkspaceGraph } from "@/db/workspaces";
-import {
-  ASSUMPTION_KIND_LABELS,
-  ASSUMPTION_STATUS_LABELS,
-  AssumptionKind,
-  AssumptionStatus,
-  VALUE_CHAIN_LEVEL_LABELS,
-} from "@/domain/enums";
+import { AssumptionKind, AssumptionStatus } from "@/domain/enums";
+import { useT } from "@/i18n/client";
 import { truncate } from "@/lib/utils";
 
 const STATUS_TONE = { UNKNOWN: "muted", SUPPORTED: "positive", CONTRADICTED: "negative" } as const;
@@ -55,15 +50,6 @@ const KIND_RANK: Record<AssumptionKind, number> = {
   GENERIC: 5,
 };
 
-const KIND_EXAMPLE: Record<AssumptionKind, string> = {
-  CAUSAL: "If high-risk bookings receive adaptive reminders, the no-show rate decreases.",
-  VALUE: "A 5-point reduction in no-shows creates enough economic value to justify the product.",
-  FEASIBILITY: "Booking platforms expose enough data to calculate appointment risk.",
-  WTP: "Independent salons would pay €79–149/month.",
-  ACCESS: "The target buyers can be reached efficiently.",
-  GENERIC: "The owner controls software purchases.",
-};
-
 export function assumptionRank(a: Pick<GraphAssumption, "status" | "importance" | "kind">) {
   const statusRank = a.status === "UNKNOWN" ? 0 : a.status === "CONTRADICTED" ? 1 : 2;
   return statusRank * 1000 - a.importance * 10 + KIND_RANK[a.kind];
@@ -76,6 +62,7 @@ export function AssumptionLedger({
   graph: WorkspaceGraph;
   opportunityId?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [statement, setStatement] = useState("");
@@ -100,7 +87,7 @@ export function AssumptionLedger({
       kind,
     });
     setSaving(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
       setStatement("");
       setAdding(false);
@@ -110,19 +97,19 @@ export function AssumptionLedger({
 
   const setStatus = async (a: GraphAssumption, status: AssumptionStatus) => {
     const r = await updateAssumptionAction({ assumptionId: a.id, status });
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else router.refresh();
   };
 
   const setKindOf = async (a: GraphAssumption, next: AssumptionKind) => {
     const r = await updateAssumptionAction({ assumptionId: a.id, kind: next });
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else router.refresh();
   };
 
   const remove = async (a: GraphAssumption) => {
     const r = await deleteAssumptionAction(a.id);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else router.refresh();
   };
 
@@ -131,11 +118,11 @@ export function AssumptionLedger({
       <div className="flex items-center justify-between gap-2">
         <p className="text-muted-foreground text-xs">
           {untested > 0
-            ? `${untested} critical assumption${untested === 1 ? "" : "s"} remain${untested === 1 ? "s" : ""} untested. If a causal or value assumption is false, the opportunity collapses.`
-            : "Riskiest untested assumptions first. Link evidence to move them to supported or contradicted."}
+            ? t("assumptions.summary.untested", { count: untested })
+            : t("assumptions.summary.default")}
         </p>
         <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
-          <Plus /> Assumption
+          <Plus /> {t("assumptions.addButton")}
         </Button>
       </div>
       {adding && (
@@ -148,7 +135,7 @@ export function AssumptionLedger({
               <SelectContent>
                 {Object.values(AssumptionKind).map((k) => (
                   <SelectItem key={k} value={k}>
-                    {ASSUMPTION_KIND_LABELS[k]}
+                    {t(`labels.assumptionKind.${k}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -156,13 +143,17 @@ export function AssumptionLedger({
             <Input
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
-              placeholder={`e.g. ${KIND_EXAMPLE[kind]}`}
+              placeholder={t("assumptions.examplePlaceholder", {
+                example: t(`assumptions.example.${kind}`),
+              })}
               required
               minLength={3}
             />
           </div>
           <div className="flex items-center gap-3">
-            <Label className="text-xs whitespace-nowrap">Importance {importance}/10</Label>
+            <Label className="text-xs whitespace-nowrap">
+              {t("assumptions.importance", { value: importance })}
+            </Label>
             <input
               type="range"
               min={0}
@@ -172,19 +163,16 @@ export function AssumptionLedger({
               className="flex-1 accent-current"
             />
             <Button type="submit" size="sm" disabled={saving}>
-              {saving && <Loader2 className="animate-spin" />} Add
+              {saving && <Loader2 className="animate-spin" />} {t("assumptions.add")}
             </Button>
           </div>
-          <p className="text-muted-foreground text-[11px]">
-            Causal and value assumptions can also be attached to a value chain level or a causal
-            link from the Value tab or the report ladder.
-          </p>
+          <p className="text-muted-foreground text-[11px]">{t("assumptions.formHelp")}</p>
         </form>
       )}
       {assumptions.length === 0 ? (
         <EmptyState
-          title="No assumptions recorded"
-          description="Every opportunity rests on assumptions about the buyer, the pain, the price and — above all — the causal chain from mechanism to value. Write them down so they can be tested."
+          title={t("assumptions.emptyTitle")}
+          description={t("assumptions.emptyDescription")}
         />
       ) : (
         <ul className="space-y-2">
@@ -197,27 +185,37 @@ export function AssumptionLedger({
                       variant={a.kind === "GENERIC" ? "muted" : "outline"}
                       className="text-[10px]"
                     >
-                      {ASSUMPTION_KIND_LABELS[a.kind]}
+                      {t(`labels.assumptionKind.${a.kind}`)}
                     </Badge>
                     {a.valueChainNode && (
                       <span className="text-muted-foreground text-[11px]">
-                        on {VALUE_CHAIN_LEVEL_LABELS[a.valueChainNode.level]}
+                        {t("assumptions.onLevel", {
+                          level: t(`labels.valueChainLevel.${a.valueChainNode.level}`),
+                        })}
                       </span>
                     )}
                     {a.causalLink && (
                       <span className="text-muted-foreground truncate text-[11px]">
-                        on link “{truncate(a.causalLink.statement, 60)}”
+                        {t("assumptions.onLink", {
+                          statement: truncate(a.causalLink.statement, 60),
+                        })}
                       </span>
                     )}
                   </div>
                   <p className="mt-1 text-sm">{a.statement}</p>
                 </div>
-                <Badge variant={STATUS_TONE[a.status]}>{ASSUMPTION_STATUS_LABELS[a.status]}</Badge>
+                <Badge variant={STATUS_TONE[a.status]}>
+                  {t(`labels.assumptionStatus.${a.status}`)}
+                </Badge>
               </div>
               <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                <span className="font-mono tabular-nums">importance {a.importance}/10</span>
-                <span className="font-mono tabular-nums">confidence {a.confidence}%</span>
-                <span>{a.links.length} evidence</span>
+                <span className="font-mono tabular-nums">
+                  {t("assumptions.item.importance", { value: a.importance })}
+                </span>
+                <span className="font-mono tabular-nums">
+                  {t("assumptions.item.confidence", { value: a.confidence })}
+                </span>
+                <span>{t("assumptions.item.evidenceCount", { count: a.links.length })}</span>
                 <ProvenanceBadge provenance={a.provenance} className="px-1.5 py-0 text-[10px]" />
               </div>
               {a.links.length > 0 && (
@@ -237,7 +235,7 @@ export function AssumptionLedger({
                                 : "text-muted-foreground"
                           }
                         >
-                          {l.direction.toLowerCase()}
+                          {t(`shared.direction.${l.direction}`)}
                         </span>{" "}
                         · {l.evidence.sourceTitle}
                       </span>
@@ -246,11 +244,11 @@ export function AssumptionLedger({
                         className="text-muted-foreground hover:text-foreground"
                         onClick={async () => {
                           const r = await unlinkAssumptionEvidenceAction(a.id, l.evidenceId);
-                          if (!r.ok) toast.error(r.error);
+                          if (!r.ok) toast.error(t(r.error));
                           else router.refresh();
                         }}
                       >
-                        unlink
+                        {t("assumptions.unlink")}
                       </button>
                     </li>
                   ))}
@@ -264,7 +262,7 @@ export function AssumptionLedger({
                   <SelectContent>
                     {Object.values(AssumptionStatus).map((s) => (
                       <SelectItem key={s} value={s}>
-                        {ASSUMPTION_STATUS_LABELS[s]}
+                        {t(`labels.assumptionStatus.${s}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -276,7 +274,7 @@ export function AssumptionLedger({
                   <SelectContent>
                     {Object.values(AssumptionKind).map((k) => (
                       <SelectItem key={k} value={k}>
-                        {ASSUMPTION_KIND_LABELS[k]}
+                        {t(`labels.assumptionKind.${k}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -288,13 +286,13 @@ export function AssumptionLedger({
                   onClick={() => setLinkFor(a)}
                   disabled={graph.evidence.length === 0}
                 >
-                  <Link2 /> Link evidence
+                  <Link2 /> {t("assumptions.linkEvidence")}
                 </Button>
                 <Button
                   size="icon-xs"
                   variant="ghost"
                   onClick={() => remove(a)}
-                  aria-label="Delete assumption"
+                  aria-label={t("assumptions.delete")}
                 >
                   <Trash2 />
                 </Button>
@@ -317,6 +315,7 @@ function LinkEvidenceDialog({
   graph: WorkspaceGraph;
   onClose: () => void;
 }) {
+  const t = useT();
   const router = useRouter();
   const [evidenceId, setEvidenceId] = useState("");
   const [direction, setDirection] = useState<"SUPPORTS" | "CONTRADICTS" | "NEUTRAL">("SUPPORTS");
@@ -332,9 +331,9 @@ function LinkEvidenceDialog({
       direction,
     });
     setSaving(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
-      toast.success("Evidence linked — status recomputed");
+      toast.success(t("assumptions.linkDialog.linked"));
       onClose();
       router.refresh();
     }
@@ -345,14 +344,14 @@ function LinkEvidenceDialog({
       <DialogContent>
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>Link evidence to assumption</DialogTitle>
+            <DialogTitle>{t("assumptions.linkDialog.title")}</DialogTitle>
             <DialogDescription>{assumption?.statement}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label>Evidence</Label>
+            <Label>{t("assumptions.linkDialog.evidence")}</Label>
             <Select value={evidenceId} onValueChange={setEvidenceId}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose evidence" />
+                <SelectValue placeholder={t("assumptions.linkDialog.choose")} />
               </SelectTrigger>
               <SelectContent>
                 {graph.evidence.map((e) => (
@@ -364,7 +363,7 @@ function LinkEvidenceDialog({
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Direction</Label>
+            <Label>{t("assumptions.linkDialog.direction")}</Label>
             <Select
               value={direction}
               onValueChange={(v) => setDirection(v as "SUPPORTS" | "CONTRADICTS" | "NEUTRAL")}
@@ -373,18 +372,20 @@ function LinkEvidenceDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SUPPORTS">Supports the assumption</SelectItem>
-                <SelectItem value="CONTRADICTS">Contradicts the assumption</SelectItem>
-                <SelectItem value="NEUTRAL">Neutral — relevant but inconclusive</SelectItem>
+                <SelectItem value="SUPPORTS">{t("assumptions.linkDialog.supports")}</SelectItem>
+                <SelectItem value="CONTRADICTS">
+                  {t("assumptions.linkDialog.contradicts")}
+                </SelectItem>
+                <SelectItem value="NEUTRAL">{t("assumptions.linkDialog.neutral")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={saving || !evidenceId}>
-              {saving && <Loader2 className="animate-spin" />} Link
+              {saving && <Loader2 className="animate-spin" />} {t("assumptions.linkDialog.link")}
             </Button>
           </DialogFooter>
         </form>

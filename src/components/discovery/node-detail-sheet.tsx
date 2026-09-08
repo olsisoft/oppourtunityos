@@ -10,9 +10,10 @@ import { deleteEntityAction, updateIcpAction, updatePainAction } from "@/actions
 import type { MapSelection } from "@/components/discovery/opportunity-map";
 import { ProvenanceBadge } from "@/components/shared/provenance-badge";
 import { VerdictBadge } from "@/components/shared/verdict-badge";
-import { Scorecard, frontierText } from "@/components/value/scorecard";
+import { Scorecard } from "@/components/value/scorecard";
 import { VariableValueForm } from "@/components/value/variable-value-form";
 import type { WorkspaceGraph } from "@/db/workspaces";
+import { useT } from "@/i18n/client";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import { compactLabel } from "@/services/value/variable-semantics";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +28,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { ALTERNATIVE_CATEGORY_LABELS, EVIDENCE_TYPE_LABELS } from "@/domain/enums";
 
 export function NodeDetailSheet({
   selection,
@@ -62,16 +62,17 @@ function Body({
   graph: WorkspaceGraph;
   onClose: () => void;
 }) {
+  const t = useT();
   const router = useRouter();
   const [pending, start] = useTransition();
 
   const remove = (kind: Parameters<typeof deleteEntityAction>[0]["kind"], id: string) => {
-    if (!confirm("Delete this item and everything beneath it? Scores will be recomputed.")) return;
+    if (!confirm(t("discovery.detail.confirmDelete"))) return;
     start(async () => {
       const r = await deleteEntityAction({ kind, id, workspaceId });
-      if (!r.ok) toast.error(r.error);
+      if (!r.ok) toast.error(t(r.error));
       else {
-        toast.success("Deleted");
+        toast.success(t("discovery.detail.deleted"));
         onClose();
         router.refresh();
       }
@@ -84,13 +85,20 @@ function Body({
         <div className="p-4 pt-10">
           <SheetHeader className="p-0">
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs uppercase">Market</span>
+              <span className="text-muted-foreground text-xs uppercase">
+                {t("discovery.detail.market.kind")}
+              </span>
               <ProvenanceBadge provenance={selection.item.provenance} />
             </div>
             <SheetTitle>{selection.item.name}</SheetTitle>
-            <SheetDescription>{selection.item.description ?? "No description."}</SheetDescription>
+            <SheetDescription>
+              {selection.item.description ?? t("discovery.detail.market.noDescription")}
+            </SheetDescription>
           </SheetHeader>
-          <Field label="Attractiveness notes" value={selection.item.attractivenessNotes} />
+          <Field
+            label={t("discovery.detail.market.attractiveness")}
+            value={selection.item.attractivenessNotes}
+          />
           <div className="mt-6">
             <Button
               variant="outline"
@@ -98,7 +106,7 @@ function Body({
               disabled={pending}
               onClick={() => remove("market", selection.item.id)}
             >
-              <Trash2 /> Delete market
+              <Trash2 /> {t("discovery.detail.market.delete")}
             </Button>
           </div>
         </div>
@@ -121,13 +129,14 @@ function Body({
         <div className="space-y-3 p-4 pt-10">
           <SheetHeader className="p-0">
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs uppercase">Valuable variable</span>
+              <span className="text-muted-foreground text-xs uppercase">
+                {t("discovery.detail.variable.kind")}
+              </span>
               <ProvenanceBadge provenance={v.provenance} />
             </div>
             <SheetTitle>{compactLabel(v.desiredDirection, v.name)}</SheetTitle>
             <SheetDescription>
-              {v.pains.length} pain{v.pains.length === 1 ? "" : "s"} attached. Each field carries
-              its own status; leave a field empty when it is UNKNOWN rather than guessing.
+              {t("discovery.detail.variable.description", { count: v.pains.length })}
             </SheetDescription>
           </SheetHeader>
           <VariableValueForm variable={v} siblings={siblings} />
@@ -139,7 +148,7 @@ function Body({
               onClick={() => remove("variable", v.id)}
               disabled={pending}
             >
-              <Trash2 /> Delete variable
+              <Trash2 /> {t("discovery.detail.variable.delete")}
             </Button>
           </div>
         </div>
@@ -155,15 +164,22 @@ function Body({
       );
     case "opportunity": {
       const o = selection.item;
+      const frontier = o.proofFrontierRung
+        ? t(`labels.proofRung.${o.proofFrontierRung}`)
+        : t("opportunity.score.notComputed");
       return (
         <div className="p-4 pt-10">
           <SheetHeader className="p-0">
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs uppercase">Opportunity</span>
+              <span className="text-muted-foreground text-xs uppercase">
+                {t("discovery.detail.opportunity.kind")}
+              </span>
               <VerdictBadge verdict={o.verdict} />
             </div>
             <SheetTitle>{o.title}</SheetTitle>
-            <SheetDescription>{o.problemStatement ?? "No problem statement yet."}</SheetDescription>
+            <SheetDescription>
+              {o.problemStatement ?? t("discovery.detail.opportunity.noProblemStatement")}
+            </SheetDescription>
           </SheetHeader>
           <div className="mt-4">
             <Scorecard
@@ -173,14 +189,14 @@ function Body({
             />
           </div>
           <p className="text-muted-foreground mt-3 text-xs">
-            Current Proof Frontier:{" "}
-            <span className="text-foreground">{frontierText(o.proofFrontierRung)}</span>. Everything
-            beyond it remains a product or causal hypothesis.
+            {t("discovery.detail.opportunity.frontierLabel")}{" "}
+            <span className="text-foreground">{frontier}</span>.{" "}
+            {t("discovery.detail.opportunity.frontierNote")}
           </p>
           <div className="mt-6">
             <Button asChild size="sm">
               <Link href={`/app/w/${workspaceId}/opportunities/${o.id}`}>
-                Open report <ArrowUpRight />
+                {t("discovery.detail.opportunity.openReport")} <ArrowUpRight />
               </Link>
             </Button>
           </div>
@@ -202,6 +218,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 }
 
 function useSave<T>(action: (input: T) => Promise<{ ok: boolean; error?: string }>) {
+  const t = useT();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   return {
@@ -210,9 +227,9 @@ function useSave<T>(action: (input: T) => Promise<{ ok: boolean; error?: string 
       setSaving(true);
       const r = await action(input);
       setSaving(false);
-      if (!r.ok) toast.error(r.error ?? "Failed");
+      if (!r.ok) toast.error(r.error ? t(r.error) : t("discovery.detail.failed"));
       else {
-        toast.success("Saved");
+        toast.success(t("discovery.detail.saved"));
         router.refresh();
       }
     },
@@ -228,6 +245,7 @@ function IcpForm({
   onDelete: () => void;
   pending: boolean;
 }) {
+  const t = useT();
   const { save, saving } = useSave(updateIcpAction);
   const [form, setForm] = useState({
     name: icp.name,
@@ -253,50 +271,49 @@ function IcpForm({
     >
       <SheetHeader className="p-0">
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-xs uppercase">ICP</span>
+          <span className="text-muted-foreground text-xs uppercase">
+            {t("discovery.detail.icp.kind")}
+          </span>
           <ProvenanceBadge provenance={icp.provenance} />
         </div>
         <SheetTitle>{icp.name}</SheetTitle>
-        <SheetDescription>
-          Edit any field. Manual edits mark the ICP as stated by you. Say UNKNOWN when you do not
-          know.
-        </SheetDescription>
+        <SheetDescription>{t("discovery.detail.icp.description")}</SheetDescription>
       </SheetHeader>
-      <L label="Name">
+      <L label={t("discovery.detail.icp.name")}>
         <Input value={form.name} onChange={set("name")} required />
       </L>
       <div className="grid grid-cols-2 gap-3">
-        <L label="Role">
+        <L label={t("discovery.detail.icp.role")}>
           <Input value={form.role} onChange={set("role")} />
         </L>
-        <L label="Company type">
+        <L label={t("discovery.detail.icp.companyType")}>
           <Input value={form.companyType} onChange={set("companyType")} />
         </L>
-        <L label="Company size">
+        <L label={t("discovery.detail.icp.companySize")}>
           <Input value={form.companySize} onChange={set("companySize")} />
         </L>
-        <L label="User role">
+        <L label={t("discovery.detail.icp.userRole")}>
           <Input value={form.userRole} onChange={set("userRole")} />
         </L>
       </div>
-      <L label="Responsibilities">
+      <L label={t("discovery.detail.icp.responsibilities")}>
         <Textarea rows={2} value={form.responsibilities} onChange={set("responsibilities")} />
       </L>
-      <L label="Economic buyer (who controls the budget?)">
+      <L label={t("discovery.detail.icp.economicBuyer")}>
         <Input value={form.economicBuyer} onChange={set("economicBuyer")} placeholder="UNKNOWN" />
       </L>
-      <L label="Reachability (how can you reach them?)">
+      <L label={t("discovery.detail.icp.reachability")}>
         <Input value={form.reachability} onChange={set("reachability")} placeholder="UNKNOWN" />
       </L>
-      <L label="Notes">
+      <L label={t("discovery.detail.icp.notes")}>
         <Textarea rows={2} value={form.notes} onChange={set("notes")} />
       </L>
       <div className="flex items-center justify-between pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onDelete} disabled={pending}>
-          <Trash2 /> Delete
+          <Trash2 /> {t("common.delete")}
         </Button>
         <Button type="submit" size="sm" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Save
+          {saving && <Loader2 className="animate-spin" />} {t("common.save")}
         </Button>
       </div>
     </form>
@@ -312,6 +329,7 @@ function PainForm({
   onDelete: () => void;
   pending: boolean;
 }) {
+  const t = useT();
   const { save, saving } = useSave(updatePainAction);
   const [form, setForm] = useState({
     description: pain.description,
@@ -331,15 +349,15 @@ function PainForm({
     >
       <SheetHeader className="p-0">
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-xs uppercase">Pain</span>
+          <span className="text-muted-foreground text-xs uppercase">
+            {t("discovery.detail.pain.kind")}
+          </span>
           <ProvenanceBadge provenance={pain.provenance} />
         </div>
         <SheetTitle className="text-base">{pain.description}</SheetTitle>
-        <SheetDescription>
-          Current state, desired state and gap. UNKNOWN is a valid and honest answer.
-        </SheetDescription>
+        <SheetDescription>{t("discovery.detail.pain.description")}</SheetDescription>
       </SheetHeader>
-      <L label="Description">
+      <L label={t("discovery.detail.pain.descriptionField")}>
         <Textarea
           rows={2}
           value={form.description}
@@ -347,7 +365,7 @@ function PainForm({
         />
       </L>
       <div className="grid grid-cols-2 gap-3">
-        <L label={`Severity ${form.severityScore}/10`}>
+        <L label={t("discovery.detail.pain.severity", { value: form.severityScore })}>
           <input
             type="range"
             min={0}
@@ -357,7 +375,7 @@ function PainForm({
             className="w-full accent-current"
           />
         </L>
-        <L label={`Frequency ${form.frequencyScore}/10`}>
+        <L label={t("discovery.detail.pain.frequency", { value: form.frequencyScore })}>
           <input
             type="range"
             min={0}
@@ -368,21 +386,21 @@ function PainForm({
           />
         </L>
       </div>
-      <L label="Current state">
+      <L label={t("discovery.detail.pain.currentState")}>
         <Input
           value={form.currentState}
           onChange={(e) => setForm({ ...form, currentState: e.target.value })}
           placeholder="UNKNOWN"
         />
       </L>
-      <L label="Desired state">
+      <L label={t("discovery.detail.pain.desiredState")}>
         <Input
           value={form.desiredState}
           onChange={(e) => setForm({ ...form, desiredState: e.target.value })}
           placeholder="UNKNOWN"
         />
       </L>
-      <L label="Gap">
+      <L label={t("discovery.detail.pain.gap")}>
         <Textarea
           rows={2}
           value={form.gapDescription}
@@ -391,26 +409,28 @@ function PainForm({
       </L>
 
       <div className="space-y-2 pt-2">
-        <p className="text-xs font-medium">Triggers ({pain.triggers.length})</p>
+        <p className="text-xs font-medium">
+          {t("discovery.detail.pain.triggers", { count: pain.triggers.length })}
+        </p>
         {pain.triggers.length === 0 && (
-          <p className="text-muted-foreground text-xs">
-            No trigger identified. Without a trigger there is no urgency.
-          </p>
+          <p className="text-muted-foreground text-xs">{t("discovery.detail.pain.noTrigger")}</p>
         )}
-        {pain.triggers.map((t) => (
-          <div key={t.id} className="rounded-md border p-2 text-xs">
+        {pain.triggers.map((trigger) => (
+          <div key={trigger.id} className="rounded-md border p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
-              <span>{t.description}</span>
-              <Badge variant="outline">urgency {t.urgencyScore}</Badge>
+              <span>{trigger.description}</span>
+              <Badge variant="outline">
+                {t("discovery.detail.pain.urgency", { value: trigger.urgencyScore })}
+              </Badge>
             </div>
           </div>
         ))}
         <p className="pt-2 text-xs font-medium">
-          Current alternatives ({pain.alternatives.length})
+          {t("discovery.detail.pain.alternatives", { count: pain.alternatives.length })}
         </p>
         {pain.alternatives.length === 0 && (
           <p className="text-muted-foreground text-xs">
-            No alternative documented. Alternative weakness cannot be trusted yet.
+            {t("discovery.detail.pain.noAlternative")}
           </p>
         )}
         {pain.alternatives.map((a) => (
@@ -418,35 +438,38 @@ function PainForm({
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{a.name}</span>
               <Badge variant="outline">
-                {ALTERNATIVE_CATEGORY_LABELS[a.category]} · weakness {a.weaknessScore}
+                {t("discovery.detail.pain.alternativeBadge", {
+                  category: t(`labels.alternativeCategory.${a.category}`),
+                  value: a.weaknessScore,
+                })}
               </Badge>
             </div>
             <p className="text-muted-foreground mt-1">
-              {a.weaknessDescription ?? "Failure UNKNOWN"}
+              {a.weaknessDescription ?? t("discovery.detail.pain.failureUnknown")}
             </p>
           </div>
         ))}
-        <p className="pt-2 text-xs font-medium">Evidence on this pain ({pain.evidence.length})</p>
+        <p className="pt-2 text-xs font-medium">
+          {t("discovery.detail.pain.evidence", { count: pain.evidence.length })}
+        </p>
         {pain.evidence.length === 0 && (
-          <p className="text-muted-foreground text-xs">
-            No evidence yet. Everything about this pain is a hypothesis.
-          </p>
+          <p className="text-muted-foreground text-xs">{t("discovery.detail.pain.noEvidence")}</p>
         )}
         {pain.evidence.slice(0, 5).map((e) => (
           <div key={e.id} className="rounded-md border p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{e.sourceTitle}</span>
-              <Badge variant="muted">{EVIDENCE_TYPE_LABELS[e.type]}</Badge>
+              <Badge variant="muted">{t(`labels.evidenceType.${e.type}`)}</Badge>
             </div>
           </div>
         ))}
       </div>
       <div className="flex items-center justify-between pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onDelete} disabled={pending}>
-          <Trash2 /> Delete
+          <Trash2 /> {t("common.delete")}
         </Button>
         <Button type="submit" size="sm" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Save
+          {saving && <Loader2 className="animate-spin" />} {t("common.save")}
         </Button>
       </div>
     </form>

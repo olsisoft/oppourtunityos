@@ -12,6 +12,7 @@ import { OpportunityPanel } from "@/components/discovery/opportunity-panel";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { WorkspaceGraph } from "@/db/workspaces";
+import { useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 import type { DiscoveryProgress } from "@/services/scoring/discovery-progress";
 
@@ -28,6 +29,7 @@ export function WorkspaceView({
   provider: ProviderInfo;
   defaultIntent?: "discover" | "validate";
 }) {
+  const t = useT();
   const [panelOpen, setPanelOpen] = useState(true);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const conversation = graph.conversations[0];
@@ -39,7 +41,9 @@ export function WorkspaceView({
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{graph.name}</h1>
             {graph.ideaStatement && (
-              <p className="text-muted-foreground truncate text-xs">Idea: {graph.ideaStatement}</p>
+              <p className="text-muted-foreground truncate text-xs">
+                {t("discovery.workspace.idea", { idea: graph.ideaStatement })}
+              </p>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -48,16 +52,16 @@ export function WorkspaceView({
               size="sm"
               className="lg:hidden"
               onClick={() => setMobilePanelOpen(true)}
-              aria-label="Open opportunity map"
+              aria-label={t("discovery.workspace.openMap")}
             >
-              <MapIcon /> Map
+              <MapIcon /> {t("discovery.workspace.mapButton")}
             </Button>
             <Button
               variant="ghost"
               size="icon-sm"
               className="hidden lg:inline-flex"
               onClick={() => setPanelOpen((v) => !v)}
-              aria-label="Toggle opportunity map"
+              aria-label={t("discovery.workspace.toggleMap")}
             >
               {panelOpen ? <PanelRightClose /> : <PanelRightOpen />}
             </Button>
@@ -86,7 +90,7 @@ export function WorkspaceView({
       <Sheet open={mobilePanelOpen} onOpenChange={setMobilePanelOpen}>
         <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-xl">
           <SheetHeader className="border-b">
-            <SheetTitle>Opportunity map</SheetTitle>
+            <SheetTitle>{t("discovery.workspace.sheetTitle")}</SheetTitle>
           </SheetHeader>
           <div className="min-h-0 flex-1 overflow-hidden">
             <OpportunityPanel graph={graph} />

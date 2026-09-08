@@ -24,7 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { EVIDENCE_TYPE_LABELS } from "@/domain/enums";
+import { useLocale, useT } from "@/i18n/client";
+import { formatDate } from "@/i18n/format";
 import type { ResearchResult } from "@/services/research/types";
 
 export function ResearchDialog({
@@ -40,6 +41,8 @@ export function ResearchDialog({
   pains: PainOption[];
   defaultQuery?: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const router = useRouter();
   const [query, setQuery] = useState(defaultQuery ?? "");
   const [painId, setPainId] = useState(pains[0]?.id ?? "");
@@ -59,7 +62,7 @@ export function ResearchDialog({
     setLoading(true);
     const r = await runResearchAction({ workspaceId, query });
     setLoading(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else setResults(r.data);
   };
 
@@ -76,9 +79,9 @@ export function ResearchDialog({
       strengthScore: 4,
     });
     setImporting(null);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
-      toast.success("Imported as evidence (labelled by origin)");
+      toast.success(t("evidence.research.imported"));
       setResults((prev) =>
         prev ? { ...prev, results: prev.results.filter((x) => x.id !== result.id) } : prev,
       );
@@ -90,17 +93,14 @@ export function ResearchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Research</DialogTitle>
-          <DialogDescription>
-            Search external sources for signals about the pain. Results are untrusted content:
-            review them, set the sentiment, then import the useful ones as evidence.
-          </DialogDescription>
+          <DialogTitle>{t("evidence.research.title")}</DialogTitle>
+          <DialogDescription>{t("evidence.research.description")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={run} className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. salon no-shows deposit policy"
+            placeholder={t("evidence.research.placeholder")}
             required
             className="flex-1"
           />
@@ -110,10 +110,10 @@ export function ResearchDialog({
               onValueChange={(v) => setPainId(v === "none" ? "" : v)}
             >
               <SelectTrigger className="w-full sm:w-56">
-                <SelectValue placeholder="Link to pain" />
+                <SelectValue placeholder={t("evidence.research.linkToPain")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No pain link</SelectItem>
+                <SelectItem value="none">{t("evidence.research.noPainLink")}</SelectItem>
                 {pains.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.label.slice(0, 60)}
@@ -123,7 +123,8 @@ export function ResearchDialog({
             </Select>
           )}
           <Button type="submit" disabled={loading}>
-            {loading ? <Loader2 className="animate-spin" /> : <Search />} Search
+            {loading ? <Loader2 className="animate-spin" /> : <Search />}{" "}
+            {t("evidence.research.search")}
           </Button>
         </form>
         {results && (
@@ -132,23 +133,26 @@ export function ResearchDialog({
               <div className="bg-tone-warning-bg text-tone-warning flex items-start gap-2 rounded-md px-3 py-2 text-xs">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                 <span>
-                  <strong>Mocked research data.</strong> The provider “{results.providerName}”
-                  returns synthetic results so you can test the workflow. Nothing here is a real
-                  source. Imported items stay labelled MOCKED and should be deleted before real
-                  analysis.
+                  <strong>{t("evidence.research.mockedTitle")}</strong>{" "}
+                  {t("evidence.research.mockedBody", { provider: results.providerName })}
                 </span>
               </div>
             )}
             {results.results.length === 0 && (
-              <p className="text-muted-foreground text-sm">No results.</p>
+              <p className="text-muted-foreground text-sm">{t("evidence.research.noResults")}</p>
             )}
             {results.results.map((r) => (
               <div key={r.id} className="rounded-lg border p-3">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">{EVIDENCE_TYPE_LABELS[r.type]}</Badge>
-                  {r.isMocked && <Badge variant="warning">MOCK</Badge>}
+                  <Badge variant="outline">{t(`labels.evidenceType.${r.type}`)}</Badge>
+                  {r.isMocked && <Badge variant="warning">{t("evidence.research.mock")}</Badge>}
                   <span className="text-muted-foreground text-xs">
-                    {r.publishedAt ?? "undated"} · relevance hint {r.relevanceHint}/10
+                    {t("evidence.research.meta", {
+                      date: r.publishedAt
+                        ? formatDate(r.publishedAt, locale)
+                        : t("evidence.research.undated"),
+                      hint: r.relevanceHint,
+                    })}
                   </span>
                 </div>
                 <p className="mt-1.5 text-sm font-medium">{r.title}</p>
@@ -169,9 +173,9 @@ export function ResearchDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="POSITIVE">Supports</SelectItem>
-                      <SelectItem value="NEUTRAL">Neutral</SelectItem>
-                      <SelectItem value="NEGATIVE">Contradicts</SelectItem>
+                      <SelectItem value="POSITIVE">{t("labels.sentiment.POSITIVE")}</SelectItem>
+                      <SelectItem value="NEUTRAL">{t("labels.sentiment.NEUTRAL")}</SelectItem>
+                      <SelectItem value="NEGATIVE">{t("labels.sentiment.NEGATIVE")}</SelectItem>
                     </SelectContent>
                   </Select>
                   <Button
@@ -180,7 +184,8 @@ export function ResearchDialog({
                     onClick={() => importResult(r)}
                     disabled={importing === r.id}
                   >
-                    {importing === r.id && <Loader2 className="animate-spin" />} Import as evidence
+                    {importing === r.id && <Loader2 className="animate-spin" />}{" "}
+                    {t("evidence.research.import")}
                   </Button>
                 </div>
               </div>
