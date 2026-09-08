@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DiscoveryExtractionSchema } from "@/services/ai/schemas";
-import { buildMockTurn, decomposeIdea, MOCK_LABEL } from "@/services/ai/providers/mock";
+import { buildMockTurn, decomposeIdea, MOCK_LABEL, splitList } from "@/services/ai/providers/mock";
 import type { TurnHints } from "@/services/ai/types";
 
 function hints(overrides: Partial<TurnHints> = {}): TurnHints {
@@ -65,6 +65,39 @@ describe("mock provider", () => {
     expect(extraction.stage.suggestedStage).toBe("VARIABLE_DISCOVERY");
     expect(reply).toMatch(/I will not evaluate/);
     expect(extraction.icps[0]?.economicBuyer).toMatch(/UNKNOWN/);
+  });
+
+  it("splits free-text lists without cutting inside parentheses", () => {
+    expect(splitList("Local services (salons, clinics, restaurants)")).toEqual([
+      "Local services (salons, clinics, restaurants)",
+    ]);
+    expect(splitList("Logistics, healthcare and B2B software / fintech")).toEqual([
+      "Logistics",
+      "healthcare",
+      "B2B software",
+      "fintech",
+    ]);
+  });
+
+  it("names candidate markets from the industry, not from a parenthetical detail", () => {
+    const turn = buildMockTurn(
+      hints({
+        entryMode: "NO_IDEA",
+        stage: "USER_CONTEXT",
+        userMessage: "B2B",
+        userContext: {
+          industries: ["Local services (salons, clinics, restaurants)"],
+          audiences: ["Small business owners"],
+          businessModel: "UNKNOWN",
+          productPreferences: [],
+          avoidIndustries: [],
+          technicalStrengths: [],
+        },
+      }),
+    );
+    const names = turn.extraction.markets.map((m) => m.name);
+    expect(names[0]).toBe("Independent local services");
+    expect(names.some((n) => /[()]/.test(n))).toBe(false);
   });
 
   it("does not mutate the user context passed in hints", () => {

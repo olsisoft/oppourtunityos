@@ -399,12 +399,27 @@ const CONTEXT_QUESTIONS: Array<{ key: keyof UserContext; question: string; optio
   },
 ];
 
-function splitList(text: string): string[] {
-  return text
+/**
+ * Split a free-text list on commas, semicolons, slashes, "and" / "or" and
+ * newlines. Separators inside parentheses never split: "Local services
+ * (salons, clinics, restaurants)" stays one item.
+ */
+export function splitList(text: string): string[] {
+  const groups: string[] = [];
+  const masked = text.replace(/\([^()]*\)/g, (group) => {
+    groups.push(group);
+    return `\uE000${groups.length - 1}\uE001`;
+  });
+  return masked
     .split(/,|;|\band\b|\bor\b|\/|\n/i)
-    .map((s) => s.trim())
+    .map((s) => s.replace(/\uE000(\d+)\uE001/g, (_, i: string) => groups[Number(i)]).trim())
     .filter((s) => s.length > 1 && s.length < 80)
     .slice(0, 6);
+}
+
+/** "Local services (salons, clinics)" → "Local services" — for names built from a list item. */
+function stripParenthetical(text: string): string {
+  return text.replace(/\s*\([^()]*\)/g, "").trim();
 }
 
 function singular(word: string): string {
@@ -727,7 +742,7 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
 
     const base = ctx.industries.slice(0, 3);
     const markets = base.map((ind) => ({
-      name: `Independent ${plural(singular(ind)).toLowerCase()}`,
+      name: `Independent ${plural(singular(stripParenthetical(ind))).toLowerCase()}`,
       description: `Small, owner-operated businesses in ${ind.toLowerCase()} that you can reach through ${ctx.audiences[0] ?? "your network"}.`,
       attractivenessNotes:
         "HYPOTHESIS: fragmented buyers, owner is both user and buyer, under-served by generic tools. Nothing verified yet.",
