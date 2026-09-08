@@ -217,10 +217,10 @@ export default async function DashboardPage({
                   {VERDICT_ORDER.map((v) => (
                     <div
                       key={v}
-                      className="grid grid-cols-[6rem_1fr_2rem] items-center gap-2 text-xs"
+                      className="grid grid-cols-[7rem_1fr_2rem] items-center gap-2 text-xs"
                     >
-                      <Badge variant={VERDICT_TONE[v]} className="w-fit">
-                        {v}
+                      <Badge variant={VERDICT_TONE[v]} className="w-fit uppercase">
+                        {t(`labels.verdict.${v}`)}
                       </Badge>
                       <div className="bg-muted h-2 overflow-hidden rounded-full">
                         <div
