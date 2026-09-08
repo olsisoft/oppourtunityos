@@ -5,28 +5,42 @@ import { ArrowDown, Plus } from "lucide-react";
 import { CausalDistanceBadge, EpistemicBadge } from "@/components/value/epistemic-badge";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { EPISTEMIC_LABELS } from "@/domain/enums";
-import { DESIGN_LEVEL_LABELS } from "@/services/value/experimental-validity";
-import { GENERALIZATION_LABELS } from "@/services/value/language-gate";
-import { FIT_BAND_LABELS } from "@/components/value/fit-badge";
 import type {
   GraphCausalLink,
   GraphValueChainNode,
   OpportunityWithRelations,
 } from "@/db/workspaces";
-import { VALUE_CHAIN_LEVEL_LABELS } from "@/domain/enums";
-import type { ValueChainLevel } from "@/generated/prisma/enums";
+import type {
+  EpistemicStatus,
+  ExperimentDesignLevel,
+  ValueChainLevel,
+} from "@/generated/prisma/enums";
+import { useLocale, useT } from "@/i18n/client";
+import type { Locale } from "@/i18n/locales";
+import type { LocalizedText } from "@/i18n/messages";
+import type { T } from "@/i18n/t";
 import { cn } from "@/lib/utils";
 import { VALUE_CHAIN_LEVEL_ORDER } from "@/services/value/epistemic";
 import {
   FRONTIER_DESIGN_REQUIRED,
-  PROOF_RUNG_LABELS,
   rungIndex,
   type FrontierClaimSummary,
   type FrontierPosition,
   type ProofFrontierResult,
   type ProofRung,
 } from "@/services/value/proof-frontier";
+import { describeScope } from "@/services/value/scope";
+
+/** Scope of a claim summary, rendered from the object when available. */
+function summaryScope(
+  summary: FrontierClaimSummary | null | undefined,
+  t: T,
+  locale: Locale,
+): string | null {
+  if (!summary) return null;
+  if (summary.scope) return describeScope(summary.scope, locale);
+  return summary.scopeText ? t(summary.scopeText) : null;
+}
 
 /** STATUS / FIT / SCOPE of a claim, shown on hover of a ladder node or link. */
 function ClaimHover({
@@ -38,42 +52,71 @@ function ClaimHover({
   blockers,
 }: {
   title: string;
-  status: keyof typeof EPISTEMIC_LABELS;
+  status: EpistemicStatus;
   confidence: number;
   summary: FrontierClaimSummary | null | undefined;
   requiredDesign?: ProofRung | null;
-  blockers?: string[];
+  blockers?: LocalizedText[];
 }) {
+  const t = useT();
+  const locale = useLocale();
   const design = requiredDesign ? FRONTIER_DESIGN_REQUIRED[requiredDesign] : undefined;
+  const designLabel = (d: ExperimentDesignLevel) => t(`labels.designLevel.${d}`).toLowerCase();
+  const statusLabel = t(`labels.epistemic.${status}`);
+  const fitParts =
+    summary && summary.total > 0
+      ? [
+          t("value.ladder.hover.fitBest", {
+            fit: summary.bestFit,
+            band: t(`value.fitBand.${summary.bestBand}`),
+          }),
+          t("value.ladder.hover.admissible", {
+            admissible: summary.admissible,
+            total: summary.total,
+          }),
+          t("value.ladder.hover.independentOrigins", { count: summary.independentOrigins }),
+          ...(summary.lowFitOnly ? [t("value.ladder.hover.lowFitOnly")] : []),
+        ]
+      : [t("value.ladder.hover.noEvidence")];
+  if (summary?.designLevel)
+    fitParts.push(t("value.ladder.hover.design", { design: designLabel(summary.designLevel) }));
+  const scope = summaryScope(summary, t, locale);
+  const scopeLine = summary?.observed
+    ? t("value.ladder.hover.observedIn", {
+        scope: scope ?? t("value.ladder.hover.unrecordedScope"),
+      })
+    : (scope ?? t("value.ladder.hover.notObserved"));
   return (
     <div className="max-w-sm space-y-1 text-xs">
       <p className="font-medium">{title}</p>
       <p>
-        <span className="text-muted-foreground font-mono text-[10px] uppercase">Status</span>{" "}
-        {EPISTEMIC_LABELS[status]}
-        {confidence ? ` ${confidence}/100` : ""}
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">
+          {t("value.ladder.hover.status")}
+        </span>{" "}
+        {confidence
+          ? t("value.ladder.hover.statusConfidence", { status: statusLabel, confidence })
+          : statusLabel}
       </p>
       <p>
-        <span className="text-muted-foreground font-mono text-[10px] uppercase">Fit</span>{" "}
-        {summary && summary.total > 0
-          ? `best ${summary.bestFit}/100 (${FIT_BAND_LABELS[summary.bestBand]}) · ${summary.admissible}/${summary.total} admissible · ${summary.independentOrigins} independent origin${summary.independentOrigins === 1 ? "" : "s"}${summary.lowFitOnly ? " · low-fit only" : ""}`
-          : "no evidence linked"}
-        {summary?.designLevel
-          ? ` · ${DESIGN_LEVEL_LABELS[summary.designLevel].toLowerCase()} design`
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">
+          {t("value.ladder.hover.fit")}
+        </span>{" "}
+        {fitParts.join(" · ")}
+        {design
+          ? ` ${t("value.ladder.hover.requiresDesign", { design: designLabel(design) })}`
           : ""}
-        {design ? ` (requires ≥ ${DESIGN_LEVEL_LABELS[design].toLowerCase()})` : ""}
       </p>
       <p>
-        <span className="text-muted-foreground font-mono text-[10px] uppercase">Scope</span>{" "}
-        {summary?.observed
-          ? `observed in ${summary.scopeText ?? "an unrecorded scope"}`
-          : summary?.scopeText
-            ? summary.scopeText
-            : "not observed directly"}
-        {summary?.generalization ? ` · ${GENERALIZATION_LABELS[summary.generalization]}` : ""}
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">
+          {t("value.ladder.hover.scope")}
+        </span>{" "}
+        {scopeLine}
+        {summary?.generalization
+          ? ` · ${t(`labels.generalization.${summary.generalization}`)}`
+          : ""}
       </p>
-      {summary?.inference && <p className="text-muted-foreground">{summary.inference}</p>}
-      {blockers && blockers.length > 0 && <p className="text-tone-warning">{blockers[0]}</p>}
+      {summary?.inference && <p className="text-muted-foreground">{t(summary.inference)}</p>}
+      {blockers && blockers.length > 0 && <p className="text-tone-warning">{t(blockers[0])}</p>}
     </div>
   );
 }
@@ -101,6 +144,8 @@ export function ValueLadder({
   showProblemRungs?: boolean;
   className?: string;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const frontierPos: FrontierPosition =
     (o.proofFrontierRung as FrontierPosition | null) ?? frontier?.frontier ?? "NONE";
   const frontierIdx = rungIndex(frontierPos);
@@ -110,30 +155,45 @@ export function ValueLadder({
   );
   const rungState = (rung: ProofRung) => frontier?.rungs.find((r) => r.rung === rung);
   const interactive = Boolean(onSelect);
+  const rungLabel = (rung: FrontierPosition) => t(`labels.proofRung.${rung}`);
+  const levelLabel = (level: ValueChainLevel) => t(`labels.valueChainLevel.${level}`);
 
-  const scopeText = frontier?.frontierScope?.text ?? null;
+  const frontierScope = frontier?.frontierScope ?? null;
+  const scopeText = frontierScope
+    ? frontierScope.scope
+      ? describeScope(frontierScope.scope, locale)
+      : frontierScope.text
+        ? t(frontierScope.text)
+        : null
+    : null;
+  const frontierLevel = rungLabel(frontierPos);
   const frontierDivider = (
-    <div className="my-1 flex items-center gap-2" aria-label="Proof frontier">
+    <div className="my-1 flex items-center gap-2" aria-label={t("value.ladder.frontierAria")}>
       <div className="bg-foreground h-px flex-1" />
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="bg-foreground text-background max-w-full truncate rounded px-2 py-0.5 font-mono text-[10px] tracking-wider uppercase">
-            Proof frontier · {PROOF_RUNG_LABELS[frontierPos]}
-            {!compact && frontierPos !== "NONE" && scopeText ? ` · ${scopeText}` : ""}
+            {!compact && frontierPos !== "NONE" && scopeText
+              ? t("value.ladder.frontierChipScoped", { level: frontierLevel, scope: scopeText })
+              : t("value.ladder.frontierChip", { level: frontierLevel })}
           </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm text-xs">
-          <p className="font-medium">Level: {PROOF_RUNG_LABELS[frontierPos]}</p>
+          <p className="font-medium">{t("value.ladder.level", { level: frontierLevel })}</p>
           <p>
-            Scope: {scopeText ?? "not computed"}
-            {frontier?.frontierScope?.generalizationLabel
-              ? ` · ${frontier.frontierScope.generalizationLabel}`
-              : ""}
+            {frontierScope?.generalization
+              ? t("value.ladder.scopeWithGeneralization", {
+                  scope: scopeText ?? t("value.ladder.scopeNotComputed"),
+                  generalization: t(`labels.generalization.${frontierScope.generalization}`),
+                })
+              : t("value.ladder.scope", {
+                  scope: scopeText ?? t("value.ladder.scopeNotComputed"),
+                })}
           </p>
           <p className="text-muted-foreground mt-1">
             {frontierPos === "NONE"
-              ? "Nothing is supported by fitting evidence yet."
-              : "What was reached, and where it was observed. Beyond this scope the claim is a hypothesis."}
+              ? t("value.ladder.nothingSupported")
+              : t("value.ladder.reachedWhere")}
           </p>
         </TooltipContent>
       </Tooltip>
@@ -156,10 +216,10 @@ export function ValueLadder({
               >
                 <div className="min-w-0">
                   <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                    {PROOF_RUNG_LABELS[rung]}
+                    {rungLabel(rung)}
                   </p>
                   {!compact && state?.reasons?.length && !state.eligible ? (
-                    <p className="text-muted-foreground truncate text-xs">{state.reasons[0]}</p>
+                    <p className="text-muted-foreground truncate text-xs">{t(state.reasons[0])}</p>
                   ) : null}
                 </div>
                 <Tooltip>
@@ -173,7 +233,7 @@ export function ValueLadder({
                   </TooltipTrigger>
                   <TooltipContent>
                     <ClaimHover
-                      title={PROOF_RUNG_LABELS[rung]}
+                      title={rungLabel(rung)}
                       status={state?.status ?? "UNKNOWN"}
                       confidence={state?.confidence ?? 0}
                       summary={state?.summary}
@@ -199,6 +259,25 @@ export function ValueLadder({
             : undefined;
         const isFrontier = frontierPos === level;
         const beyond = rungIndex(level as ProofRung) > frontierIdx;
+        const state = rungState(level as ProofRung);
+        const nodeMeta = node
+          ? [
+              t("value.ladder.counts", {
+                evidence: node.evidenceLinks.length,
+                assumptions: node.assumptions.length,
+              }),
+              ...(state?.summary?.total
+                ? [t("value.ladder.bestFit", { fit: state.summary.bestFit })]
+                : []),
+              ...(node.status === "OBSERVED" && node.observedScope
+                ? [
+                    t("value.ladder.scopeRecorded", {
+                      scope: summaryScope(state?.summary, t, locale) ?? t("value.ladder.recorded"),
+                    }),
+                  ]
+                : []),
+            ].join(" · ")
+          : "";
 
         return (
           <div key={level}>
@@ -221,7 +300,7 @@ export function ValueLadder({
                     <span className="flex shrink-0 items-center gap-1">
                       {link.criticality !== "CRITICAL" && (
                         <Badge variant="outline" className="px-1 py-0 text-[9px]">
-                          {link.criticality.toLowerCase()}
+                          {t(`labels.criticality.${link.criticality}`).toLowerCase()}
                         </Badge>
                       )}
                       <Tooltip>
@@ -232,12 +311,15 @@ export function ValueLadder({
                         </TooltipTrigger>
                         <TooltipContent>
                           <ClaimHover
-                            title={`${VALUE_CHAIN_LEVEL_LABELS[link.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[link.toNode.level]}`}
+                            title={t("value.ladder.linkTitle", {
+                              from: levelLabel(link.fromNode.level),
+                              to: levelLabel(link.toNode.level),
+                            })}
                             status={link.status}
                             confidence={link.confidence}
-                            summary={rungState(level as ProofRung)?.linkFromPrevious?.summary}
+                            summary={state?.linkFromPrevious?.summary}
                             requiredDesign={level as ProofRung}
-                            blockers={rungState(level as ProofRung)?.linkFromPrevious?.reasons}
+                            blockers={state?.linkFromPrevious?.reasons}
                           />
                         </TooltipContent>
                       </Tooltip>
@@ -255,7 +337,7 @@ export function ValueLadder({
                       interactive && "hover:bg-accent",
                     )}
                   >
-                    <Plus className="size-3" /> state the causal assumption
+                    <Plus className="size-3" /> {t("value.ladder.stateCausalAssumption")}
                   </button>
                 ) : (
                   <span className="text-muted-foreground text-xs">—</span>
@@ -277,22 +359,13 @@ export function ValueLadder({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                      {VALUE_CHAIN_LEVEL_LABELS[level]}
+                      {levelLabel(level)}
                     </p>
                     {!compact && <CausalDistanceBadge distance={node.causalDistance} />}
                   </div>
                   <p className={cn("text-sm", compact && "truncate")}>{node.statement}</p>
                   {!compact && (node.evidenceLinks.length > 0 || node.assumptions.length > 0) && (
-                    <p className="text-muted-foreground mt-0.5 text-[11px]">
-                      {node.evidenceLinks.length} evidence · {node.assumptions.length} assumption
-                      {node.assumptions.length === 1 ? "" : "s"}
-                      {rungState(level as ProofRung)?.summary?.total
-                        ? ` · best fit ${rungState(level as ProofRung)!.summary!.bestFit}`
-                        : ""}
-                      {node.status === "OBSERVED" && node.observedScope
-                        ? ` · scope: ${rungState(level as ProofRung)?.summary?.scopeText ?? "recorded"}`
-                        : ""}
-                    </p>
+                    <p className="text-muted-foreground mt-0.5 text-[11px]">{nodeMeta}</p>
                   )}
                 </div>
                 <Tooltip>
@@ -303,15 +376,14 @@ export function ValueLadder({
                   </TooltipTrigger>
                   <TooltipContent>
                     <ClaimHover
-                      title={`${VALUE_CHAIN_LEVEL_LABELS[level]}: ${node.statement}`}
+                      title={t("value.ladder.nodeTitle", {
+                        level: levelLabel(level),
+                        statement: node.statement,
+                      })}
                       status={node.status}
                       confidence={node.confidence}
-                      summary={rungState(level as ProofRung)?.summary}
-                      blockers={
-                        rungState(level as ProofRung)?.eligible
-                          ? []
-                          : rungState(level as ProofRung)?.reasons
-                      }
+                      summary={state?.summary}
+                      blockers={state?.eligible ? [] : state?.reasons}
                     />
                   </TooltipContent>
                 </Tooltip>
@@ -329,9 +401,9 @@ export function ValueLadder({
               >
                 <span>
                   <span className="text-[10px] font-medium tracking-wider uppercase">
-                    {VALUE_CHAIN_LEVEL_LABELS[level]}
+                    {levelLabel(level)}
                   </span>{" "}
-                  · not stated
+                  · {t("value.ladder.notStated")}
                 </span>
                 {interactive && <Plus className="size-3.5" />}
               </button>
@@ -346,8 +418,7 @@ export function ValueLadder({
           onClick={() => onSelect?.({ kind: "add-node", level: "BUSINESS_OUTCOME" })}
           className="text-muted-foreground hover:bg-accent flex w-full items-center gap-1 rounded-md px-2.5 py-1 text-left text-[11px]"
         >
-          <Plus className="size-3" /> Business outcome (optional — farthest from product
-          attribution)
+          <Plus className="size-3" /> {t("value.ladder.addBusinessOutcome")}
         </button>
       )}
     </div>

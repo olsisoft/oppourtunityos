@@ -5,6 +5,7 @@ import {
   fitFactor,
   FIT_VERSION,
 } from "@/services/value/evidence-fit";
+import { textOf } from "@/i18n/messages";
 import { item, NOW } from "../support/fit-helpers";
 
 describe("Evidence Fitness", () => {
@@ -23,6 +24,8 @@ describe("Evidence Fitness", () => {
     expect(purchase.fitScore).toBe(0);
     expect(purchase.band).toBe("NONE");
     expect(purchase.admissibility).toBe("NOT_ADMISSIBLE");
+    expect(purchase.summary.text).toBe('Not admissible for "buyers actually bought".');
+    expect(purchase.explanation[0].text).toMatch(/^Not admissible: a interview cannot be evidence/);
     expect(pain.version).toBe(FIT_VERSION);
   });
 
@@ -43,7 +46,21 @@ describe("Evidence Fitness", () => {
       "recency",
     ]);
     expect(fit.explanation.length).toBeGreaterThan(5);
-    expect(fit.summary).toMatch(/fit \(\d+\/100\)/);
+    expect(fit.summary.text).toMatch(/fit \(\d+\/100\)/);
+    expect(fit.summary.key).toBe("validity.fit.summary.line");
+    expect(fit.summary.text.endsWith(`— ${fit.reason.text}.`)).toBe(true);
+    expect(fit.explanation[0].text).toBe(
+      `Fit ${fit.fitScore}/100 (${fit.band}) for "the magnitude is as stated".`,
+    );
+    const method = fit.dimensions.find((d) => d.key === "methodQuality")!;
+    expect(method.label.text).toBe("Method quality");
+    expect(method.note.text).toBe("transaction records baseline 0.9, strength 8/10");
+    expect(fit.explanation[3].text).toBe(
+      `Method quality: ${Math.round(method.value * 100)}% of ${method.weight} → ${method.points} pts (transaction records baseline 0.9, strength 8/10)`,
+    );
+    expect(fit.dimensions.find((d) => d.key === "sampleRelevance")?.note.text).toBe(
+      "12 organizations",
+    );
   });
 
   it("caps fit by admissibility so low-admissibility evidence can inform but never dominate", () => {
@@ -100,7 +117,7 @@ describe("Evidence Fitness", () => {
     expect(fits.get(c.id)!.duplicateOfOrigin).toBe(false);
     const independent = [a, b].map((x) => fits.get(x.id)!).find((f) => !f.duplicateOfOrigin)!;
     expect(duplicates[0].fitScore).toBeLessThan(independent.fitScore);
-    expect(duplicates[0].explanation.join(" ")).toMatch(/already counted/);
+    expect(duplicates[0].explanation.map(textOf).join(" ")).toMatch(/already counted/);
   });
 
   it("weak internal validity and a weak design lower the fit of experimental evidence for causal claims", () => {
@@ -131,6 +148,15 @@ describe("Evidence Fitness", () => {
     expect(strong.band).toBe("HIGH");
     expect(weakValidity.fitScore).toBeLessThan(strong.fitScore);
     expect(weakValidity.limitationsPenalty).toBe(8);
+    expect(weakValidity.dimensions.find((d) => d.key === "methodQuality")?.note.text).toBe(
+      "controlled experiment baseline 0.95, strength 8/10, controlled design ×0.9, internal validity low ×0.45",
+    );
+    expect(weakValidity.explanation.map(textOf)).toContain(
+      "Limitations penalty: −8 (low internal validity (−8))",
+    );
+    expect(beforeAfter.explanation.map(textOf)).toContain(
+      "Capped at 69: medium-admissibility evidence cannot fit better than this for the claim.",
+    );
     expect(beforeAfter.fitScore).toBeLessThan(strong.fitScore);
     expect(beforeAfter.admissibility).toBe("MEDIUM");
   });

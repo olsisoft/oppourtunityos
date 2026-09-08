@@ -28,13 +28,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GraphExperiment, OpportunityWithRelations } from "@/db/workspaces";
-import {
-  ASSUMPTION_KIND_LABELS,
-  ASSUMPTION_STATUS_LABELS,
-  EXPERIMENT_TYPE_LABELS,
-  ExperimentType,
-  VALUE_CHAIN_LEVEL_LABELS,
-} from "@/domain/enums";
+import { ExperimentType } from "@/domain/enums";
+import { useT } from "@/i18n/client";
 import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
 import { experimentWarnings } from "@/services/value/experiment-outcome";
 import type { PlanPrefill } from "@/services/value/experiment-prefill";
@@ -47,7 +42,6 @@ import {
 import { claimTypeForLevel, claimTypeForLink } from "@/services/value/claim-taxonomy";
 import {
   defaultDesignLevel,
-  DESIGN_LEVEL_LABELS,
   designProofPreview,
   parseValidityInputs,
   resolveDesignLevel,
@@ -56,7 +50,7 @@ import { parseScope } from "@/services/value/scope";
 import type { AssumptionKind, ClaimType } from "@/generated/prisma/enums";
 
 export type { PlanPrefill };
-import { PROOF_RUNG_LABELS, rungIndex } from "@/services/value/proof-frontier";
+import { rungIndex } from "@/services/value/proof-frontier";
 
 const CLAIM_BY_ASSUMPTION_KIND: Record<AssumptionKind, ClaimType> = {
   CAUSAL: "CAUSAL_EFFECT",
@@ -133,6 +127,7 @@ export function ExperimentPlanDialog({
   /** Edit mode. */
   experiment?: GraphExperiment | null;
 }) {
+  const t = useT();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [designTouched, setDesignTouched] = useState(Boolean(experiment?.designLevel));
@@ -157,13 +152,13 @@ export function ExperimentPlanDialog({
     setValidity((f) => ({ ...f, [k]: v }));
   };
   const [form, setForm] = useState<PlanForm>(() => ({
-    title: experiment?.title ?? prefill?.title ?? "",
+    title: experiment?.title ?? t(prefill?.title),
     experimentType: experiment?.experimentType ?? prefill?.experimentType ?? "OTHER",
-    hypothesis: experiment?.hypothesis ?? prefill?.hypothesis ?? "",
-    decisionQuestion: experiment?.decisionQuestion ?? prefill?.decisionQuestion ?? "",
+    hypothesis: experiment?.hypothesis ?? t(prefill?.hypothesis),
+    decisionQuestion: experiment?.decisionQuestion ?? t(prefill?.decisionQuestion),
     target: targetKey(experiment ?? prefill ?? {}),
-    design: experiment?.design ?? prefill?.design ?? "",
-    successMetric: experiment?.successMetric ?? prefill?.successMetric ?? "",
+    design: experiment?.design ?? t(prefill?.design),
+    successMetric: experiment?.successMetric ?? t(prefill?.successMetric),
     successThreshold: experiment?.successThreshold?.toString() ?? "",
     failureThreshold: experiment?.failureThreshold?.toString() ?? "",
     unit: experiment?.unit ?? "",
@@ -196,45 +191,50 @@ export function ExperimentPlanDialog({
   const frontier = insights.frontier;
   const blockedRung = frontier?.blockedAt?.rung ?? null;
   const expected = useMemo(() => {
-    const current = PROOF_RUNG_LABELS[frontier?.frontier ?? "NONE"];
+    const current = t(`labels.proofRung.${frontier?.frontier ?? "NONE"}`);
+    const level = (l: string) => t(`labels.valueChainLevel.${l}`);
     if (affectedLink) {
       const to = affectedLink.toNode.level;
+      const from = level(affectedLink.fromNode.level);
       const movesFrontier = blockedRung === to;
       return {
         ifSupported: movesFrontier
-          ? `Proof Frontier may move ${current} → ${VALUE_CHAIN_LEVEL_LABELS[to]} (if no other blocker remains on that level).`
+          ? t("experiments.plan.expected.linkMovesFrontier", { current, to: level(to) })
           : rungIndex(to) <= rungIndex(frontier?.frontier ?? "NONE")
-            ? `Strengthens ${VALUE_CHAIN_LEVEL_LABELS[affectedLink.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[to]}; the frontier is already beyond it.`
-            : `Strengthens ${VALUE_CHAIN_LEVEL_LABELS[affectedLink.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[to]}; the frontier cannot reach it until ${frontier?.blockedAt?.label ?? "the earlier gap"} is resolved.`,
-        ifContradicted: `The link ${VALUE_CHAIN_LEVEL_LABELS[affectedLink.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[to]} becomes CONTRADICTED: everything downstream stays a hypothesis and the frontier can move back.`,
+            ? t("experiments.plan.expected.linkBeyondFrontier", { from, to: level(to) })
+            : t("experiments.plan.expected.linkBlocked", {
+                from,
+                to: level(to),
+                blocker: frontier?.blockedAt?.label
+                  ? t(frontier.blockedAt.label)
+                  : t("experiments.plan.expected.earlierGap"),
+              }),
+        ifContradicted: t("experiments.plan.expected.linkContradicted", { from, to: level(to) }),
       };
     }
     if (node) {
       const movesFrontier = blockedRung === node.level;
       return {
         ifSupported: movesFrontier
-          ? `Proof Frontier may move ${current} → ${VALUE_CHAIN_LEVEL_LABELS[node.level]}.`
-          : `Strengthens the ${VALUE_CHAIN_LEVEL_LABELS[node.level]} level.`,
-        ifContradicted: `The ${VALUE_CHAIN_LEVEL_LABELS[node.level]} level becomes CONTRADICTED.`,
+          ? t("experiments.plan.expected.levelMovesFrontier", { current, level: level(node.level) })
+          : t("experiments.plan.expected.levelStrengthens", { level: level(node.level) }),
+        ifContradicted: t("experiments.plan.expected.levelContradicted", {
+          level: level(node.level),
+        }),
       };
     }
     if (assumption) {
       return {
-        ifSupported: `The ${ASSUMPTION_KIND_LABELS[assumption.kind].toLowerCase()} becomes SUPPORTED; it no longer blocks any link it is attached to.`,
-        ifContradicted:
-          assumption.kind === "CAUSAL"
-            ? "The product hypothesis collapses: the mechanism would not move the variable."
-            : assumption.kind === "VALUE"
-              ? "The opportunity collapses: moving the variable would not create enough value."
-              : assumption.kind === "FEASIBILITY"
-                ? "The current product mechanism becomes infeasible."
-                : assumption.kind === "WTP"
-                  ? "The problem may be real but nobody pays: the business case collapses."
-                  : "A load-bearing belief is false; the opportunity must be re-examined.",
+        ifSupported: t("experiments.plan.expected.assumptionSupported", {
+          kind: t(`labels.assumptionKind.${assumption.kind}`).toLowerCase(),
+        }),
+        ifContradicted: t("experiments.plan.expected.assumptionContradicted", {
+          kind: assumption.kind,
+        }),
       };
     }
     return null;
-  }, [affectedLink, node, assumption, blockedRung, frontier]);
+  }, [affectedLink, node, assumption, blockedRung, frontier, t]);
 
   const targetClaim: ClaimType | null = link
     ? claimTypeForLink(link.fromNode.level, link.toNode.level)
@@ -246,6 +246,7 @@ export function ExperimentPlanDialog({
   const planInputs = validityInputsFrom(validity);
   const resolved = resolveDesignLevel(validity.designLevel, planInputs);
   const preview = designProofPreview(form.experimentType, resolved.effective, targetClaim);
+  const listSeparator = t("experiments.plan.aside.listSeparator");
 
   const warnings = experimentWarnings({
     decisionQuestion: form.decisionQuestion,
@@ -295,7 +296,9 @@ export function ExperimentPlanDialog({
       toast.error(r.error);
       return;
     }
-    toast.success(experiment ? "Experiment updated" : "Experiment planned");
+    toast.success(
+      experiment ? t("experiments.plan.toastUpdated") : t("experiments.plan.toastPlanned"),
+    );
     onOpenChange(false);
     router.refresh();
   };
@@ -305,21 +308,19 @@ export function ExperimentPlanDialog({
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <form onSubmit={submit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>{experiment ? "Edit experiment" : "Plan an experiment"}</DialogTitle>
-            <DialogDescription>
-              An experiment tests one assumption, causal link or value chain level and must say what
-              decision becomes easier afterwards. Its result becomes evidence; the engine decides
-              what that proves.
-            </DialogDescription>
+            <DialogTitle>
+              {experiment ? t("experiments.plan.titleEdit") : t("experiments.plan.titleNew")}
+            </DialogTitle>
+            <DialogDescription>{t("experiments.plan.description")}</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3 sm:grid-cols-[1.2fr_1fr]">
             <div className="space-y-3">
-              <L label="Title">
+              <L label={t("experiments.plan.field.title")}>
                 <Input value={form.title} onChange={(e) => set("title", e.target.value)} required />
               </L>
               <div className="grid grid-cols-2 gap-3">
-                <L label="Type">
+                <L label={t("experiments.plan.field.type")}>
                   <Select
                     value={form.experimentType}
                     onValueChange={(v) => set("experimentType", v as ExperimentType)}
@@ -328,44 +329,51 @@ export function ExperimentPlanDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.values(ExperimentType).map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {EXPERIMENT_TYPE_LABELS[t]}
+                      {Object.values(ExperimentType).map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {t(`labels.experimentType.${type}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </L>
-                <L label="What it tests">
+                <L label={t("experiments.plan.field.target")}>
                   <Select value={form.target} onValueChange={(v) => set("target", v)}>
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose a target" />
+                      <SelectValue placeholder={t("experiments.plan.field.targetPlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NONE}>— nothing yet —</SelectItem>
+                      <SelectItem value={NONE}>{t("experiments.plan.field.targetNone")}</SelectItem>
                       {o.assumptions
                         .filter((a) => a.status !== "SUPPORTED")
                         .map((a) => (
                           <SelectItem key={a.id} value={`assumption:${a.id}`}>
-                            {ASSUMPTION_KIND_LABELS[a.kind]}: {a.statement.slice(0, 70)}
+                            {t("experiments.plan.field.targetAssumption", {
+                              kind: t(`labels.assumptionKind.${a.kind}`),
+                              statement: a.statement.slice(0, 70),
+                            })}
                           </SelectItem>
                         ))}
                       {o.causalLinks.map((l) => (
                         <SelectItem key={l.id} value={`link:${l.id}`}>
-                          Link {VALUE_CHAIN_LEVEL_LABELS[l.fromNode.level]} →{" "}
-                          {VALUE_CHAIN_LEVEL_LABELS[l.toNode.level]}
+                          {t("experiments.plan.field.targetLink", {
+                            from: t(`labels.valueChainLevel.${l.fromNode.level}`),
+                            to: t(`labels.valueChainLevel.${l.toNode.level}`),
+                          })}
                         </SelectItem>
                       ))}
                       {o.valueChainNodes.map((n) => (
                         <SelectItem key={n.id} value={`node:${n.id}`}>
-                          Level {VALUE_CHAIN_LEVEL_LABELS[n.level]}
+                          {t("experiments.plan.field.targetLevel", {
+                            level: t(`labels.valueChainLevel.${n.level}`),
+                          })}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </L>
               </div>
-              <L label="Hypothesis (falsifiable)">
+              <L label={t("experiments.plan.field.hypothesis")}>
                 <Textarea
                   rows={2}
                   value={form.hypothesis}
@@ -374,14 +382,14 @@ export function ExperimentPlanDialog({
                   minLength={3}
                 />
               </L>
-              <L label="Decision question — what decision becomes easier after this experiment?">
+              <L label={t("experiments.plan.field.decisionQuestion")}>
                 <Input
                   value={form.decisionQuestion}
                   onChange={(e) => set("decisionQuestion", e.target.value)}
-                  placeholder='e.g. "Can we build the reconciliation mechanism?"'
+                  placeholder={t("experiments.plan.field.decisionQuestionPlaceholder")}
                 />
               </L>
-              <L label="Design">
+              <L label={t("experiments.plan.field.design")}>
                 <Textarea
                   rows={2}
                   value={form.design}
@@ -389,41 +397,41 @@ export function ExperimentPlanDialog({
                 />
               </L>
               <div className="grid grid-cols-3 gap-3">
-                <L label="Success metric">
+                <L label={t("experiments.plan.field.successMetric")}>
                   <Input
                     value={form.successMetric}
                     onChange={(e) => set("successMetric", e.target.value)}
-                    placeholder="no-show rate"
+                    placeholder={t("experiments.plan.field.successMetricPlaceholder")}
                   />
                 </L>
-                <L label="Success threshold">
+                <L label={t("experiments.plan.field.successThreshold")}>
                   <Input
                     type="number"
                     step="any"
                     value={form.successThreshold}
                     onChange={(e) => set("successThreshold", e.target.value)}
-                    placeholder="≤ 10"
+                    placeholder={t("experiments.plan.field.successThresholdPlaceholder")}
                   />
                 </L>
-                <L label="Failure threshold">
+                <L label={t("experiments.plan.field.failureThreshold")}>
                   <Input
                     type="number"
                     step="any"
                     value={form.failureThreshold}
                     onChange={(e) => set("failureThreshold", e.target.value)}
-                    placeholder="≥ 13"
+                    placeholder={t("experiments.plan.field.failureThresholdPlaceholder")}
                   />
                 </L>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <L label="Unit">
+                <L label={t("experiments.plan.field.unit")}>
                   <Input
                     value={form.unit}
                     onChange={(e) => set("unit", e.target.value)}
-                    placeholder="%"
+                    placeholder={t("experiments.plan.field.unitPlaceholder")}
                   />
                 </L>
-                <L label="Sample size">
+                <L label={t("experiments.plan.field.sampleSize")}>
                   <Input
                     type="number"
                     min={0}
@@ -431,23 +439,27 @@ export function ExperimentPlanDialog({
                     onChange={(e) => set("sampleSize", e.target.value)}
                   />
                 </L>
-                <L label="Duration">
+                <L label={t("experiments.plan.field.duration")}>
                   <Input
                     value={form.duration}
                     onChange={(e) => set("duration", e.target.value)}
-                    placeholder="2 weeks"
+                    placeholder={t("experiments.plan.field.durationPlaceholder")}
                   />
                 </L>
               </div>
-              <L label="Population">
+              <L label={t("experiments.plan.field.population")}>
                 <Input
                   value={form.population}
                   onChange={(e) => set("population", e.target.value)}
-                  placeholder="5 salons, 8–12 chairs"
+                  placeholder={t("experiments.plan.field.populationPlaceholder")}
                 />
               </L>
               <div className="grid grid-cols-3 gap-3">
-                <L label={`Decision impact ${form.decisionImpact || "—"}/10`}>
+                <L
+                  label={t("experiments.plan.field.decisionImpact", {
+                    value: form.decisionImpact || "—",
+                  })}
+                >
                   <input
                     type="range"
                     min={0}
@@ -457,7 +469,11 @@ export function ExperimentPlanDialog({
                     className="mt-2 w-full accent-current"
                   />
                 </L>
-                <L label={`Information gain ${form.expectedInformationGain || "—"}/10`}>
+                <L
+                  label={t("experiments.plan.field.informationGain", {
+                    value: form.expectedInformationGain || "—",
+                  })}
+                >
                   <input
                     type="range"
                     min={0}
@@ -467,7 +483,7 @@ export function ExperimentPlanDialog({
                     className="mt-2 w-full accent-current"
                   />
                 </L>
-                <L label={`Effort ${form.effort || "—"}/10`}>
+                <L label={t("experiments.plan.field.effort", { value: form.effort || "—" })}>
                   <input
                     type="range"
                     min={0}
@@ -479,25 +495,25 @@ export function ExperimentPlanDialog({
                 </L>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <L label="Time estimate">
+                <L label={t("experiments.plan.field.timeEstimate")}>
                   <Input
                     value={form.timeEstimate}
                     onChange={(e) => set("timeEstimate", e.target.value)}
-                    placeholder="2 days"
+                    placeholder={t("experiments.plan.field.timeEstimatePlaceholder")}
                   />
                 </L>
-                <L label="Cost estimate">
+                <L label={t("experiments.plan.field.costEstimate")}>
                   <Input
                     value={form.costEstimate}
                     onChange={(e) => set("costEstimate", e.target.value)}
-                    placeholder="€200"
+                    placeholder={t("experiments.plan.field.costEstimatePlaceholder")}
                   />
                 </L>
-                <L label="Owner">
+                <L label={t("experiments.plan.field.owner")}>
                   <Input value={form.owner} onChange={(e) => set("owner", e.target.value)} />
                 </L>
               </div>
-              <L label="Notes">
+              <L label={t("experiments.plan.field.notes")}>
                 <Textarea
                   rows={2}
                   value={form.notes}
@@ -506,38 +522,37 @@ export function ExperimentPlanDialog({
               </L>
               <fieldset className="space-y-2 rounded-md border p-3">
                 <legend className="px-1 text-[10px] font-semibold tracking-wider uppercase">
-                  Experimental validity plan
+                  {t("experiments.plan.validityPlan.legend")}
                 </legend>
                 <p className="text-muted-foreground text-xs">
-                  What the design intends. The result records what actually happened; the
-                  application decides what the run can establish.
+                  {t("experiments.plan.validityPlan.help")}
                 </p>
                 <ValidityChecklist fields={validity} onChange={setV} mode="plan" idPrefix="plan" />
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <L label="Systems / configurations (comma-separated)">
+                  <L label={t("experiments.plan.scope.systems")}>
                     <Input
                       value={scope.scopeSystems}
                       onChange={(e) => setScope((f) => ({ ...f, scopeSystems: e.target.value }))}
-                      placeholder="POS A, POS B"
+                      placeholder={t("experiments.plan.scope.systemsPlaceholder")}
                     />
                   </L>
-                  <L label="Environment / conditions">
+                  <L label={t("experiments.plan.scope.environment")}>
                     <Input
                       value={scope.scopeEnvironment}
                       onChange={(e) =>
                         setScope((f) => ({ ...f, scopeEnvironment: e.target.value }))
                       }
-                      placeholder="founder-assisted"
+                      placeholder={t("experiments.plan.scope.environmentPlaceholder")}
                     />
                   </L>
-                  <L label="Time period">
+                  <L label={t("experiments.plan.scope.timePeriod")}>
                     <Input
                       value={scope.scopeTimePeriod}
                       onChange={(e) => setScope((f) => ({ ...f, scopeTimePeriod: e.target.value }))}
-                      placeholder="one month"
+                      placeholder={t("experiments.plan.scope.timePeriodPlaceholder")}
                     />
                   </L>
-                  <L label="Other conditions">
+                  <L label={t("experiments.plan.scope.conditions")}>
                     <Input
                       value={scope.scopeConditions}
                       onChange={(e) => setScope((f) => ({ ...f, scopeConditions: e.target.value }))}
@@ -549,27 +564,33 @@ export function ExperimentPlanDialog({
 
             {/* Before running: what is at stake */}
             <aside className="bg-muted/40 space-y-3 rounded-md border p-3 text-xs">
-              <p className="text-[10px] font-semibold tracking-wider uppercase">Before running</p>
+              <p className="text-[10px] font-semibold tracking-wider uppercase">
+                {t("experiments.plan.aside.title")}
+              </p>
               <div>
                 <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
                   {assumption
-                    ? "Assumption being tested"
+                    ? t("experiments.plan.aside.testingAssumption")
                     : link
-                      ? "Causal link being tested"
+                      ? t("experiments.plan.aside.testingLink")
                       : node
-                        ? "Level being tested"
-                        : "Target"}
+                        ? t("experiments.plan.aside.testingLevel")
+                        : t("experiments.plan.aside.testingTarget")}
                 </p>
                 {assumption ? (
                   <>
                     <p className="mt-0.5">{assumption.statement}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline">{ASSUMPTION_KIND_LABELS[assumption.kind]}</Badge>
+                      <Badge variant="outline">
+                        {t(`labels.assumptionKind.${assumption.kind}`)}
+                      </Badge>
                       <Badge variant={assumption.status === "CONTRADICTED" ? "negative" : "muted"}>
-                        {ASSUMPTION_STATUS_LABELS[assumption.status]}
+                        {t(`labels.assumptionStatus.${assumption.status}`)}
                       </Badge>
                       <span className="text-muted-foreground font-mono">
-                        importance {assumption.importance}/10
+                        {t("experiments.plan.aside.importance", {
+                          importance: assumption.importance,
+                        })}
                       </span>
                     </div>
                   </>
@@ -578,7 +599,9 @@ export function ExperimentPlanDialog({
                     <p className="mt-0.5">{link.statement}</p>
                     <div className="mt-1 flex items-center gap-1.5">
                       <EpistemicBadge status={link.status} confidence={link.confidence} />
-                      <Badge variant="outline">{link.criticality.toLowerCase()}</Badge>
+                      <Badge variant="outline">
+                        {t(`labels.criticality.${link.criticality}`).toLowerCase()}
+                      </Badge>
                     </div>
                   </>
                 ) : node ? (
@@ -591,96 +614,122 @@ export function ExperimentPlanDialog({
                     />
                   </>
                 ) : (
-                  <p className="text-muted-foreground mt-0.5">Choose what this experiment tests.</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    {t("experiments.plan.aside.chooseTarget")}
+                  </p>
                 )}
               </div>
               {affectedLink && (
                 <div>
                   <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                    What it blocks
+                    {t("experiments.plan.aside.blocks")}
                   </p>
                   <p className="mt-0.5">
-                    {VALUE_CHAIN_LEVEL_LABELS[affectedLink.fromNode.level]} →{" "}
-                    {VALUE_CHAIN_LEVEL_LABELS[affectedLink.toNode.level]}
-                    {blockedRung === affectedLink.toNode.level
-                      ? " — the first level beyond the frontier"
-                      : ""}
+                    {t(
+                      blockedRung === affectedLink.toNode.level
+                        ? "experiments.plan.aside.blockedLinkFirst"
+                        : "experiments.plan.aside.blockedLink",
+                      {
+                        from: t(`labels.valueChainLevel.${affectedLink.fromNode.level}`),
+                        to: t(`labels.valueChainLevel.${affectedLink.toNode.level}`),
+                      },
+                    )}
                   </p>
                 </div>
               )}
               <div>
                 <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                  Current Proof Frontier
+                  {t("experiments.plan.aside.currentFrontier")}
                 </p>
                 <p className="mt-0.5 font-medium">
-                  {PROOF_RUNG_LABELS[frontier?.frontier ?? "NONE"]}
+                  {t(`labels.proofRung.${frontier?.frontier ?? "NONE"}`)}
                 </p>
                 {frontier?.whyStops && (
-                  <p className="text-muted-foreground mt-0.5">{frontier.whyStops}</p>
+                  <p className="text-muted-foreground mt-0.5">{t(frontier.whyStops)}</p>
                 )}
               </div>
               <div className="space-y-1">
                 <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                  What can this design prove?
+                  {t("experiments.plan.aside.whatCanProve")}
                 </p>
                 <p className="font-medium">
-                  {DESIGN_LEVEL_LABELS[resolved.effective]}
                   {resolved.effective !== validity.designLevel
-                    ? ` (declared ${DESIGN_LEVEL_LABELS[validity.designLevel].toLowerCase()})`
-                    : ""}
+                    ? t("experiments.plan.aside.effectiveDesignDeclared", {
+                        effective: t(`labels.designLevel.${resolved.effective}`),
+                        declared: t(`labels.designLevel.${validity.designLevel}`).toLowerCase(),
+                      })
+                    : t("experiments.plan.aside.effectiveDesign", {
+                        effective: t(`labels.designLevel.${resolved.effective}`),
+                      })}
                 </p>
                 {resolved.downgrades.map((d) => (
-                  <p key={d} className="text-tone-warning">
-                    {d}
+                  <p key={t(d)} className="text-tone-warning">
+                    {t(d)}
                   </p>
                 ))}
                 {preview.target && (
                   <p>
                     <span className="font-medium">
                       {preview.target.strength === "STRONGLY"
-                        ? "Can strongly establish"
+                        ? t("experiments.plan.aside.canStrongly")
                         : preview.target.strength === "PARTIALLY"
-                          ? "Can partially support"
-                          : "Cannot establish"}
+                          ? t("experiments.plan.aside.canPartially")
+                          : t("experiments.plan.aside.cannotEstablish")}
                     </span>{" "}
-                    that {preview.target.statement} — {preview.target.reason}
+                    {t("experiments.plan.aside.targetLine", {
+                      statement: t(preview.target.statement),
+                      reason: t(preview.target.reason),
+                    })}
                   </p>
                 )}
                 <p>
-                  <span className="font-medium">Can strongly:</span> {preview.strongly.join("; ")}
+                  <span className="font-medium">{t("experiments.plan.aside.stronglyList")}</span>{" "}
+                  {preview.strongly.map((x) => t(x)).join(listSeparator)}
                 </p>
                 <p>
-                  <span className="font-medium">Partially:</span> {preview.partially.join("; ")}
+                  <span className="font-medium">{t("experiments.plan.aside.partiallyList")}</span>{" "}
+                  {preview.partially.map((x) => t(x)).join(listSeparator)}
                 </p>
                 <p>
-                  <span className="font-medium">Cannot:</span> {preview.cannot.join("; ")}
+                  <span className="font-medium">{t("experiments.plan.aside.cannotList")}</span>{" "}
+                  {preview.cannot.map((x) => t(x)).join(listSeparator)}
                 </p>
-                <p className="text-muted-foreground">{preview.note}</p>
+                <p className="text-muted-foreground">{t(preview.note)}</p>
               </div>
               {expected && (
                 <div className="space-y-1.5">
                   <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                    Expected movement
+                    {t("experiments.plan.aside.expectedMovement")}
                   </p>
                   <p>
-                    <span className="font-medium">If supported:</span> {expected.ifSupported}
+                    <span className="font-medium">{t("experiments.plan.aside.ifSupported")}</span>{" "}
+                    {expected.ifSupported}
                   </p>
                   <p>
-                    <span className="font-medium">If contradicted:</span> {expected.ifContradicted}
+                    <span className="font-medium">
+                      {t("experiments.plan.aside.ifContradicted")}
+                    </span>{" "}
+                    {expected.ifContradicted}
                   </p>
                 </div>
               )}
               <div className="grid grid-cols-3 gap-2">
                 <Stat
-                  label="Decision impact"
+                  label={t("experiments.plan.aside.statDecisionImpact")}
                   value={form.decisionImpact ? `${form.decisionImpact}/10` : "—"}
                 />
-                <Stat label="Effort" value={form.effort ? `${form.effort}/10` : "—"} />
-                <Stat label="Time" value={form.timeEstimate || "—"} />
+                <Stat
+                  label={t("experiments.plan.aside.statEffort")}
+                  value={form.effort ? `${form.effort}/10` : "—"}
+                />
+                <Stat
+                  label={t("experiments.plan.aside.statTime")}
+                  value={form.timeEstimate || "—"}
+                />
               </div>
               {warnings.map((w) => (
                 <p
-                  key={w.message}
+                  key={t(w.message)}
                   className={
                     w.level === "warning"
                       ? "bg-tone-warning-bg text-tone-warning flex items-start gap-1.5 rounded px-2 py-1"
@@ -692,7 +741,7 @@ export function ExperimentPlanDialog({
                   ) : (
                     <Info className="mt-0.5 size-3 shrink-0" />
                   )}
-                  {w.message}
+                  {t(w.message)}
                 </p>
               ))}
             </aside>
@@ -700,11 +749,11 @@ export function ExperimentPlanDialog({
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={saving}>
               {saving && <Loader2 className="animate-spin" />}{" "}
-              {experiment ? "Save" : "Plan experiment"}
+              {experiment ? t("common.save") : t("experiments.plan.submitNew")}
             </Button>
           </DialogFooter>
         </form>

@@ -19,14 +19,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GraphVariable } from "@/db/workspaces";
-import {
-  DIRECTION_LABELS,
-  DesiredDirection,
-  VARIABLE_CATEGORY_LABELS,
-  VARIABLE_POLARITY_LABELS,
-  VariableCategory,
-  VariablePolarity,
-} from "@/domain/enums";
+import { DesiredDirection, VariableCategory, VariablePolarity } from "@/domain/enums";
+import { useT } from "@/i18n/client";
 import {
   checkVerbType,
   compactLabel,
@@ -52,6 +46,7 @@ export function VariableValueForm({
   variable: GraphVariable;
   siblings: Array<{ id: string; name: string }>;
 }) {
+  const t = useT();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -84,6 +79,9 @@ export function VariableValueForm({
   );
   const suggestions = useMemo(() => suggestedVerbsFor(check.polarity), [check.polarity]);
   const status = (field: VariableField) => fieldStatus(variable, field);
+  const direction = (d: DesiredDirection) => t(`labels.direction.${d}`);
+  const polarity = (p: VariablePolarity) => t(`labels.variablePolarity.${p}`);
+  const unknown = t("value.unknown");
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,9 +93,9 @@ export function VariableValueForm({
     }
     const r = await updateVariableValueFieldsAction(changed);
     setSaving(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
-      toast.success("Variable saved (changed fields marked USER)");
+      toast.success(t("value.variableForm.saved"));
       router.refresh();
     }
   };
@@ -109,17 +107,20 @@ export function VariableValueForm({
     <form onSubmit={save} className="space-y-3">
       <div className="rounded-md border p-2.5">
         <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-          Direct variable
+          {t("value.variableForm.direct")}
         </p>
         <p className="text-base font-semibold">{compactLabel(form.desiredDirection, form.name)}</p>
         <p className="text-muted-foreground text-xs">
-          Action: {DIRECTION_LABELS[form.desiredDirection]} · Type:{" "}
-          {form.variableType.trim() ? form.variableType : "UNKNOWN"}
-          {check.polarity ? ` (${VARIABLE_POLARITY_LABELS[check.polarity].toLowerCase()})` : ""}
+          {t("value.variableForm.summary", {
+            action: direction(form.desiredDirection),
+            type: form.variableType.trim() ? form.variableType : unknown,
+            withPolarity: Boolean(check.polarity),
+            polarity: check.polarity ? polarity(check.polarity).toLowerCase() : "",
+          })}
         </p>
       </div>
 
-      <F label="Variable" status={status("name")}>
+      <F label={t("value.variableForm.name")} status={status("name")}>
         <Input
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -128,7 +129,7 @@ export function VariableValueForm({
       </F>
 
       <div className="grid grid-cols-2 gap-3">
-        <F label="Action (verb)" status={status("desiredDirection")}>
+        <F label={t("value.variableForm.action")} status={status("desiredDirection")}>
           <Select
             value={form.desiredDirection}
             onValueChange={(v) => setForm({ ...form, desiredDirection: v as DesiredDirection })}
@@ -139,31 +140,31 @@ export function VariableValueForm({
             <SelectContent>
               {suggestions.map((d) => (
                 <SelectItem key={d} value={d}>
-                  {DIRECTION_LABELS[d]} · suggested
+                  {t("value.variableForm.suggested", { label: direction(d) })}
                 </SelectItem>
               ))}
               {Object.values(DesiredDirection)
                 .filter((d) => !suggestions.includes(d))
                 .map((d) => (
                   <SelectItem key={d} value={d}>
-                    {DIRECTION_LABELS[d]}
+                    {direction(d)}
                   </SelectItem>
                 ))}
             </SelectContent>
           </Select>
         </F>
-        <F label="Variable type (what is moved)" status={status("variableType")}>
+        <F label={t("value.variableForm.type")} status={status("variableType")}>
           <Input
             list={`variable-types-${variable.id}`}
             value={form.variableType}
             onChange={(e) => setForm({ ...form, variableType: e.target.value })}
-            placeholder="Leakage, Churn, Downtime, Revenue… or custom"
+            placeholder={t("value.variableForm.typePlaceholder")}
           />
           <datalist id={`variable-types-${variable.id}`}>
             {(["NEGATIVE", "POSITIVE", "NEUTRAL"] as VariablePolarity[]).flatMap((p) =>
-              VARIABLE_TYPES_BY_POLARITY[p].map((t) => (
-                <option key={t} value={t}>
-                  {VARIABLE_POLARITY_LABELS[p]}
+              VARIABLE_TYPES_BY_POLARITY[p].map((type) => (
+                <option key={type} value={type}>
+                  {polarity(p)}
                 </option>
               )),
             )}
@@ -181,20 +182,20 @@ export function VariableValueForm({
             "Revenue",
             "Retention",
             "Utilization",
-          ].map((t) => (
+          ].map((type) => (
             <button
-              key={t}
+              key={type}
               type="button"
-              onClick={() => setTypeQuick(t)}
+              onClick={() => setTypeQuick(type)}
               className="text-muted-foreground hover:text-foreground rounded border px-1.5 py-0.5 text-[11px]"
             >
-              {t}
+              {type}
             </button>
           ))}
         </div>
       )}
       {isCustom && (
-        <F label="Polarity of this custom type" status={status("variablePolarity")}>
+        <F label={t("value.variableForm.polarity")} status={status("variablePolarity")}>
           <Select
             value={form.variablePolarity || NONE}
             onValueChange={(v) =>
@@ -202,13 +203,13 @@ export function VariableValueForm({
             }
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="UNKNOWN" />
+              <SelectValue placeholder={unknown} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE}>UNKNOWN — no compatibility check</SelectItem>
+              <SelectItem value={NONE}>{t("value.variableForm.noPolarity")}</SelectItem>
               {Object.values(VariablePolarity).map((p) => (
                 <SelectItem key={p} value={p}>
-                  {VARIABLE_POLARITY_LABELS[p]}
+                  {polarity(p)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -217,17 +218,17 @@ export function VariableValueForm({
       )}
       {check.level === "warning" && (
         <p className="bg-tone-warning-bg text-tone-warning flex items-start gap-2 rounded-md px-2 py-1.5 text-xs">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {check.message}
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {t(check.message)}
         </p>
       )}
       {check.level === "unknown" && (
         <p className="text-muted-foreground flex items-start gap-2 rounded-md border border-dashed px-2 py-1.5 text-xs">
-          <Info className="mt-0.5 size-3.5 shrink-0" /> {check.message}
+          <Info className="mt-0.5 size-3.5 shrink-0" /> {t(check.message)}
         </p>
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <F label="Economic category" status={status("category")}>
+        <F label={t("value.variableForm.category")} status={status("category")}>
           <Select
             value={form.category}
             onValueChange={(v) => setForm({ ...form, category: v as VariableCategory })}
@@ -238,13 +239,16 @@ export function VariableValueForm({
             <SelectContent>
               {Object.values(VariableCategory).map((c) => (
                 <SelectItem key={c} value={c}>
-                  {VARIABLE_CATEGORY_LABELS[c]}
+                  {t(`labels.variableCategory.${c}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </F>
-        <F label={`Importance ${form.importanceScore}/10`} status={status("importanceScore")}>
+        <F
+          label={t("value.variableForm.importance", { score: form.importanceScore })}
+          status={status("importanceScore")}
+        >
           <input
             type="range"
             min={0}
@@ -256,78 +260,77 @@ export function VariableValueForm({
         </F>
       </div>
 
-      <F label="Target (what exactly is moved)" status={status("target")}>
+      <F label={t("value.variableForm.target")} status={status("target")}>
         <Input
           value={form.target}
           onChange={(e) => setForm({ ...form, target: e.target.value })}
-          placeholder="e.g. booked appointments not honoured or cancelled same-day"
+          placeholder={t("value.variableForm.targetPlaceholder")}
         />
       </F>
-      <F label="Scope (where it applies)" status={status("scope")}>
+      <F label={t("value.variableForm.scope")} status={status("scope")}>
         <Input
           value={form.scope}
           onChange={(e) => setForm({ ...form, scope: e.target.value })}
-          placeholder="e.g. peak-hour bookings, single-location salons"
+          placeholder={t("value.variableForm.scopePlaceholder")}
         />
       </F>
       <div className="grid grid-cols-2 gap-3">
-        <F label="Current state" status={status("currentState")}>
+        <F label={t("value.variableForm.currentState")} status={status("currentState")}>
           <Input
             value={form.currentState}
             onChange={(e) => setForm({ ...form, currentState: e.target.value })}
-            placeholder="UNKNOWN"
+            placeholder={unknown}
           />
         </F>
-        <F label="Desired state" status={status("desiredState")}>
+        <F label={t("value.variableForm.desiredState")} status={status("desiredState")}>
           <Input
             value={form.desiredState}
             onChange={(e) => setForm({ ...form, desiredState: e.target.value })}
-            placeholder="UNKNOWN"
+            placeholder={unknown}
           />
         </F>
-        <F label="Unit" status={status("unit")}>
+        <F label={t("value.variableForm.unit")} status={status("unit")}>
           <Input
             value={form.unit}
             onChange={(e) => setForm({ ...form, unit: e.target.value })}
-            placeholder="% of appointments"
+            placeholder={t("value.variableForm.unitPlaceholder")}
           />
         </F>
-        <F label="Who values it" status={status("whoValuesIt")}>
+        <F label={t("value.variableForm.whoValuesIt")} status={status("whoValuesIt")}>
           <Input
             value={form.whoValuesIt}
             onChange={(e) => setForm({ ...form, whoValuesIt: e.target.value })}
-            placeholder="Independent salon owner"
+            placeholder={t("value.variableForm.whoPlaceholder")}
           />
         </F>
       </div>
-      <F label="Why it matters" status={status("whyItMatters")}>
+      <F label={t("value.variableForm.whyItMatters")} status={status("whyItMatters")}>
         <Textarea
           rows={2}
           value={form.whyItMatters}
           onChange={(e) => setForm({ ...form, whyItMatters: e.target.value })}
-          placeholder="Empty peak-hour slots cannot always be resold…"
+          placeholder={t("value.variableForm.whyPlaceholder")}
         />
       </F>
 
       <div className="rounded-md border border-dashed p-2.5">
         <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-          Parent economic variable
+          {t("value.variableForm.parent")}
         </p>
         <p className="text-muted-foreground mb-2 text-[11px]">
-          What benefits downstream when this variable moves as desired. The relation stays a
-          hypothesis until evidence supports it; it never enters the compatibility check.
+          {t("value.variableForm.parentHelp")}
         </p>
         <div className="grid grid-cols-2 gap-3">
-          <F label="Parent variable" status={status("parentVariableId")}>
+          <F label={t("value.variableForm.parentVariable")} status={status("parentVariableId")}>
             <Select
               value={form.parentVariableId || NONE}
               onValueChange={(v) => setForm({ ...form, parentVariableId: v === NONE ? "" : v })}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="None" />
+                <SelectValue placeholder={t("value.variableForm.none")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NONE}>None</SelectItem>
+                <SelectItem value={NONE}>{t("value.variableForm.none")}</SelectItem>
                 {siblings
                   .filter((s) => s.id !== variable.id)
                   .map((s) => (
@@ -338,7 +341,7 @@ export function VariableValueForm({
               </SelectContent>
             </Select>
           </F>
-          <F label="Expected movement of the parent" status={status("parentDirection")}>
+          <F label={t("value.variableForm.parentDirection")} status={status("parentDirection")}>
             <Select
               value={form.parentDirection || NONE}
               onValueChange={(v) =>
@@ -346,13 +349,13 @@ export function VariableValueForm({
               }
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="UNKNOWN" />
+                <SelectValue placeholder={unknown} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NONE}>UNKNOWN</SelectItem>
+                <SelectItem value={NONE}>{unknown}</SelectItem>
                 {Object.values(DesiredDirection).map((d) => (
                   <SelectItem key={d} value={d}>
-                    {DIRECTION_LABELS[d]}
+                    {direction(d)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -361,13 +364,10 @@ export function VariableValueForm({
         </div>
       </div>
 
-      <p className="text-muted-foreground text-[11px]">
-        Each field keeps its own status. Empty fields are UNKNOWN and stay UNKNOWN; saving marks the
-        fields you changed as USER.
-      </p>
+      <p className="text-muted-foreground text-[11px]">{t("value.variableForm.footer")}</p>
       <div className="flex justify-end">
         <Button type="submit" size="sm" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Save variable
+          {saving && <Loader2 className="animate-spin" />} {t("value.variableForm.save")}
         </Button>
       </div>
     </form>

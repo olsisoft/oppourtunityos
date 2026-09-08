@@ -17,27 +17,22 @@ import type {
   ExperimentDesignLevel,
   InternalValidity,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { clamp } from "@/lib/utils";
 import {
   admissibility,
   ADMISSIBILITY_FIT_CAP,
-  ADMISSIBILITY_LABELS,
   ADMISSIBILITY_VALUE,
   ADMISSIBILITY_VERSION,
 } from "./admissibility";
-import { claimNature, CLAIM_STATEMENTS, type ClaimNature } from "./claim-taxonomy";
+import { claimNature, type ClaimNature } from "./claim-taxonomy";
 import {
   IMPLIED_DESIGN_LEVEL,
   METHOD_QUALITY_BASE,
   sourceFamily,
   THIRD_PARTY_FAMILIES,
 } from "./evidence-sources";
-import {
-  DESIGN_CAUSAL_FACTOR,
-  DESIGN_LEVEL_LABELS,
-  INTERNAL_VALIDITY_LABELS,
-  VALIDITY_FACTOR,
-} from "./experimental-validity";
+import { DESIGN_CAUSAL_FACTOR, VALIDITY_FACTOR } from "./experimental-validity";
 import { scopeMatch, type Scope, type ScopeMatchResult } from "./scope";
 
 export const FIT_VERSION = `fit-1.0/matrix-${ADMISSIBILITY_VERSION}`;
@@ -172,18 +167,20 @@ export interface EvidenceFitContext {
 
 export interface FitDimension {
   key: FitDimensionKey;
-  label: string;
+  /** The dimension's label (`labels.fitDimension.<key>`). */
+  label: SystemMessage;
   value: number;
   weight: number;
   points: number;
-  note: string;
+  /** Short note on what drove the value ("relevance 8/10", "n = 12"…). */
+  note: SystemMessage;
 }
 
 export interface EvidenceFit {
   version: string;
   claimType: ClaimType;
   admissibility: EvidenceAdmissibility;
-  admissibilityExplanation: string;
+  admissibilityExplanation: SystemMessage;
   dimensions: FitDimension[];
   limitationsPenalty: number;
   fitScore: number;
@@ -193,9 +190,11 @@ export interface EvidenceFit {
   duplicateOfOrigin: boolean;
   scope: ScopeMatchResult;
   designLevel: ExperimentDesignLevel;
-  explanation: string[];
+  explanation: SystemMessage[];
   /** One line: "HIGH fit (82/100) for 'the pain exists' — …". */
-  summary: string;
+  summary: SystemMessage;
+  /** The tail of `summary`: what most limits (or makes) the fit. */
+  reason: SystemMessage;
 }
 
 export function originOf(item: Pick<EvidenceFitInput, "id" | "sourceOriginId">): string {
@@ -206,17 +205,22 @@ export function originOf(item: Pick<EvidenceFitInput, "id" | "sourceOriginId">):
 function recencyValue(
   date: Date | string | null | undefined,
   now: Date,
-): { value: number; note: string } {
-  if (!date) return { value: 0.5, note: "undated (half credit)" };
+): { value: number; note: SystemMessage } {
+  if (!date) return { value: 0.5, note: msg("validity.fit.note.recency.undated") };
   const d = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(d.getTime())) return { value: 0.5, note: "undated (half credit)" };
+  if (Number.isNaN(d.getTime()))
+    return { value: 0.5, note: msg("validity.fit.note.recency.undated") };
   const months = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
-  if (months <= RECENT_MONTHS) return { value: 1, note: "within 12 months" };
-  if (months <= RECENT_MONTHS * 2) return { value: 0.5, note: "12–24 months old" };
-  return { value: 0.2, note: "older than 24 months" };
+  if (months <= RECENT_MONTHS) return { value: 1, note: msg("validity.fit.note.recency.recent") };
+  if (months <= RECENT_MONTHS * 2)
+    return { value: 0.5, note: msg("validity.fit.note.recency.aging") };
+  return { value: 0.2, note: msg("validity.fit.note.recency.old") };
 }
 
-function sampleValue(item: EvidenceFitInput, nature: ClaimNature): { value: number; note: string } {
+function sampleValue(
+  item: EvidenceFitInput,
+  nature: ClaimNature,
+): { value: number; note: SystemMessage } {
   const orgs = item.organizationCount ?? item.scope?.organizationCount ?? null;
   const n = item.sampleSize ?? item.scope?.sampleSize ?? null;
   const family = sourceFamily(item.sourceType);
@@ -233,16 +237,19 @@ function sampleValue(item: EvidenceFitInput, nature: ClaimNature): { value: numb
               : orgs === 2
                 ? 0.55
                 : 0.45;
-    return { value: v, note: `${orgs} organization${orgs === 1 ? "" : "s"}` };
+    return { value: v, note: msg("validity.fit.note.sample.organizations", { count: orgs }) };
   }
   if (n !== null && n > 0) {
     const v = n >= 100 ? 1 : n >= 30 ? 0.9 : n >= 10 ? 0.7 : n >= 5 ? 0.6 : 0.5;
-    return { value: v, note: `n = ${n}` };
+    return { value: v, note: msg("validity.fit.note.sample.units", { count: n }) };
   }
   if (family === "SELF_REPORTED" && item.sourceType !== "SURVEY")
-    return { value: nature === "EXISTENCE" ? 0.6 : 0.45, note: "single respondent" };
-  if (family === "MARKET") return { value: 0.6, note: "aggregate source, sample not stated" };
-  return { value: 0.5, note: "sample not recorded" };
+    return {
+      value: nature === "EXISTENCE" ? 0.6 : 0.45,
+      note: msg("validity.fit.note.sample.singleRespondent"),
+    };
+  if (family === "MARKET") return { value: 0.6, note: msg("validity.fit.note.sample.aggregate") };
+  return { value: 0.5, note: msg("validity.fit.note.sample.unknown") };
 }
 
 /** Fitness of one evidence item for one claim. */
@@ -257,9 +264,11 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
   const duplicate = prior.has(originId);
   const designLevel = item.designLevel ?? IMPLIED_DESIGN_LEVEL[item.sourceType] ?? "ANECDOTAL";
   const scope = scopeMatch(item.scope ?? null, ctx.claimScope ?? null);
-  const statement = CLAIM_STATEMENTS[ctx.claimType];
+  const statement = msg(`labels.claimStatement.${ctx.claimType}`);
+  const source = msg(`validity.sourceTypeLower.${item.sourceType}`);
 
   if (adm.level === "NOT_ADMISSIBLE") {
+    const reason = msg("validity.fit.summary.notAdmissible", { what: statement });
     return {
       version: FIT_VERSION,
       claimType: ctx.claimType,
@@ -275,18 +284,23 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
       scope,
       designLevel,
       explanation: [
-        `Not admissible: a ${label(item.sourceType)} cannot be evidence that ${statement} (matrix ${ADMISSIBILITY_VERSION}).`,
+        msg("validity.fit.explanation.notAdmissible", {
+          source,
+          what: statement,
+          version: ADMISSIBILITY_VERSION,
+        }),
       ],
-      summary: `Not admissible for "${statement}".`,
+      summary: reason,
+      reason,
     };
   }
 
   const dims: FitDimension[] = [];
-  const add = (key: FitDimensionKey, value: number, note: string) => {
+  const add = (key: FitDimensionKey, value: number, note: SystemMessage) => {
     const v = clamp(round2(value), 0, 1);
     dims.push({
       key,
-      label: FIT_DIMENSION_LABELS[key],
+      label: msg(`labels.fitDimension.${key}`),
       value: v,
       weight: weights[key],
       points: round1(v * weights[key]),
@@ -297,7 +311,10 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
   add(
     "admissibility",
     ADMISSIBILITY_VALUE[adm.level],
-    `${ADMISSIBILITY_LABELS[adm.level]} — ${adm.explanation}`,
+    msg("validity.fit.note.admissibility", {
+      level: msg(`labels.admissibility.${adm.level}`),
+      explanation: adm.explanation,
+    }),
   );
 
   const relevance = clamp(Number(item.relevanceScore) || 0, 0, 10) / 10;
@@ -305,38 +322,52 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
   add(
     "directness",
     relevance * (thirdParty ? 0.85 : 1),
-    `relevance ${Math.round(relevance * 10)}/10${thirdParty ? ", third-party source" : ""}`,
+    msg(`validity.fit.note.${thirdParty ? "directnessThirdParty" : "directness"}`, {
+      relevance: Math.round(relevance * 10),
+    }),
   );
 
   const strength = clamp(Number(item.strengthScore) || 0, 0, 10) / 10;
   let method = 0.5 * (METHOD_QUALITY_BASE[item.sourceType] ?? 0.3) + 0.5 * strength;
-  const methodNotes = [
-    `${label(item.sourceType)} baseline ${METHOD_QUALITY_BASE[item.sourceType] ?? 0.3}`,
-    `strength ${Math.round(strength * 10)}/10`,
-  ];
+  const methodParams: Record<string, SystemMessage | number | boolean | null> = {
+    source,
+    base: METHOD_QUALITY_BASE[item.sourceType] ?? 0.3,
+    strength: Math.round(strength * 10),
+    hasDesign: false,
+    design: null,
+    designFactor: null,
+    hasValidity: false,
+    validity: null,
+    validityFactor: null,
+  };
   if (nature === "CAUSAL") {
     method *= DESIGN_CAUSAL_FACTOR[designLevel];
-    methodNotes.push(
-      `${DESIGN_LEVEL_LABELS[designLevel].toLowerCase()} design ×${DESIGN_CAUSAL_FACTOR[designLevel]}`,
-    );
+    methodParams.hasDesign = true;
+    methodParams.design = msg(`validity.designLevelLower.${designLevel}`);
+    methodParams.designFactor = DESIGN_CAUSAL_FACTOR[designLevel];
   }
   if (item.internalValidity) {
     method *= VALIDITY_FACTOR[item.internalValidity];
-    methodNotes.push(
-      `internal validity ${INTERNAL_VALIDITY_LABELS[item.internalValidity].toLowerCase()} ×${VALIDITY_FACTOR[item.internalValidity]}`,
-    );
+    methodParams.hasValidity = true;
+    methodParams.validity = msg(`validity.internalValidityLower.${item.internalValidity}`);
+    methodParams.validityFactor = VALIDITY_FACTOR[item.internalValidity];
   }
-  add("methodQuality", method, methodNotes.join(", "));
+  add("methodQuality", method, msg("validity.fit.note.method", methodParams));
 
   add(
     "independence",
     duplicate ? DUPLICATE_INDEPENDENCE : 1,
     duplicate
-      ? `derivative of a source already counted on this claim (${originId})`
-      : "independent origin",
+      ? msg("validity.fit.note.duplicate", { origin: originId })
+      : msg("validity.fit.note.independent"),
   );
 
-  add("scopeMatch", scope.score, scope.explanation);
+  // The scope engine explains the match itself; the note passes it through.
+  add(
+    "scopeMatch",
+    scope.score,
+    msg("validity.fit.note.scopeMatch", { explanation: scope.explanation }),
+  );
 
   const sample = sampleValue(item, nature);
   add("sampleRelevance", sample.value, sample.note);
@@ -345,19 +376,19 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
   add("recency", rec.value, rec.note);
 
   let penalty = 0;
-  const penaltyNotes: string[] = [];
+  let penaltyNote: SystemMessage | null = null;
   if (item.internalValidity === "LOW") {
     penalty += 8;
-    penaltyNotes.push("low internal validity (−8)");
+    penaltyNote = msg("validity.fit.penalty.lowValidity");
   } else if (item.internalValidity === "INDETERMINATE") {
     penalty += 5;
-    penaltyNotes.push("indeterminate internal validity (−5)");
+    penaltyNote = msg("validity.fit.penalty.indeterminateValidity");
   } else if (item.internalValidity === "MEDIUM") {
     penalty += 3;
-    penaltyNotes.push("medium internal validity (−3)");
+    penaltyNote = msg("validity.fit.penalty.mediumValidity");
   } else if (item.limitations && item.limitations.trim().length > 0) {
     penalty += 2;
-    penaltyNotes.push("recorded limitations (−2)");
+    penaltyNote = msg("validity.fit.penalty.limitations");
   }
   penalty = Math.min(10, penalty);
 
@@ -367,30 +398,43 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
   const band = fitBand(fitScore);
   const weakest = [...dims].sort((a, b) => a.value - b.value)[0];
 
-  const explanation = [
-    `Fit ${fitScore}/100 (${band}) for "${statement}".`,
-    ...dims.map(
-      (d) =>
-        `${d.label}: ${Math.round(d.value * 100)}% of ${d.weight} → ${d.points} pts (${d.note})`,
+  const explanation: SystemMessage[] = [
+    msg("validity.fit.explanation.score", { score: fitScore, band, what: statement }),
+    ...dims.map((d) =>
+      msg("validity.fit.explanation.dimension", {
+        label: d.label,
+        percent: Math.round(d.value * 100),
+        weight: d.weight,
+        points: d.points,
+        note: d.note,
+      }),
     ),
     penalty > 0
-      ? `Limitations penalty: −${penalty} (${penaltyNotes.join(", ")})`
-      : "No limitations penalty.",
-    cap < 100
-      ? `Capped at ${cap}: ${ADMISSIBILITY_LABELS[adm.level].toLowerCase()}-admissibility evidence cannot fit better than this for the claim.`
-      : "",
-  ].filter(Boolean);
+      ? msg("validity.fit.explanation.penalty", { penalty, note: penaltyNote })
+      : msg("validity.fit.explanation.noPenalty"),
+    ...(cap < 100
+      ? [
+          msg("validity.fit.explanation.cap", {
+            cap,
+            level: msg(`validity.admissibilityLower.${adm.level}`),
+          }),
+        ]
+      : []),
+  ];
 
-  const why =
+  const reason =
     adm.level === "LOW"
-      ? `a ${label(item.sourceType)} is low-admissibility evidence for this claim`
+      ? msg("validity.fit.reason.lowAdmissibility", { source })
       : adm.level === "MEDIUM"
-        ? `a ${label(item.sourceType)} is medium-admissibility evidence for this claim`
+        ? msg("validity.fit.reason.mediumAdmissibility", { source })
         : duplicate
-          ? "it derives from a source already counted"
+          ? msg("validity.fit.reason.duplicate")
           : weakest && weakest.value < 0.6
-            ? `${weakest.label.toLowerCase()} is weak (${weakest.note})`
-            : "high-admissibility, direct and independent";
+            ? msg("validity.fit.reason.weakDimension", {
+                dimension: msg(`validity.fitDimensionLower.${weakest.key}`),
+                note: weakest.note,
+              })
+            : msg("validity.fit.reason.strong");
   return {
     version: FIT_VERSION,
     claimType: ctx.claimType,
@@ -406,7 +450,8 @@ export function computeEvidenceFit(item: EvidenceFitInput, ctx: EvidenceFitConte
     scope,
     designLevel,
     explanation,
-    summary: `${band} fit (${fitScore}/100) for "${statement}" — ${why}.`,
+    summary: msg("validity.fit.summary.line", { band, score: fitScore, what: statement, reason }),
+    reason,
   };
 }
 
@@ -433,10 +478,6 @@ export function computeClaimFits(
     out.set(item.id, fit);
   }
   return out;
-}
-
-function label(type: EvidenceSourceType): string {
-  return type.toLowerCase().replace(/_/g, " ");
 }
 
 function round1(n: number): number {

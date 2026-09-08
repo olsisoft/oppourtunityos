@@ -1,16 +1,14 @@
+"use client";
+
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import type { GraphKnowledgeChange } from "@/db/workspaces";
-import { KNOWLEDGE_TRIGGER_LABELS } from "@/domain/enums";
-import { formatDate } from "@/lib/utils";
+import { useLocale, useT } from "@/i18n/client";
+import { formatDate } from "@/i18n/format";
 import type { ClaimDelta } from "@/services/value/knowledge-change";
-import {
-  frontierMovement,
-  PROOF_RUNG_LABELS,
-  type FrontierPosition,
-} from "@/services/value/proof-frontier";
+import { frontierMovement, type FrontierPosition } from "@/services/value/proof-frontier";
 
 function deltas(json: unknown): ClaimDelta[] {
   return Array.isArray(json) ? (json as ClaimDelta[]) : [];
@@ -27,15 +25,20 @@ export function LearningHistory({
   changes: GraphKnowledgeChange[];
   limit?: number;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const rows = limit ? changes.slice(0, limit) : changes;
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="No learning recorded yet"
-        description="Every time evidence or an experiment result changes a claim, a score, the Proof Frontier or the verdict, the change is recorded here with what caused it."
+        title={t("value.history.emptyTitle")}
+        description={t("value.history.emptyDescription")}
       />
     );
   }
+  const rung = (position: string | null | undefined) =>
+    t(`labels.proofRung.${(position ?? "NONE") as FrontierPosition}`);
+  const incomplete = t("value.incomplete");
   return (
     <ol className="space-y-2">
       {rows.map((c) => {
@@ -43,11 +46,12 @@ export function LearningHistory({
           (c.previousFrontier ?? "NONE") as FrontierPosition,
           (c.newFrontier ?? "NONE") as FrontierPosition,
         );
+        const trigger = t(`labels.knowledgeTrigger.${c.trigger}`);
         const cause = c.experiment
           ? c.experiment.title
           : c.evidence
             ? c.evidence.sourceTitle
-            : KNOWLEDGE_TRIGGER_LABELS[c.trigger];
+            : trigger;
         const strengthened = deltas(c.claimsStrengthened);
         const contradicted = deltas(c.claimsContradicted);
         const weakened = deltas(c.claimsWeakened);
@@ -56,7 +60,7 @@ export function LearningHistory({
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-muted-foreground text-[11px]">
-                  {formatDate(c.createdAt)} · {KNOWLEDGE_TRIGGER_LABELS[c.trigger]}
+                  {t("value.history.meta", { date: formatDate(c.createdAt, locale), trigger })}
                 </p>
                 <p className="font-medium">{cause}</p>
               </div>
@@ -70,39 +74,51 @@ export function LearningHistory({
                   ) : (
                     <ArrowDown className="size-3" />
                   )}{" "}
-                  frontier {PROOF_RUNG_LABELS[(c.previousFrontier ?? "NONE") as FrontierPosition]} →{" "}
-                  {PROOF_RUNG_LABELS[(c.newFrontier ?? "NONE") as FrontierPosition]}
+                  {t("value.history.frontierMoved", {
+                    from: rung(c.previousFrontier),
+                    to: rung(c.newFrontier),
+                  })}
                 </Badge>
               ) : (
                 <Badge variant="muted" className="shrink-0">
-                  <Minus className="size-3" /> frontier unchanged
+                  <Minus className="size-3" /> {t("value.history.frontierUnchanged")}
                 </Badge>
               )}
             </div>
             <ul className="text-muted-foreground mt-1.5 space-y-0.5 text-xs">
               {[...contradicted, ...strengthened, ...weakened].slice(0, 5).map((d) => (
-                <li key={d.key}>{d.text}</li>
+                <li key={d.key}>{t(d.text)}</li>
               ))}
               {c.previousEvidenceConfidence !== c.newEvidenceConfidence && (
                 <li>
-                  Evidence Confidence {c.previousEvidenceConfidence} → {c.newEvidenceConfidence}
+                  {t("value.history.evidenceConfidence", {
+                    before: c.previousEvidenceConfidence,
+                    after: c.newEvidenceConfidence,
+                  })}
                 </li>
               )}
               {(c.previousCausalConfidence ?? null) !== (c.newCausalConfidence ?? null) && (
                 <li>
-                  Causal Confidence {c.previousCausalConfidence ?? "INCOMPLETE"} →{" "}
-                  {c.newCausalConfidence ?? "INCOMPLETE"}
+                  {t("value.history.causalConfidence", {
+                    before: c.previousCausalConfidence ?? incomplete,
+                    after: c.newCausalConfidence ?? incomplete,
+                  })}
                 </li>
               )}
               {(c.previousValueStrength ?? null) !== (c.newValueStrength ?? null) && (
                 <li>
-                  Value Strength {c.previousValueStrength ?? "INCOMPLETE"} →{" "}
-                  {c.newValueStrength ?? "INCOMPLETE"}
+                  {t("value.history.valueStrength", {
+                    before: c.previousValueStrength ?? incomplete,
+                    after: c.newValueStrength ?? incomplete,
+                  })}
                 </li>
               )}
               {c.previousVerdict !== c.newVerdict && (
                 <li className="text-foreground">
-                  Verdict {c.previousVerdict} → {c.newVerdict}
+                  {t("value.history.verdict", {
+                    before: t(`labels.verdict.${c.previousVerdict}`).toUpperCase(),
+                    after: t(`labels.verdict.${c.newVerdict}`).toUpperCase(),
+                  })}
                 </li>
               )}
             </ul>

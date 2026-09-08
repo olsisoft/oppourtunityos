@@ -11,11 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { OpportunityWithRelations } from "@/db/workspaces";
+import { useT } from "@/i18n/client";
 import type { FieldStatus } from "@/services/value/variable-semantics";
 import {
   computeValueStrength,
-  VALUE_DIMENSION_HELP,
-  VALUE_DIMENSION_LABELS,
   VALUE_DIMENSIONS,
   type ValueDimension,
 } from "@/services/value/value-strength";
@@ -33,6 +32,7 @@ export function dimsOf(o: OpportunityWithRelations): Dims {
 }
 
 export function ValueStrengthEditor({ opportunity: o }: { opportunity: OpportunityWithRelations }) {
+  const t = useT();
   const router = useRouter();
   const initial = useMemo(() => dimsOf(o), [o]);
   const [dims, setDims] = useState<Dims>(initial);
@@ -45,9 +45,9 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
     setSaving(true);
     const r = await updateValueDimensionsAction({ opportunityId: o.id, ...dims });
     setSaving(false);
-    if (!r.ok) toast.error(r.error);
+    if (!r.ok) toast.error(t(r.error));
     else {
-      toast.success("Dimensions saved — Value Strength recomputed");
+      toast.success(t("value.strength.saved"));
       router.refresh();
     }
   };
@@ -56,15 +56,16 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold tracking-wider uppercase">
-          Value Strength dimensions (0–10)
+          {t("value.strength.title")}
         </p>
         <span className="font-mono text-sm tabular-nums">
           {preview.status === "COMPLETE" ? (
             <>
-              Preview <span className="font-semibold">{preview.score}</span>/100
+              {t("value.strength.preview")} <span className="font-semibold">{preview.score}</span>
+              {t("common.outOf100")}
             </>
           ) : (
-            <span className="text-tone-warning font-semibold">INCOMPLETE</span>
+            <span className="text-tone-warning font-semibold">{t("value.incomplete")}</span>
           )}
         </span>
       </div>
@@ -72,6 +73,7 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
         const value = dims[key];
         const status: FieldStatus =
           value === null ? "UNKNOWN" : ((provenance[key] as FieldStatus | undefined) ?? "USER");
+        const label = t(`labels.valueDimension.${key}`);
         return (
           <div key={key} className="grid grid-cols-[1fr_auto] items-center gap-3">
             <div>
@@ -79,10 +81,10 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="cursor-help text-xs font-medium underline decoration-dotted underline-offset-2">
-                      {VALUE_DIMENSION_LABELS[key]}
+                      {label}
                     </span>
                   </TooltipTrigger>
-                  <TooltipContent>{VALUE_DIMENSION_HELP[key]}</TooltipContent>
+                  <TooltipContent>{t(`labels.valueDimensionHelp.${key}`)}</TooltipContent>
                 </Tooltip>
                 <FieldStatusBadge status={status} />
               </div>
@@ -94,7 +96,7 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
                 disabled={value === null}
                 onChange={(e) => setDims({ ...dims, [key]: Number(e.target.value) })}
                 className="mt-1 w-full accent-current disabled:opacity-30"
-                aria-label={VALUE_DIMENSION_LABELS[key]}
+                aria-label={label}
               />
             </div>
             <div className="flex w-28 items-center justify-end gap-2">
@@ -104,7 +106,7 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
                   checked={value === null}
                   onCheckedChange={(c) => setDims({ ...dims, [key]: c ? null : 5 })}
                 />{" "}
-                unknown
+                {t("value.strength.unknown")}
               </label>
             </div>
           </div>
@@ -113,11 +115,13 @@ export function ValueStrengthEditor({ opportunity: o }: { opportunity: Opportuni
       <div className="flex items-center justify-between gap-3">
         <p className="text-muted-foreground text-xs">
           {preview.status === "INCOMPLETE"
-            ? `Needs validation: ${preview.missing.map((m) => VALUE_DIMENSION_LABELS[m]).join(", ")}. UNKNOWN is never estimated.`
-            : "Geometric mean: one weak dimension pulls the score down hard."}
+            ? t("value.strength.needsValidation", {
+                missing: preview.missing.map((m) => t(`labels.valueDimension.${m}`)).join(", "),
+              })
+            : t("value.strength.geometricMean")}
         </p>
         <Button size="sm" onClick={save} disabled={!dirty || saving}>
-          {saving && <Loader2 className="animate-spin" />} Save dimensions
+          {saving && <Loader2 className="animate-spin" />} {t("value.strength.save")}
         </Button>
       </div>
     </div>

@@ -30,11 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GraphExperiment, OpportunityWithRelations, WorkspaceGraph } from "@/db/workspaces";
-import {
-  EXPERIMENT_OUTCOME_LABELS,
-  EXPERIMENT_OUTCOME_TONE,
-  ExperimentOutcome,
-} from "@/domain/enums";
+import { EXPERIMENT_OUTCOME_TONE, ExperimentOutcome } from "@/domain/enums";
+import { useLocale, useT } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 import { classifyOutcome } from "@/services/value/experiment-outcome";
 import {
@@ -72,6 +69,8 @@ export function ExperimentResultDialog({
   opportunity: OpportunityWithRelations;
   graph?: WorkspaceGraph;
 }) {
+  const t = useT();
+  const locale = useLocale();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<ExperimentCompletion | null>(null);
@@ -138,6 +137,7 @@ export function ExperimentResultDialog({
       organizationCount: validity.organizationCount || undefined,
       sampleSize: form.sampleSize || undefined,
     }),
+    locale,
   );
 
   const hasThresholds = exp.successThreshold !== null && exp.failureThreshold !== null;
@@ -153,16 +153,17 @@ export function ExperimentResultDialog({
   const effectiveOutcome: ExperimentOutcome | null =
     form.outcome === "INVALID" ? "INVALID" : decided ? decided.outcome : form.outcome || null;
 
-  const targets = useMemo(() => (graph ? claimTargetsFor(graph, o.id) : []), [graph, o.id]);
+  const targets = useMemo(() => (graph ? claimTargetsFor(graph, o.id, t) : []), [graph, o.id, t]);
   const extraTargets = targets.filter(
-    (t) => t.causalLinkId !== exp.causalLinkId && t.valueChainNodeId !== exp.valueChainNodeId,
+    (target) =>
+      target.causalLinkId !== exp.causalLinkId && target.valueChainNodeId !== exp.valueChainNodeId,
   );
-  const toggle = (t: ClaimTarget) =>
+  const toggle = (target: ClaimTarget) =>
     setClaims((c) => {
       const next = { ...c };
-      if (next[t.key]) delete next[t.key];
+      if (next[target.key]) delete next[target.key];
       else
-        next[t.key] =
+        next[target.key] =
           effectiveOutcome === "CONTRADICTED"
             ? "CONTRADICTS"
             : effectiveOutcome === "SUPPORTED"
@@ -196,13 +197,13 @@ export function ExperimentResultDialog({
       ...validityInputs,
       ...scope,
       claims: extraTargets
-        .filter((t) => claims[t.key])
-        .map((t) => ({
-          claimType: t.claimType,
+        .filter((target) => claims[target.key])
+        .map((target) => ({
+          claimType: target.claimType,
           opportunityId: o.id,
-          valueChainNodeId: t.valueChainNodeId,
-          causalLinkId: t.causalLinkId,
-          direction: claims[t.key],
+          valueChainNodeId: target.valueChainNodeId,
+          causalLinkId: target.causalLinkId,
+          direction: claims[target.key],
         })),
     });
     setSaving(false);
@@ -216,7 +217,12 @@ export function ExperimentResultDialog({
 
   const observedText =
     form.observedValue !== ""
-      ? `${form.observedMetric || "value"}: ${form.observedValue}${form.unit ? ` ${form.unit}` : ""}`
+      ? t("experiments.result.observedLine", {
+          metric: form.observedMetric || t("experiments.result.observedValueFallback"),
+          value: form.observedValue,
+          hasUnit: Boolean(form.unit),
+          unit: form.unit,
+        })
       : form.observedMetric || null;
 
   return (
@@ -231,11 +237,8 @@ export function ExperimentResultDialog({
         {done ? (
           <div className="space-y-4">
             <DialogHeader>
-              <DialogTitle>What the last test changed</DialogTitle>
-              <DialogDescription>
-                The result is now evidence (type EXPERIMENT) with its methodology and limitations.
-                Claims, the Proof Frontier, the scores and the verdict were recomputed.
-              </DialogDescription>
+              <DialogTitle>{t("experiments.result.doneTitle")}</DialogTitle>
+              <DialogDescription>{t("experiments.result.doneDescription")}</DialogDescription>
             </DialogHeader>
             <ValiditySummary
               assessment={done.validity.assessment}
@@ -256,28 +259,34 @@ export function ExperimentResultDialog({
               nextAction={done.nextAction?.what ?? null}
             />
             <DialogFooter>
-              <Button onClick={() => onOpenChange(false)}>Done</Button>
+              <Button onClick={() => onOpenChange(false)}>{t("common.done")}</Button>
             </DialogFooter>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <DialogHeader>
-              <DialogTitle>Record the result — {exp.title}</DialogTitle>
+              <DialogTitle>{t("experiments.result.title", { title: exp.title })}</DialogTitle>
               <DialogDescription>
-                Hypothesis: {exp.hypothesis}
-                {exp.decisionQuestion ? ` · Decision: ${exp.decisionQuestion}` : ""}
+                {exp.decisionQuestion
+                  ? t("experiments.result.hypothesisDecision", {
+                      hypothesis: exp.hypothesis,
+                      decision: exp.decisionQuestion,
+                    })
+                  : t("experiments.result.hypothesis", { hypothesis: exp.hypothesis })}
               </DialogDescription>
             </DialogHeader>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <L label="Observed metric">
+              <L label={t("experiments.result.field.observedMetric")}>
                 <Input
                   value={form.observedMetric}
                   onChange={(e) => set("observedMetric", e.target.value)}
-                  placeholder={exp.successMetric ?? "e.g. no-show rate"}
+                  placeholder={
+                    exp.successMetric ?? t("experiments.result.field.observedMetricPlaceholder")
+                  }
                 />
               </L>
-              <L label="Observed value">
+              <L label={t("experiments.result.field.observedValue")}>
                 <Input
                   type="number"
                   step="any"
@@ -285,10 +294,10 @@ export function ExperimentResultDialog({
                   onChange={(e) => set("observedValue", e.target.value)}
                 />
               </L>
-              <L label="Unit">
+              <L label={t("experiments.result.field.unit")}>
                 <Input value={form.unit} onChange={(e) => set("unit", e.target.value)} />
               </L>
-              <L label="Sample size">
+              <L label={t("experiments.result.field.sampleSize")}>
                 <Input
                   type="number"
                   min={0}
@@ -296,37 +305,44 @@ export function ExperimentResultDialog({
                   onChange={(e) => set("sampleSize", e.target.value)}
                 />
               </L>
-              <L label="Measurement period">
+              <L label={t("experiments.result.field.measurementPeriod")}>
                 <Input
                   value={form.measurementPeriod}
                   onChange={(e) => set("measurementPeriod", e.target.value)}
-                  placeholder="2 weeks, 5 salons"
+                  placeholder={t("experiments.result.field.measurementPeriodPlaceholder")}
                 />
               </L>
-              <L label="Entered by">
+              <L label={t("experiments.result.field.enteredBy")}>
                 <Input value={form.enteredBy} onChange={(e) => set("enteredBy", e.target.value)} />
               </L>
             </div>
 
             <div className="rounded-md border p-3">
-              <p className="text-[10px] font-semibold tracking-wider uppercase">Outcome</p>
+              <p className="text-[10px] font-semibold tracking-wider uppercase">
+                {t("experiments.result.outcome.title")}
+              </p>
               {hasThresholds ? (
                 <div className="mt-1 text-xs">
                   <p className="text-muted-foreground">
-                    Decided by the thresholds you configured (success {exp.successThreshold}
-                    {exp.unit ? ` ${exp.unit}` : ""}, failure {exp.failureThreshold}
-                    {exp.unit ? ` ${exp.unit}` : ""}). Enter the observed value.
+                    {t("experiments.result.outcome.byThresholds", {
+                      success: exp.successThreshold,
+                      failure: exp.failureThreshold,
+                      hasUnit: Boolean(exp.unit),
+                      unit: exp.unit ?? "",
+                    })}
                   </p>
                   <div className="mt-1 flex items-center gap-2">
                     {decided ? (
                       <>
                         <Badge variant={EXPERIMENT_OUTCOME_TONE[decided.outcome]}>
-                          {EXPERIMENT_OUTCOME_LABELS[decided.outcome]}
+                          {t(`labels.experimentOutcome.${decided.outcome}`)}
                         </Badge>
-                        <span className="text-muted-foreground">{decided.explanation}</span>
+                        <span className="text-muted-foreground">{t(decided.explanation)}</span>
                       </>
                     ) : (
-                      <span className="text-muted-foreground">Waiting for an observed value…</span>
+                      <span className="text-muted-foreground">
+                        {t("experiments.result.outcome.waiting")}
+                      </span>
                     )}
                   </div>
                   <label className="mt-2 flex items-center gap-2 text-xs">
@@ -334,14 +350,13 @@ export function ExperimentResultDialog({
                       checked={form.outcome === "INVALID"}
                       onCheckedChange={(v) => set("outcome", v ? "INVALID" : "")}
                     />
-                    Declare this run INVALID (cannot be trusted; produces no evidence)
+                    {t("experiments.result.outcome.declareInvalid")}
                   </label>
                 </div>
               ) : (
                 <div className="mt-1 space-y-1 text-xs">
                   <p className="text-muted-foreground">
-                    No deterministic threshold was configured, so you classify the outcome
-                    explicitly. Leave it empty to record it as INCONCLUSIVE.
+                    {t("experiments.result.outcome.noThreshold")}
                   </p>
                   <Select
                     value={form.outcome || "__none__"}
@@ -350,13 +365,17 @@ export function ExperimentResultDialog({
                     }
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="INCONCLUSIVE" />
+                      <SelectValue
+                        placeholder={t("experiments.result.outcome.inconclusivePlaceholder")}
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Inconclusive (default)</SelectItem>
+                      <SelectItem value="__none__">
+                        {t("experiments.result.outcome.inconclusiveDefault")}
+                      </SelectItem>
                       {Object.values(ExperimentOutcome).map((oc) => (
                         <SelectItem key={oc} value={oc}>
-                          {EXPERIMENT_OUTCOME_LABELS[oc]}
+                          {t(`labels.experimentOutcome.${oc}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -365,7 +384,7 @@ export function ExperimentResultDialog({
               )}
             </div>
 
-            <L label="Result summary (what happened, with numbers)">
+            <L label={t("experiments.result.field.resultSummary")}>
               <Textarea
                 rows={3}
                 value={form.resultSummary}
@@ -375,21 +394,21 @@ export function ExperimentResultDialog({
               />
             </L>
             <div className="grid gap-3 sm:grid-cols-3">
-              <L label="Limitations">
+              <L label={t("experiments.result.field.limitations")}>
                 <Textarea
                   rows={2}
                   value={form.limitations}
                   onChange={(e) => set("limitations", e.target.value)}
                 />
               </L>
-              <L label="Confounders">
+              <L label={t("experiments.result.field.confounders")}>
                 <Textarea
                   rows={2}
                   value={form.confounders}
                   onChange={(e) => set("confounders", e.target.value)}
                 />
               </L>
-              <L label="Anomalies">
+              <L label={t("experiments.result.field.anomalies")}>
                 <Textarea
                   rows={2}
                   value={form.anomalies}
@@ -400,34 +419,32 @@ export function ExperimentResultDialog({
 
             <div className="space-y-2 rounded-md border p-3">
               <p className="text-[10px] font-semibold tracking-wider uppercase">
-                Experimental validity — what actually happened
+                {t("experiments.result.validity.title")}
               </p>
               <p className="text-muted-foreground text-xs">
-                Record the facts of the run. The application derives the effective design level, the
-                internal validity and the wording of the conclusion; you cannot rewrite the
-                inference strength.
+                {t("experiments.result.validity.help")}
               </p>
               <ValidityChecklist fields={validity} onChange={setV} mode="result" idPrefix="res" />
               <div className="grid gap-3 sm:grid-cols-2">
-                <L label="Population observed">
+                <L label={t("experiments.result.field.population")}>
                   <Input
                     value={scope.scopePopulation}
                     onChange={(e) => setScope((f) => ({ ...f, scopePopulation: e.target.value }))}
                   />
                 </L>
-                <L label="Systems / configurations (comma-separated)">
+                <L label={t("experiments.plan.scope.systems")}>
                   <Input
                     value={scope.scopeSystems}
                     onChange={(e) => setScope((f) => ({ ...f, scopeSystems: e.target.value }))}
                   />
                 </L>
-                <L label="Environment / conditions">
+                <L label={t("experiments.plan.scope.environment")}>
                   <Input
                     value={scope.scopeEnvironment}
                     onChange={(e) => setScope((f) => ({ ...f, scopeEnvironment: e.target.value }))}
                   />
                 </L>
-                <L label="Time period">
+                <L label={t("experiments.plan.scope.timePeriod")}>
                   <Input
                     value={scope.scopeTimePeriod}
                     onChange={(e) => setScope((f) => ({ ...f, scopeTimePeriod: e.target.value }))}
@@ -440,11 +457,10 @@ export function ExperimentResultDialog({
             {effectiveOutcome !== "INVALID" && (
               <div className="space-y-2 rounded-md border p-3">
                 <p className="text-[10px] font-semibold tracking-wider uppercase">
-                  Evidence signals
+                  {t("experiments.result.signals.title")}
                 </p>
                 <p className="text-muted-foreground text-xs">
-                  The result is stored as evidence. Tick only what the run actually shows; the
-                  strength you give it is a judgement, labelled as yours.
+                  {t("experiments.result.signals.help")}
                 </p>
                 <div className="grid gap-1.5 sm:grid-cols-3">
                   <label className="flex items-center gap-2 text-xs">
@@ -452,25 +468,27 @@ export function ExperimentResultDialog({
                       checked={form.isDirectCustomer}
                       onCheckedChange={(v) => set("isDirectCustomer", Boolean(v))}
                     />{" "}
-                    Real customers involved
+                    {t("experiments.result.signals.directCustomer")}
                   </label>
                   <label className="flex items-center gap-2 text-xs">
                     <Checkbox
                       checked={form.hasEconomicImpact}
                       onCheckedChange={(v) => set("hasEconomicImpact", Boolean(v))}
                     />{" "}
-                    Quantifies economic impact
+                    {t("experiments.result.signals.economicImpact")}
                   </label>
                   <label className="flex items-center gap-2 text-xs">
                     <Checkbox
                       checked={form.hasPurchaseIntent}
                       onCheckedChange={(v) => set("hasPurchaseIntent", Boolean(v))}
                     />{" "}
-                    Shows purchase intent
+                    {t("experiments.result.signals.purchaseIntent")}
                   </label>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <L label={`Strength ${form.strengthScore}/10`}>
+                  <L
+                    label={t("experiments.result.signals.strength", { value: form.strengthScore })}
+                  >
                     <input
                       type="range"
                       min={0}
@@ -480,7 +498,11 @@ export function ExperimentResultDialog({
                       className="w-full accent-current"
                     />
                   </L>
-                  <L label={`Relevance ${form.relevanceScore}/10`}>
+                  <L
+                    label={t("experiments.result.signals.relevance", {
+                      value: form.relevanceScore,
+                    })}
+                  >
                     <input
                       type="range"
                       min={0}
@@ -494,28 +516,31 @@ export function ExperimentResultDialog({
                 {extraTargets.length > 0 && (
                   <div>
                     <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                      Other claims this result speaks to (optional)
+                      {t("experiments.result.signals.otherClaims")}
                     </p>
                     <ul className="mt-1 grid gap-1 sm:grid-cols-2">
-                      {extraTargets.map((t) => (
+                      {extraTargets.map((target) => (
                         <li
-                          key={t.key}
+                          key={target.key}
                           className={cn(
                             "flex items-start gap-2 rounded-md border px-2 py-1 text-xs",
-                            claims[t.key] && "border-foreground",
+                            claims[target.key] && "border-foreground",
                           )}
                         >
                           <Checkbox
                             className="mt-0.5"
-                            checked={Boolean(claims[t.key])}
-                            onCheckedChange={() => toggle(t)}
+                            checked={Boolean(claims[target.key])}
+                            onCheckedChange={() => toggle(target)}
                           />
                           <span className="min-w-0">
-                            <span className="font-medium">{t.label}</span>
-                            {claims[t.key] && (
+                            <span className="font-medium">{t(target.label)}</span>
+                            {claims[target.key] && (
                               <span className="text-muted-foreground">
                                 {" "}
-                                · {claims[t.key].toLowerCase()}
+                                ·{" "}
+                                {t("experiments.result.signals.direction", {
+                                  direction: claims[target.key],
+                                })}
                               </span>
                             )}
                           </span>
@@ -529,16 +554,16 @@ export function ExperimentResultDialog({
 
             <DialogFooter className="items-center sm:justify-between">
               <span className="text-muted-foreground text-[11px]">
-                {effectiveOutcome
-                  ? `Will be recorded as ${EXPERIMENT_OUTCOME_LABELS[effectiveOutcome]}.`
-                  : "Will be recorded as Inconclusive."}
+                {t("experiments.result.willRecord", {
+                  outcome: t(`labels.experimentOutcome.${effectiveOutcome ?? "INCONCLUSIVE"}`),
+                })}
               </span>
               <div className="flex gap-2">
                 <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" disabled={saving}>
-                  {saving && <Loader2 className="animate-spin" />} Record result
+                  {saving && <Loader2 className="animate-spin" />} {t("experiments.result.submit")}
                 </Button>
               </div>
             </DialogFooter>

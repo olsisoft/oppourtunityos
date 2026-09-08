@@ -9,10 +9,12 @@ import {
 import {
   causalLanguage,
   experimentInterpretation,
+  inferenceSentence,
   languageViolations,
 } from "@/services/value/language-gate";
 import { outcomeToDirection } from "@/services/value/experiment-outcome";
 import { assessClaim } from "@/services/value/epistemic";
+import { textOf } from "@/i18n/messages";
 import { claimInputs, item, NOW } from "../support/fit-helpers";
 
 describe("experimental design and internal validity", () => {
@@ -40,9 +42,12 @@ describe("experimental design and internal validity", () => {
       resolveDesignLevel("RANDOMIZED", { assignmentMethod: "RANDOM", comparisonGroup: true })
         .effective,
     ).toBe("RANDOMIZED");
-    expect(resolveDesignLevel("CONTROLLED", { comparisonGroup: false }).downgrades[0]).toMatch(
-      /no comparison group/,
+    const downgrade = resolveDesignLevel("CONTROLLED", { comparisonGroup: false }).downgrades[0];
+    expect(downgrade.text).toMatch(/no comparison group/);
+    expect(downgrade.text).toBe(
+      "Controlled declared, but no comparison group exists: treated as before / after.",
     );
+    expect(downgrade.key).toBe("validity.downgrade.noComparisonGroup");
   });
 
   it("assesses internal validity from threats: clean → HIGH, changed instrument → LOW, unknowns → INDETERMINATE", () => {
@@ -74,11 +79,17 @@ describe("experimental design and internal validity", () => {
       instrumentationChanged: true,
     });
     expect(changed.internalValidity).toBe("LOW");
-    expect(changed.threats.join(" ")).toMatch(/Instrumentation changed/);
+    expect(changed.threats.map(textOf).join(" ")).toMatch(/Instrumentation changed/);
+    expect(changed.checks.find((c) => c.key === "instrumentationChanged")?.label.text).toBe(
+      "Instrumentation changed",
+    );
 
     const unknown = assessInternalValidity("CONTROLLED", {});
     expect(unknown.internalValidity).toBe("INDETERMINATE");
     expect(unknown.unknowns.length).toBeGreaterThan(3);
+    expect(unknown.explanation.map(textOf).join(" ")).toMatch(
+      /Internal validity: Indeterminate — \d+ critical facts not recorded\./,
+    );
   });
 
   it("uncontrolled confounders are critical for comparative designs and moderate for before/after", () => {
@@ -103,9 +114,14 @@ describe("experimental design and internal validity", () => {
       dataCompletenessPercent: 90,
     });
     expect(beforeAfter.internalValidity).toBe("MEDIUM");
-    expect(beforeAfter.explanation.join(" ")).not.toMatch(/cannot establish/);
+    expect(beforeAfter.explanation.map(textOf).join(" ")).not.toMatch(/cannot establish/);
+    expect(beforeAfter.explanation[0].text).toBe("Design: Before / after.");
+    expect(beforeAfter.explanation[1].text).toBe("Internal validity: Medium — 1 moderate threat.");
+    expect(beforeAfter.checks.find((c) => c.key === "sampleSize")?.text.text).toBe(
+      "5 organizations.",
+    );
     const anecdotal = assessInternalValidity("ANECDOTAL", {});
-    expect(anecdotal.explanation.join(" ")).toMatch(/measure; they do not test/);
+    expect(anecdotal.explanation.map(textOf).join(" ")).toMatch(/measure; they do not test/);
   });
 
   it("an invalid run produces no evidence and an explicit interpretation", () => {
@@ -120,8 +136,9 @@ describe("experimental design and internal validity", () => {
       direction: "NEUTRAL",
       outcomeLabel: "INVALID",
     });
-    expect(r.sentence).toMatch(/invalid/i);
-    expect(r.sentence).not.toMatch(/caused/);
+    expect(r.sentence.text).toMatch(/invalid/i);
+    expect(r.sentence.text).not.toMatch(/caused/);
+    expect(r.sentence.key).toBe("validity.interpretation.invalid");
   });
 
   it("interview-only evidence cannot lift a causal claim past the low-fit cap", () => {
@@ -142,7 +159,7 @@ describe("experimental design and internal validity", () => {
     expect(a.status).toBe("UNPROVEN");
     expect(a.fitness.lowFitOnly).toBe(true);
     expect(a.designLevel).toBe("ANECDOTAL");
-    expect(a.inference).toMatch(/low fit|does not fit|not sufficient/);
+    expect(textOf(a.inference)).toMatch(/low fit|does not fit|not sufficient/);
   });
 });
 
@@ -154,19 +171,19 @@ describe("epistemic language gate", () => {
   };
 
   it("uses the wording the design level allows, never more", () => {
-    expect(causalLanguage({ ...base, designLevel: "ANECDOTAL" }).sentence).toMatch(
+    expect(causalLanguage({ ...base, designLevel: "ANECDOTAL" }).sentence.text).toMatch(
       /^Customers report/,
     );
-    expect(causalLanguage({ ...base, designLevel: "OBSERVATIONAL" }).sentence).toMatch(
-      /is associated with/,
+    expect(causalLanguage({ ...base, designLevel: "OBSERVATIONAL" }).sentence.text).toBe(
+      "Weekly reconciliation is associated with unrecorded services fell in 5 salons, 3 POS configurations, one month. Not established beyond this scope.",
     );
-    const ba = causalLanguage({ ...base, designLevel: "BEFORE_AFTER" }).sentence;
+    const ba = causalLanguage({ ...base, designLevel: "BEFORE_AFTER" }).sentence.text;
     expect(ba).toMatch(/changed after/);
     expect(ba).toMatch(/consistent with/);
-    const matched = causalLanguage({ ...base, designLevel: "MATCHED_COMPARISON" }).sentence;
+    const matched = causalLanguage({ ...base, designLevel: "MATCHED_COMPARISON" }).sentence.text;
     expect(matched).toMatch(/improved more than/);
     expect(matched).toMatch(/supports a causal effect/);
-    expect(causalLanguage({ ...base, designLevel: "CONTROLLED" }).sentence).toMatch(
+    expect(causalLanguage({ ...base, designLevel: "CONTROLLED" }).sentence.text).toMatch(
       /supports the conclusion that/,
     );
     const rct = causalLanguage({
@@ -174,24 +191,43 @@ describe("epistemic language gate", () => {
       designLevel: "RANDOMIZED",
       internalValidity: "HIGH",
     }).sentence;
-    expect(rct).toMatch(/caused/);
-    expect(rct).toMatch(/within the tested population/);
+    expect(rct.text).toMatch(/caused/);
+    expect(rct.text).toMatch(/within the tested population/);
+    expect(rct.key).toBe("validity.gate.sentence.RANDOMIZED.supports");
     for (const level of ["ANECDOTAL", "OBSERVATIONAL", "BEFORE_AFTER"] as const) {
-      const s = causalLanguage({ ...base, designLevel: level }).sentence;
+      const s = causalLanguage({ ...base, designLevel: level }).sentence.text;
       expect(s).not.toMatch(/\bcaused\b|\bproves\b/);
     }
   });
 
+  it("falls back to generic wording when the mechanism, outcome or scope is missing", () => {
+    const empty = causalLanguage({
+      designLevel: "CONTROLLED",
+      mechanism: "",
+      outcome: "",
+      scope: "  ",
+    }).sentence;
+    expect(empty.text).toBe(
+      "The controlled experiment supports the conclusion that the intervention causes the variable changed within the tested scope. Not established beyond this scope.",
+    );
+    const contradicted = causalLanguage({
+      ...base,
+      designLevel: "RANDOMIZED",
+      direction: "CONTRADICTS",
+    }).sentence.text;
+    expect(contradicted).toMatch(/did not cause/);
+  });
+
   it("never generalizes automatically and lowers the gate when validity is weak", () => {
     for (const level of ["ANECDOTAL", "BEFORE_AFTER", "CONTROLLED", "RANDOMIZED"] as const) {
-      expect(causalLanguage({ ...base, designLevel: level }).sentence).toMatch(
+      expect(causalLanguage({ ...base, designLevel: level }).sentence.text).toMatch(
         /Not established beyond this scope\.$/,
       );
     }
     const weak = causalLanguage({ ...base, designLevel: "RANDOMIZED", internalValidity: "LOW" });
     expect(weak.gatedLevel).toBe("BEFORE_AFTER");
-    expect(weak.sentence).not.toMatch(/caused/);
-    expect(weak.caveats[0]).toMatch(/low/);
+    expect(weak.sentence.text).not.toMatch(/caused/);
+    expect(weak.caveats[0].text).toMatch(/low/);
     const indeterminate = causalLanguage({
       ...base,
       designLevel: "CONTROLLED",
@@ -239,7 +275,84 @@ describe("epistemic language gate", () => {
     expect(
       designProofPreview("CUSTOMER_INTERVIEW", "ANECDOTAL", "ACTUAL_PURCHASE").target?.strength,
     ).toBe("CANNOT");
-    expect(feasibility.cannot.join(" ")).toMatch(/causes/);
-    expect(feasibility.note).toMatch(/never generalizes/);
+    expect(feasibility.cannot.map(textOf).join(" ")).toMatch(/causes/);
+    expect(feasibility.note.text).toMatch(/never generalizes/);
+    expect(feasibility.target?.statement.text).toBe("the mechanism is feasible");
+    expect(feasibilityForCausal.target?.reason.key).toBe("validity.preview.reason.notAdmissible");
+    expect(
+      designProofPreview("COHORT_OBSERVATION", "OBSERVATIONAL", "MECHANISM_CAUSES_CAPABILITY")
+        .target?.reason.text,
+    ).toBe("observational designs cannot establish causality.");
+  });
+
+  it("writes the claim inference from the status, the scope and the generalization", () => {
+    const observed = inferenceSentence({
+      claimType: "PAIN_EXISTS",
+      status: "OBSERVED",
+      scopeText: "5 salons",
+      generalization: "CASE_ONLY",
+    });
+    expect(observed.text).toBe(
+      "The pain exists: observed within 5 salons. One case; not established elsewhere.",
+    );
+    expect(
+      inferenceSentence({
+        claimType: "PAIN_EXISTS",
+        status: "OBSERVED",
+        generalization: "UNTESTED",
+      }).text,
+    ).toBe("The pain exists: observed within the observed scope.");
+    expect(
+      inferenceSentence({
+        claimType: "MECHANISM_CAUSES_CAPABILITY",
+        status: "STRONGLY_SUPPORTED",
+        scopeText: "5 salons",
+        designLevel: "CONTROLLED",
+        generalization: "SAMPLE_SUPPORTED",
+      }).text,
+    ).toBe(
+      "Evidence strongly supports that the mechanism causes the capability (5 salons), at controlled design strength. Nothing has measured it directly. Observed in a sample; not established for the market.",
+    );
+    expect(
+      inferenceSentence({ claimType: "PAIN_EXISTS", status: "SUPPORTED", bestFitBand: "LOW" }).text,
+    ).toMatch(/low fit/);
+    expect(inferenceSentence({ claimType: "PAIN_EXISTS", status: "HYPOTHESIS" }).text).toBe(
+      "Hypothesis: nothing tested whether the pain exists.",
+    );
+    expect(inferenceSentence({ claimType: "PAIN_EXISTS", status: "UNKNOWN" }).text).toBe(
+      "Not stated.",
+    );
+  });
+
+  it("interprets a non-causal result as an observation bound to its scope", () => {
+    const r = experimentInterpretation({
+      targetIsCausal: false,
+      designLevel: "OBSERVATIONAL",
+      internalValidity: "LOW",
+      mechanism: "the mechanism",
+      outcome: "Matched appointments: 97 %.",
+      scope: "5 salons",
+      direction: "SUPPORTS",
+      outcomeLabel: "SUPPORTED",
+    });
+    expect(r.sentence.text).toBe(
+      "Matched appointments: 97 % was observed in 5 salons. Internal validity is low: treat the observation with caution. Observed within this scope only; not established beyond it.",
+    );
+    expect(r.caveats.map(textOf)).toEqual([
+      "Internal validity is low: treat the observation with caution.",
+    ]);
+    const inconclusive = experimentInterpretation({
+      targetIsCausal: true,
+      designLevel: "CONTROLLED",
+      internalValidity: "HIGH",
+      mechanism: "the mechanism",
+      outcome: "Leakage fell by 2%",
+      scope: "5 salons",
+      direction: "NEUTRAL",
+      outcomeLabel: "INCONCLUSIVE",
+    });
+    expect(inconclusive.sentence.text).toBe(
+      "Inconclusive: leakage fell by 2% in 5 salons decides nothing either way. The claim stays where it was.",
+    );
   });
 });

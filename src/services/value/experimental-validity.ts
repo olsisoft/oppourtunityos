@@ -12,8 +12,9 @@ import type {
   ExperimentType,
   InternalValidity,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { admissibilityLevel } from "./admissibility";
-import { claimNature, CLAIM_STATEMENTS } from "./claim-taxonomy";
+import { claimNature } from "./claim-taxonomy";
 import { sourceTypeForExperiment } from "./evidence-sources";
 
 export const DESIGN_LEVELS: ExperimentDesignLevel[] = [
@@ -232,8 +233,17 @@ export function parseValidityInputs(value: unknown): ValidityInputs {
 export interface DesignResolution {
   declared: ExperimentDesignLevel;
   effective: ExperimentDesignLevel;
-  downgrades: string[];
+  /** "Randomized declared, but units were not randomly assigned: treated as controlled." */
+  downgrades: SystemMessage[];
 }
+
+type DowngradeReason =
+  | "noComparisonGroup"
+  | "notRandomlyAssigned"
+  | "singleGroup"
+  | "notMatched"
+  | "notIsolated"
+  | "noBaseline";
 
 /**
  * The design level a run actually achieved: the declared level, capped by
@@ -245,40 +255,46 @@ export function resolveDesignLevel(
   inputs: ValidityInputs,
 ): DesignResolution {
   let effective = declared;
-  const downgrades: string[] = [];
-  const cap = (level: ExperimentDesignLevel, reason: string) => {
+  const downgrades: SystemMessage[] = [];
+  const cap = (level: ExperimentDesignLevel, reason: DowngradeReason) => {
     if (designIndex(effective) > designIndex(level)) {
       downgrades.push(
-        `${DESIGN_LEVEL_LABELS[declared]} declared, but ${reason}: treated as ${DESIGN_LEVEL_LABELS[level].toLowerCase()}.`,
+        msg(`validity.downgrade.${reason}`, {
+          declared: msg(`labels.designLevel.${declared}`),
+          level: msg(`validity.designLevelLower.${level}`),
+        }),
       );
       effective = level;
     }
   };
-  if (inputs.comparisonGroup === false) cap("BEFORE_AFTER", "no comparison group exists");
+  if (inputs.comparisonGroup === false) cap("BEFORE_AFTER", "noComparisonGroup");
   if (inputs.assignmentMethod && inputs.assignmentMethod !== "RANDOM")
-    cap("CONTROLLED", "units were not randomly assigned");
-  if (inputs.assignmentMethod === "NONE") cap("BEFORE_AFTER", "there is a single group");
+    cap("CONTROLLED", "notRandomlyAssigned");
+  if (inputs.assignmentMethod === "NONE") cap("BEFORE_AFTER", "singleGroup");
   if (
     designIndex(effective) === designIndex("MATCHED_COMPARISON") &&
     inputs.assignmentMethod &&
     inputs.assignmentMethod !== "MATCHED" &&
     inputs.assignmentMethod !== "RANDOM"
   )
-    cap("BEFORE_AFTER", "comparison units were not matched");
+    cap("BEFORE_AFTER", "notMatched");
   if (inputs.interventionIsolated === false && designIndex(effective) >= designIndex("CONTROLLED"))
-    cap("MATCHED_COMPARISON", "the intervention was not isolated");
+    cap("MATCHED_COMPARISON", "notIsolated");
   if (inputs.baselineMeasured === false && designIndex(effective) === designIndex("BEFORE_AFTER"))
-    cap("OBSERVATIONAL", "no baseline was measured");
+    cap("OBSERVATIONAL", "noBaseline");
   return { declared, effective, downgrades };
 }
 
 export interface ValidityCheck {
+  /** The ValidityInputs field this check reads. */
   key: string;
-  label: string;
+  /** The field's label (`labels.validityInput.<key>`). */
+  label: SystemMessage;
   /** true = passed, false = threat, null = not recorded. */
   ok: boolean | null;
   severity: "critical" | "moderate" | "info";
-  text: string;
+  /** What was recorded and what it means for this run. */
+  text: SystemMessage;
 }
 
 export interface InternalValidityAssessment {
@@ -286,10 +302,12 @@ export interface InternalValidityAssessment {
   designEffective: ExperimentDesignLevel;
   internalValidity: InternalValidity;
   checks: ValidityCheck[];
-  threats: string[];
-  unknowns: string[];
-  downgrades: string[];
-  explanation: string[];
+  /** Texts of the failed critical and moderate checks. */
+  threats: SystemMessage[];
+  /** Labels of the unrecorded critical and moderate checks. */
+  unknowns: SystemMessage[];
+  downgrades: SystemMessage[];
+  explanation: SystemMessage[];
 }
 
 /**
@@ -308,170 +326,138 @@ export function assessInternalValidity(
   const comparative = designIndex(effective) >= designIndex("MATCHED_COMPARISON");
 
   const push = (
-    key: keyof ValidityInputs | string,
-    label: string,
+    key: keyof ValidityInputs,
     ok: boolean | null,
     severity: ValidityCheck["severity"],
-    text: string,
-  ) => checks.push({ key, label, ok, severity, text });
+    text: SystemMessage,
+  ) => checks.push({ key, label: msg(`labels.validityInput.${key}`), ok, severity, text });
+  /** ok / fail / unknown text of a boolean fact. */
+  const tri = (key: keyof ValidityInputs, state: boolean | null | undefined) =>
+    msg(`validity.check.${key}.${state === true ? "ok" : state === false ? "fail" : "unknown"}`);
 
   push(
     "baselineMeasured",
-    VALIDITY_INPUT_LABELS.baselineMeasured,
     inputs.baselineMeasured ?? null,
     causalDesign ? "critical" : "info",
-    inputs.baselineMeasured === true
-      ? "A baseline was measured before the intervention."
-      : inputs.baselineMeasured === false
-        ? "No baseline: a change cannot be shown without a starting point."
-        : "Baseline not recorded.",
+    tri("baselineMeasured", inputs.baselineMeasured),
   );
   push(
     "comparisonGroup",
-    VALIDITY_INPUT_LABELS.comparisonGroup,
     inputs.comparisonGroup ?? null,
     comparative ? "critical" : "info",
-    inputs.comparisonGroup === true
-      ? "A comparison group exists."
-      : inputs.comparisonGroup === false
-        ? "No comparison group: what would have happened without the intervention is unobserved."
-        : "Comparison group not recorded.",
+    tri("comparisonGroup", inputs.comparisonGroup),
   );
   push(
     "assignmentMethod",
-    VALIDITY_INPUT_LABELS.assignmentMethod,
     inputs.assignmentMethod
       ? inputs.assignmentMethod === "RANDOM" || inputs.assignmentMethod === "MATCHED"
       : null,
     comparative ? "moderate" : "info",
     inputs.assignmentMethod
-      ? `Assignment: ${ASSIGNMENT_METHOD_LABELS[inputs.assignmentMethod].toLowerCase()}.`
-      : "Assignment method not recorded.",
+      ? msg("validity.check.assignmentMethod.recorded", {
+          method: msg(`validity.assignmentMethodLower.${inputs.assignmentMethod}`),
+        })
+      : msg("validity.check.assignmentMethod.unknown"),
   );
   push(
     "sameMeasurement",
-    VALIDITY_INPUT_LABELS.sameMeasurement,
     inputs.sameMeasurement ?? null,
     "critical",
-    inputs.sameMeasurement === true
-      ? "The same measurement was used throughout."
-      : inputs.sameMeasurement === false
-        ? "The measurement changed: before and after are not comparable."
-        : "Measurement consistency not recorded.",
+    tri("sameMeasurement", inputs.sameMeasurement),
   );
   push(
     "interventionIsolated",
-    VALIDITY_INPUT_LABELS.interventionIsolated,
     inputs.interventionIsolated ?? null,
     causalDesign ? "critical" : "info",
-    inputs.interventionIsolated === true
-      ? "Only the intervention changed."
-      : inputs.interventionIsolated === false
-        ? "Other things changed with the intervention: the effect cannot be attributed to it."
-        : "Isolation of the intervention not recorded.",
+    tri("interventionIsolated", inputs.interventionIsolated),
   );
   push(
     "confoundersControlled",
-    VALIDITY_INPUT_LABELS.confoundersControlled,
     inputs.confoundersControlled ?? null,
     comparative ? "critical" : causalDesign ? "moderate" : "info",
-    inputs.confoundersControlled === true
-      ? "Known confounders were controlled."
-      : inputs.confoundersControlled === false
-        ? "Known confounders were not controlled."
-        : "Confounders not recorded.",
+    tri("confoundersControlled", inputs.confoundersControlled),
   );
   push(
     "attritionPercent",
-    VALIDITY_INPUT_LABELS.attritionPercent,
     inputs.attritionPercent == null ? null : inputs.attritionPercent <= 30,
     inputs.attritionPercent != null && inputs.attritionPercent > 30 ? "critical" : "moderate",
     inputs.attritionPercent == null
-      ? "Attrition not recorded."
-      : inputs.attritionPercent > 30
-        ? `Attrition ${inputs.attritionPercent}%: more than 30% of units were lost.`
-        : inputs.attritionPercent > 10
-          ? `Attrition ${inputs.attritionPercent}%.`
-          : `Attrition ${inputs.attritionPercent}%: negligible.`,
+      ? msg("validity.check.attritionPercent.unknown")
+      : msg(
+          `validity.check.attritionPercent.${
+            inputs.attritionPercent > 30
+              ? "high"
+              : inputs.attritionPercent > 10
+                ? "moderate"
+                : "negligible"
+          }`,
+          { percent: inputs.attritionPercent },
+        ),
   );
   push(
     "instrumentationChanged",
-    VALIDITY_INPUT_LABELS.instrumentationChanged,
     inputs.instrumentationChanged == null ? null : !inputs.instrumentationChanged,
     "critical",
-    inputs.instrumentationChanged === true
-      ? "Instrumentation changed during the run."
-      : inputs.instrumentationChanged === false
-        ? "Instrumentation unchanged."
-        : "Instrumentation not recorded.",
+    // ok = unchanged, fail = changed.
+    tri(
+      "instrumentationChanged",
+      inputs.instrumentationChanged == null ? null : !inputs.instrumentationChanged,
+    ),
   );
   const orgs = inputs.organizationCount ?? null;
   const n = inputs.sampleSize ?? null;
   push(
     "sampleSize",
-    VALIDITY_INPUT_LABELS.sampleSize,
     orgs != null ? orgs >= 3 : n != null ? n >= 5 : null,
     "moderate",
     orgs != null
-      ? `${orgs} organization${orgs === 1 ? "" : "s"}${orgs < 3 ? ": very small sample" : ""}.`
+      ? msg(`validity.check.sampleSize.${orgs < 3 ? "organizationsSmall" : "organizations"}`, {
+          count: orgs,
+        })
       : n != null
-        ? `n = ${n}${n < 5 ? ": very small sample" : ""}.`
-        : "Sample size not recorded.",
+        ? msg(`validity.check.sampleSize.${n < 5 ? "unitsSmall" : "units"}`, { count: n })
+        : msg("validity.check.sampleSize.unknown"),
   );
   push(
     "durationDays",
-    VALIDITY_INPUT_LABELS.durationDays,
     inputs.durationDays == null ? null : inputs.durationDays >= 14,
     "moderate",
     inputs.durationDays == null
-      ? "Duration not recorded."
-      : inputs.durationDays < 14
-        ? `${inputs.durationDays} day${inputs.durationDays === 1 ? "" : "s"}: short period.`
-        : `${inputs.durationDays} days.`,
+      ? msg("validity.check.durationDays.unknown")
+      : msg(`validity.check.durationDays.${inputs.durationDays < 14 ? "short" : "ok"}`, {
+          count: inputs.durationDays,
+        }),
   );
   push(
     "dataCompletenessPercent",
-    VALIDITY_INPUT_LABELS.dataCompletenessPercent,
     inputs.dataCompletenessPercent == null ? null : inputs.dataCompletenessPercent >= 85,
     inputs.dataCompletenessPercent != null && inputs.dataCompletenessPercent < 60
       ? "critical"
       : "moderate",
     inputs.dataCompletenessPercent == null
-      ? "Data completeness not recorded."
-      : `${inputs.dataCompletenessPercent}% of expected data present.`,
+      ? msg("validity.check.dataCompletenessPercent.unknown")
+      : msg("validity.check.dataCompletenessPercent.recorded", {
+          percent: inputs.dataCompletenessPercent,
+        }),
   );
+  // Risk flags: ok = no risk, fail = risk present.
   push(
     "contaminationRisk",
-    VALIDITY_INPUT_LABELS.contaminationRisk,
     inputs.contaminationRisk == null ? null : !inputs.contaminationRisk,
     comparative ? "critical" : "moderate",
-    inputs.contaminationRisk === true
-      ? "Comparison units may have been exposed to the intervention."
-      : inputs.contaminationRisk === false
-        ? "No contamination between groups."
-        : "Contamination not recorded.",
+    tri("contaminationRisk", inputs.contaminationRisk == null ? null : !inputs.contaminationRisk),
   );
   push(
     "seasonalityRisk",
-    VALIDITY_INPUT_LABELS.seasonalityRisk,
     inputs.seasonalityRisk == null ? null : !inputs.seasonalityRisk,
     "moderate",
-    inputs.seasonalityRisk === true
-      ? "Seasonality may explain part of the change."
-      : inputs.seasonalityRisk === false
-        ? "No seasonality effect expected."
-        : "Seasonality not recorded.",
+    tri("seasonalityRisk", inputs.seasonalityRisk == null ? null : !inputs.seasonalityRisk),
   );
   push(
     "concurrentChanges",
-    VALIDITY_INPUT_LABELS.concurrentChanges,
     inputs.concurrentChanges == null ? null : !inputs.concurrentChanges,
     "moderate",
-    inputs.concurrentChanges === true
-      ? "Other changes happened during the run."
-      : inputs.concurrentChanges === false
-        ? "No concurrent changes."
-        : "Concurrent changes not recorded.",
+    tri("concurrentChanges", inputs.concurrentChanges == null ? null : !inputs.concurrentChanges),
   );
 
   const criticalFails = checks.filter((c) => c.ok === false && c.severity === "critical");
@@ -486,21 +472,38 @@ export function assessInternalValidity(
 
   const threats = [...criticalFails, ...moderateFails].map((c) => c.text);
   const unknowns = checks.filter((c) => c.ok === null && c.severity !== "info").map((c) => c.label);
-  const explanation = [
-    `Design: ${DESIGN_LEVEL_LABELS[effective]}${effective !== declared ? ` (declared ${DESIGN_LEVEL_LABELS[declared].toLowerCase()})` : ""}.`,
-    `Internal validity: ${INTERNAL_VALIDITY_LABELS[internalValidity]} — ${
-      criticalFails.length
-        ? `${criticalFails.length} critical threat${criticalFails.length === 1 ? "" : "s"}`
-        : criticalUnknown.length >= 3
-          ? `${criticalUnknown.length} critical facts not recorded`
-          : moderateFails.length
-            ? `${moderateFails.length} moderate threat${moderateFails.length === 1 ? "" : "s"}`
-            : "no recorded threats"
-    }.`,
+  const validityLabel = msg(`labels.internalValidity.${internalValidity}`);
+  const explanation: SystemMessage[] = [
+    effective !== declared
+      ? msg("validity.explanation.designDeclared", {
+          level: msg(`labels.designLevel.${effective}`),
+          declared: msg(`validity.designLevelLower.${declared}`),
+        })
+      : msg("validity.explanation.design", { level: msg(`labels.designLevel.${effective}`) }),
+    criticalFails.length
+      ? msg("validity.explanation.validityCriticalThreats", {
+          validity: validityLabel,
+          count: criticalFails.length,
+        })
+      : criticalUnknown.length >= 3
+        ? msg("validity.explanation.validityCriticalUnknown", {
+            validity: validityLabel,
+            count: criticalUnknown.length,
+          })
+        : moderateFails.length
+          ? msg("validity.explanation.validityModerateThreats", {
+              validity: validityLabel,
+              count: moderateFails.length,
+            })
+          : msg("validity.explanation.validityNoThreats", { validity: validityLabel }),
     ...downgrades,
     ...(causalDesign
       ? []
-      : [`${DESIGN_LEVEL_LABELS[effective]} designs measure; they do not test what causes what.`]),
+      : [
+          msg("validity.explanation.measuresOnly", {
+            level: msg(`labels.designLevel.${effective}`),
+          }),
+        ]),
   ];
   return {
     designDeclared: declared,
@@ -519,70 +522,52 @@ export type ProofStrength = "STRONGLY" | "PARTIALLY" | "CANNOT";
 export interface DesignProofPreview {
   target: {
     claimType: ClaimType;
-    statement: string;
+    /** The claim statement (`labels.claimStatement.<type>`). */
+    statement: SystemMessage;
     strength: ProofStrength;
-    reason: string;
+    /** Why the design can, partially can or cannot establish the target claim. */
+    reason: SystemMessage;
   } | null;
-  strongly: string[];
-  partially: string[];
-  cannot: string[];
-  note: string;
+  strongly: SystemMessage[];
+  partially: SystemMessage[];
+  cannot: SystemMessage[];
+  note: SystemMessage;
 }
 
+/** Dictionary keys under `validity.preview.<level>.<bucket>`. */
 const PREVIEW: Record<
   ExperimentDesignLevel,
   { strongly: string[]; partially: string[]; cannot: string[] }
 > = {
   ANECDOTAL: {
-    strongly: [
-      "That a pain exists and how customers describe it",
-      "Stated intent and stated willingness to pay",
-    ],
-    partially: ["Current state and alternatives, as reported"],
-    cannot: ["Magnitude or frequency", "That the mechanism changes anything", "Actual purchase"],
+    strongly: ["painDescribed", "statedIntent"],
+    partially: ["reportedState"],
+    cannot: ["magnitude", "mechanismEffect", "actualPurchase"],
   },
   OBSERVATIONAL: {
-    strongly: [
-      "Frequency, magnitude and current state, as measured",
-      "Feasibility, when the observation is technical",
-    ],
-    partially: ["Association between the mechanism and the variable"],
-    cannot: ["That the mechanism causes the change", "Anything beyond the observed scope"],
+    strongly: ["measuredState", "technicalFeasibility"],
+    partially: ["association"],
+    cannot: ["causation", "beyondScope"],
   },
   BEFORE_AFTER: {
-    strongly: [
-      "Feasibility and capability within the tested scope",
-      "That the variable changed after the intervention",
-    ],
-    partially: ["A causal effect (consistent with, not proven)"],
-    cannot: ["Causality against confounders and time", "Generalization beyond the tested units"],
+    strongly: ["feasibilityInScope", "variableChanged"],
+    partially: ["causalConsistent"],
+    cannot: ["causalityConfounders", "generalizationUnits"],
   },
   MATCHED_COMPARISON: {
-    strongly: [
-      "Feasibility, capability and occurrence within scope",
-      "That treated units improved more than similar untreated units",
-    ],
-    partially: ["A causal effect within the tested scope"],
-    cannot: [
-      "Causality against unobserved differences between groups",
-      "Generalization beyond the segment",
-    ],
+    strongly: ["occurrenceInScope", "treatedImproved"],
+    partially: ["causalInScope"],
+    cannot: ["unobservedDifferences", "generalizationSegment"],
   },
   CONTROLLED: {
-    strongly: ["A causal effect of the mechanism within the tested scope"],
-    partially: ["The magnitude of the effect in other contexts"],
-    cannot: [
-      "Generalization to the whole market",
-      "Willingness to pay, unless the design charges money",
-    ],
+    strongly: ["causalInScope"],
+    partially: ["magnitudeElsewhere"],
+    cannot: ["generalizationMarket", "willingnessToPay"],
   },
   RANDOMIZED: {
-    strongly: ["A causal effect of the mechanism within the tested population"],
-    partially: ["The size of the effect elsewhere"],
-    cannot: [
-      "Generalization beyond the tested scope",
-      "Willingness to pay, unless the design charges money",
-    ],
+    strongly: ["causalInPopulation"],
+    partially: ["effectSizeElsewhere"],
+    cannot: ["generalizationScope", "willingnessToPay"],
   },
 };
 
@@ -593,41 +578,48 @@ export function designProofPreview(
   targetClaim?: ClaimType | null,
 ): DesignProofPreview {
   const base = PREVIEW[designLevel];
+  const list = (bucket: "strongly" | "partially" | "cannot") =>
+    base[bucket].map((name) => msg(`validity.preview.${designLevel}.${bucket}.${name}`));
   let target: DesignProofPreview["target"] = null;
   if (targetClaim) {
     const source = sourceTypeForExperiment(experimentType, designLevel);
     const level = admissibilityLevel(source, targetClaim);
     const causal = claimNature(targetClaim) === "CAUSAL";
     let strength: ProofStrength;
-    let reason: string;
+    let reason: SystemMessage;
     if (level === "NOT_ADMISSIBLE") {
       strength = "CANNOT";
-      reason = "this kind of result is not admissible evidence for the claim.";
+      reason = msg("validity.preview.reason.notAdmissible");
     } else if (causal && !designAtLeast(designLevel, "MATCHED_COMPARISON")) {
       strength = designAtLeast(designLevel, "BEFORE_AFTER") ? "PARTIALLY" : "CANNOT";
       reason =
         strength === "PARTIALLY"
-          ? "a before/after change is consistent with a causal effect but does not establish it."
-          : `${DESIGN_LEVEL_LABELS[designLevel].toLowerCase()} designs cannot establish causality.`;
+          ? msg("validity.preview.reason.beforeAfter")
+          : msg("validity.preview.reason.designCannotCausal", {
+              level: msg(`validity.designLevelLower.${designLevel}`),
+            });
     } else if (level === "HIGH") {
       strength = "STRONGLY";
-      reason = "the result is high-admissibility evidence for this claim within the tested scope.";
+      reason = msg("validity.preview.reason.high");
     } else if (level === "MEDIUM") {
       strength = "PARTIALLY";
-      reason =
-        "the result is medium-admissibility evidence: it supports the claim but cannot establish it alone.";
+      reason = msg("validity.preview.reason.medium");
     } else {
       strength = "CANNOT";
-      reason =
-        "the result is low-admissibility evidence for this claim: it can inform, not establish.";
+      reason = msg("validity.preview.reason.low");
     }
-    target = { claimType: targetClaim, statement: CLAIM_STATEMENTS[targetClaim], strength, reason };
+    target = {
+      claimType: targetClaim,
+      statement: msg(`labels.claimStatement.${targetClaim}`),
+      strength,
+      reason,
+    };
   }
   return {
     target,
-    strongly: base.strongly,
-    partially: base.partially,
-    cannot: base.cannot,
-    note: "Whatever the design, the result is observed within the tested scope only; it never generalizes automatically.",
+    strongly: list("strongly"),
+    partially: list("partially"),
+    cannot: list("cannot"),
+    note: msg("validity.preview.note"),
   };
 }

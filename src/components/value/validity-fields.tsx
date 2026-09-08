@@ -13,13 +13,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { AssignmentMethod, ExperimentDesignLevel } from "@/generated/prisma/enums";
+import { useT } from "@/i18n/client";
+import type { LocalizedText } from "@/i18n/messages";
 import { cn } from "@/lib/utils";
 import {
   ASSIGNMENT_METHOD_LABELS,
-  DESIGN_LEVEL_HELP,
-  DESIGN_LEVEL_LABELS,
   DESIGN_LEVELS,
-  INTERNAL_VALIDITY_LABELS,
   type InternalValidityAssessment,
   type ValidityInputs,
 } from "@/services/value/experimental-validity";
@@ -101,16 +100,17 @@ export function validityInputsFrom(f: ValidityFormFields): ValidityInputs {
   return out;
 }
 
+/** Tri-state checks: form field, dictionary key of its label, and when it is shown. */
 const TRI: Array<[keyof ValidityFormFields, string, "plan" | "both"]> = [
-  ["baselineMeasured", "Baseline measured before the intervention", "both"],
-  ["comparisonGroup", "A comparison group exists", "both"],
-  ["sameMeasurement", "Same measurement before and after", "both"],
-  ["interventionIsolated", "Only the intervention changed", "both"],
-  ["confoundersControlled", "Known confounders controlled", "both"],
-  ["instrumentationChanged", "Instrumentation changed during the run", "plan"],
-  ["contaminationRisk", "Comparison units exposed to the intervention", "plan"],
-  ["seasonalityRisk", "Seasonality could explain part of the change", "plan"],
-  ["concurrentChanges", "Other changes happened during the run", "plan"],
+  ["baselineMeasured", "experiments.validity.check.baselineMeasured", "both"],
+  ["comparisonGroup", "experiments.validity.check.comparisonGroup", "both"],
+  ["sameMeasurement", "experiments.validity.check.sameMeasurement", "both"],
+  ["interventionIsolated", "experiments.validity.check.interventionIsolated", "both"],
+  ["confoundersControlled", "experiments.validity.check.confoundersControlled", "both"],
+  ["instrumentationChanged", "experiments.validity.check.instrumentationChanged", "plan"],
+  ["contaminationRisk", "experiments.validity.check.contaminationRisk", "plan"],
+  ["seasonalityRisk", "experiments.validity.check.seasonalityRisk", "plan"],
+  ["concurrentChanges", "experiments.validity.check.concurrentChanges", "plan"],
 ];
 
 function TriSelect({
@@ -122,6 +122,7 @@ function TriSelect({
   value: TriState;
   onChange: (v: TriState) => void;
 }) {
+  const t = useT();
   return (
     <Select
       value={value || "__unknown__"}
@@ -131,9 +132,9 @@ function TriSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="__unknown__">not recorded</SelectItem>
-        <SelectItem value="yes">yes</SelectItem>
-        <SelectItem value="no">no</SelectItem>
+        <SelectItem value="__unknown__">{t("common.notRecorded")}</SelectItem>
+        <SelectItem value="yes">{t("experiments.validity.tri.yes")}</SelectItem>
+        <SelectItem value="no">{t("experiments.validity.tri.no")}</SelectItem>
       </SelectContent>
     </Select>
   );
@@ -154,13 +155,14 @@ export function ValidityChecklist({
   mode: "plan" | "result";
   idPrefix: string;
 }) {
+  const t = useT();
   const rows = TRI.filter(([, , when]) => when === "both" || mode === "result");
   return (
     <div className="space-y-2 text-xs">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-design`} className="text-xs">
-            Design level
+            {t("experiments.validity.designLevel")}
           </Label>
           <Select
             value={fields.designLevel}
@@ -172,16 +174,18 @@ export function ValidityChecklist({
             <SelectContent>
               {DESIGN_LEVELS.map((d) => (
                 <SelectItem key={d} value={d}>
-                  {DESIGN_LEVEL_LABELS[d]}
+                  {t(`labels.designLevel.${d}`)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground">{DESIGN_LEVEL_HELP[fields.designLevel]}</p>
+          <p className="text-muted-foreground">
+            {t(`labels.designLevelHelp.${fields.designLevel}`)}
+          </p>
         </div>
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-assignment`} className="text-xs">
-            Assignment method
+            {t("experiments.validity.assignmentMethod")}
           </Label>
           <Select
             value={fields.assignmentMethod || "__unknown__"}
@@ -190,13 +194,13 @@ export function ValidityChecklist({
             }
           >
             <SelectTrigger id={`${idPrefix}-assignment`} className="w-full">
-              <SelectValue placeholder="not recorded" />
+              <SelectValue placeholder={t("common.notRecorded")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__unknown__">not recorded</SelectItem>
+              <SelectItem value="__unknown__">{t("common.notRecorded")}</SelectItem>
               {(Object.keys(ASSIGNMENT_METHOD_LABELS) as AssignmentMethod[]).map((m) => (
                 <SelectItem key={m} value={m}>
-                  {ASSIGNMENT_METHOD_LABELS[m]}
+                  {t(`labels.assignmentMethod.${m}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -204,13 +208,13 @@ export function ValidityChecklist({
         </div>
       </div>
       <ul className="grid gap-1.5 sm:grid-cols-2">
-        {rows.map(([key, label]) => (
+        {rows.map(([key, labelKey]) => (
           <li
             key={key}
             className="flex items-center justify-between gap-2 rounded-md border px-2 py-1"
           >
             <Label htmlFor={`${idPrefix}-${key}`} className="text-xs font-normal">
-              {label}
+              {t(labelKey)}
             </Label>
             <TriSelect
               id={`${idPrefix}-${key}`}
@@ -223,7 +227,7 @@ export function ValidityChecklist({
       <div className={cn("grid gap-3", mode === "result" ? "sm:grid-cols-4" : "sm:grid-cols-2")}>
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-orgs`} className="text-xs">
-            Organizations
+            {t("experiments.validity.organizations")}
           </Label>
           <Input
             id={`${idPrefix}-orgs`}
@@ -235,7 +239,7 @@ export function ValidityChecklist({
         </div>
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-days`} className="text-xs">
-            Duration (days)
+            {t("experiments.validity.durationDays")}
           </Label>
           <Input
             id={`${idPrefix}-days`}
@@ -249,7 +253,7 @@ export function ValidityChecklist({
           <>
             <div className="space-y-1">
               <Label htmlFor={`${idPrefix}-attrition`} className="text-xs">
-                Attrition (%)
+                {t("experiments.validity.attrition")}
               </Label>
               <Input
                 id={`${idPrefix}-attrition`}
@@ -262,7 +266,7 @@ export function ValidityChecklist({
             </div>
             <div className="space-y-1">
               <Label htmlFor={`${idPrefix}-completeness`} className="text-xs">
-                Data completeness (%)
+                {t("experiments.validity.completeness")}
               </Label>
               <Input
                 id={`${idPrefix}-completeness`}
@@ -293,12 +297,13 @@ export function ValiditySummary({
     InternalValidityAssessment,
     "designDeclared" | "designEffective" | "internalValidity" | "checks" | "downgrades"
   >;
-  observed?: string | null;
-  interpretation?: string | null;
-  caveats?: string[];
-  scopeText?: string | null;
+  observed?: LocalizedText | null;
+  interpretation?: LocalizedText | null;
+  caveats?: LocalizedText[];
+  scopeText?: LocalizedText | null;
   compact?: boolean;
 }) {
+  const t = useT();
   const tone =
     assessment.internalValidity === "HIGH"
       ? "positive"
@@ -308,28 +313,38 @@ export function ValiditySummary({
           ? "negative"
           : "warning";
   const shown = compact ? assessment.checks.filter((c) => c.ok !== null) : assessment.checks;
+  const design = t(`labels.designLevel.${assessment.designEffective}`);
   return (
     <div className="space-y-2 rounded-md border p-3 text-xs">
-      <p className="text-[10px] font-semibold tracking-wider uppercase">Experimental validity</p>
+      <p className="text-[10px] font-semibold tracking-wider uppercase">
+        {t("experiments.validity.summary.title")}
+      </p>
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline" className="font-mono text-[10px]">
-          design · {DESIGN_LEVEL_LABELS[assessment.designEffective]}
           {assessment.designEffective !== assessment.designDeclared
-            ? ` (declared ${DESIGN_LEVEL_LABELS[assessment.designDeclared].toLowerCase()})`
-            : ""}
+            ? t("experiments.validity.summary.designDeclared", {
+                design,
+                declared: t(`labels.designLevel.${assessment.designDeclared}`).toLowerCase(),
+              })
+            : t("experiments.validity.summary.design", { design })}
         </Badge>
         <Badge variant={tone} className="font-mono text-[10px]">
-          internal validity · {INTERNAL_VALIDITY_LABELS[assessment.internalValidity]}
+          {t("experiments.validity.summary.internalValidity", {
+            validity: t(`labels.internalValidity.${assessment.internalValidity}`),
+          })}
         </Badge>
       </div>
       {scopeText && (
         <p className="text-muted-foreground break-words">
-          <span className="font-mono text-[10px] uppercase">Scope</span> {scopeText}
+          <span className="font-mono text-[10px] uppercase">
+            {t("experiments.validity.summary.scope")}
+          </span>{" "}
+          {t(scopeText)}
         </p>
       )}
       {assessment.downgrades.map((d) => (
-        <p key={d} className="text-tone-warning flex items-start gap-1.5">
-          <AlertTriangle className="mt-0.5 size-3 shrink-0" /> {d}
+        <p key={t(d)} className="text-tone-warning flex items-start gap-1.5">
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" /> {t(d)}
         </p>
       ))}
       <ul className={cn("grid gap-x-3 gap-y-0.5", compact ? "" : "sm:grid-cols-2")}>
@@ -347,33 +362,32 @@ export function ValiditySummary({
             ) : (
               <Minus className="text-muted-foreground mt-0.5 size-3 shrink-0" />
             )}
-            <span className={c.ok === null ? "text-muted-foreground" : ""}>{c.text}</span>
+            <span className={c.ok === null ? "text-muted-foreground" : ""}>{t(c.text)}</span>
           </li>
         ))}
       </ul>
       {observed && (
         <p>
-          <span className="text-muted-foreground font-mono text-[10px] uppercase">Observed</span>{" "}
-          {observed}
+          <span className="text-muted-foreground font-mono text-[10px] uppercase">
+            {t("experiments.validity.summary.observed")}
+          </span>{" "}
+          {t(observed)}
         </p>
       )}
       {interpretation && (
         <p className="bg-muted/60 rounded px-2 py-1.5">
           <span className="text-muted-foreground font-mono text-[10px] uppercase">
-            System interpretation
+            {t("experiments.validity.summary.interpretation")}
           </span>{" "}
-          {interpretation}
+          {t(interpretation)}
         </p>
       )}
       {caveats?.map((c) => (
-        <p key={c} className="text-muted-foreground">
-          {c}
+        <p key={t(c)} className="text-muted-foreground">
+          {t(c)}
         </p>
       ))}
-      <p className="text-muted-foreground">
-        The wording follows the design and its validity, never the hoped-for outcome. You cannot
-        rewrite the inference strength; you can record more facts about the run.
-      </p>
+      <p className="text-muted-foreground">{t("experiments.validity.summary.footer")}</p>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import type {
   EvidenceAdmissibility,
   EvidenceSourceType,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { CLAIM_TYPES } from "./claim-taxonomy";
 import { SOURCE_TYPES, sourceFamily, type EvidenceSourceFamily } from "./evidence-sources";
 
@@ -538,7 +539,8 @@ export interface AdmissibilityResult {
   ruleSource: AdmissibilityRuleSource;
   family: EvidenceSourceFamily;
   version: string;
-  explanation: string;
+  /** Which rule of the matrix applied ("Low: family rule (self-reported sources) …"). */
+  explanation: SystemMessage;
 }
 
 export const ADMISSIBILITY_LABELS: Record<EvidenceAdmissibility, string> = {
@@ -579,7 +581,9 @@ export function admissibility(
       ruleSource: "family",
       family,
       version: ADMISSIBILITY_VERSION,
-      explanation: `${ADMISSIBILITY_LABELS[level]}: a source of unknown provenance cannot be more than low-admissibility evidence.`,
+      explanation: msg("validity.admissibility.explanation.unknownProvenance", {
+        level: msg(`labels.admissibility.${level}`),
+      }),
     };
   }
   const source = r.sources[sourceType];
@@ -589,7 +593,10 @@ export function admissibility(
       ruleSource: "source",
       family,
       version: ADMISSIBILITY_VERSION,
-      explanation: `${ADMISSIBILITY_LABELS[source]}: source-specific rule for this claim type (matrix ${ADMISSIBILITY_VERSION}).`,
+      explanation: msg("validity.admissibility.explanation.source", {
+        level: msg(`labels.admissibility.${source}`),
+        version: ADMISSIBILITY_VERSION,
+      }),
     };
   }
   const fam = r.families[family];
@@ -599,7 +606,10 @@ export function admissibility(
       ruleSource: "family",
       family,
       version: ADMISSIBILITY_VERSION,
-      explanation: `${ADMISSIBILITY_LABELS[fam]}: family rule (${family.toLowerCase().replace("_", "-")} sources) for this claim type.`,
+      explanation: msg("validity.admissibility.explanation.family", {
+        level: msg(`labels.admissibility.${fam}`),
+        family,
+      }),
     };
   }
   return {
@@ -607,7 +617,9 @@ export function admissibility(
     ruleSource: "default",
     family,
     version: ADMISSIBILITY_VERSION,
-    explanation: `${ADMISSIBILITY_LABELS[r.default]}: default for this claim type; no family or source rule applies.`,
+    explanation: msg("validity.admissibility.explanation.default", {
+      level: msg(`labels.admissibility.${r.default}`),
+    }),
   };
 }
 

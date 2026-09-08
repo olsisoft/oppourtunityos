@@ -17,6 +17,8 @@ import {
   validityInputsFromFields,
 } from "@/domain/schemas";
 import type { Prisma } from "@/generated/prisma/client";
+import { msg, type LocalizedText, type SystemMessage } from "@/i18n/messages";
+import { getT } from "@/i18n/server";
 import { claimTypeForLevel, claimTypeForLink } from "@/services/value/claim-taxonomy";
 import { sourceTypeForExperiment } from "@/services/value/evidence-sources";
 import {
@@ -52,7 +54,7 @@ import { safeAction, zodFieldErrors, type ActionResult } from "./shared";
 
 async function ownedOpportunity(userId: string, opportunityId: string) {
   const o = await prisma.opportunity.findUnique({ where: { id: opportunityId } });
-  if (!o) throw new Error("Opportunity not found");
+  if (!o) throw new Error((await getT())("validity.action.opportunityNotFound"));
   await assertWorkspaceAccess(userId, o.workspaceId);
   return o;
 }
@@ -71,7 +73,7 @@ export async function upsertValueChainNodeAction(
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
@@ -101,8 +103,9 @@ export async function upsertValueChainNodeAction(
 export async function deleteValueChainNodeAction(nodeId: string): Promise<ActionResult> {
   return safeAction("value.node_delete", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const node = await prisma.valueChainNode.findUnique({ where: { id: nodeId } });
-    if (!node) throw new Error("Node not found");
+    if (!node) throw new Error(t("validity.action.nodeNotFound"));
     const o = await ownedOpportunity(userId, node.opportunityId);
     await prisma.valueChainNode.delete({ where: { id: nodeId } });
     await recomputeOpportunity(o.id);
@@ -118,12 +121,13 @@ export async function upsertCausalLinkAction(
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
   return safeAction("value.link_upsert", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const o = await ownedOpportunity(userId, d.opportunityId);
     const [from, to] = await Promise.all([
       prisma.valueChainNode.findUnique({
@@ -133,8 +137,8 @@ export async function upsertCausalLinkAction(
         where: { opportunityId_level: { opportunityId: o.id, level: d.toLevel } },
       }),
     ]);
-    if (!from || !to) throw new Error("Both ladder levels must exist before linking them.");
-    if (from.id === to.id) throw new Error("A causal link needs two different levels.");
+    if (!from || !to) throw new Error(t("validity.action.ladderLevelsMustExist"));
+    if (from.id === to.id) throw new Error(t("validity.action.linkNeedsTwoLevels"));
     const link = await prisma.causalLink.upsert({
       where: { fromNodeId_toNodeId: { fromNodeId: from.id, toNodeId: to.id } },
       create: {
@@ -163,8 +167,9 @@ export async function upsertCausalLinkAction(
 export async function deleteCausalLinkAction(linkId: string): Promise<ActionResult> {
   return safeAction("value.link_delete", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const link = await prisma.causalLink.findUnique({ where: { id: linkId } });
-    if (!link) throw new Error("Link not found");
+    if (!link) throw new Error(t("validity.action.linkNotFound"));
     const o = await ownedOpportunity(userId, link.opportunityId);
     await prisma.causalLink.delete({ where: { id: linkId } });
     await recomputeOpportunity(o.id);
@@ -182,14 +187,15 @@ export async function linkEvidenceClaimAction(
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
   return safeAction("value.claim_link", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const evidence = await prisma.evidence.findUnique({ where: { id: d.evidenceId } });
-    if (!evidence) throw new Error("Evidence not found");
+    if (!evidence) throw new Error(t("validity.action.evidenceNotFound"));
     await assertWorkspaceAccess(userId, evidence.workspaceId);
 
     let opportunityId = d.opportunityId ?? null;
@@ -199,7 +205,7 @@ export async function linkEvidenceClaimAction(
         include: { opportunity: true },
       });
       if (!node || node.opportunity.workspaceId !== evidence.workspaceId)
-        throw new Error("Node not found in workspace");
+        throw new Error(t("validity.action.nodeNotInWorkspace"));
       opportunityId = node.opportunityId;
     }
     if (d.causalLinkId) {
@@ -208,14 +214,14 @@ export async function linkEvidenceClaimAction(
         include: { opportunity: true },
       });
       if (!link || link.opportunity.workspaceId !== evidence.workspaceId)
-        throw new Error("Link not found in workspace");
+        throw new Error(t("validity.action.linkNotInWorkspace"));
       opportunityId = link.opportunityId;
     }
     if (opportunityId) {
       const opp = await prisma.opportunity.findFirst({
         where: { id: opportunityId, workspaceId: evidence.workspaceId },
       });
-      if (!opp) throw new Error("Opportunity not found in workspace");
+      if (!opp) throw new Error(t("validity.action.opportunityNotInWorkspace"));
     }
 
     const existing = await prisma.evidenceClaimLink.findFirst({
@@ -260,11 +266,12 @@ export async function linkEvidenceClaimAction(
 export async function unlinkEvidenceClaimAction(claimLinkId: string): Promise<ActionResult> {
   return safeAction("value.claim_unlink", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const link = await prisma.evidenceClaimLink.findUnique({
       where: { id: claimLinkId },
       include: { evidence: true },
     });
-    if (!link) throw new Error("Link not found");
+    if (!link) throw new Error(t("validity.action.linkNotFound"));
     await assertWorkspaceAccess(userId, link.evidence.workspaceId);
     await prisma.evidenceClaimLink.delete({ where: { id: claimLinkId } });
     await recomputeOpportunitiesForEvidence(link.evidenceId);
@@ -280,7 +287,7 @@ export async function updateValueDimensionsAction(input: unknown): Promise<Actio
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
@@ -321,17 +328,18 @@ export async function updateVariableValueFieldsAction(input: unknown): Promise<A
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const { variableId, ...fields } = parsed.data;
   return safeAction("variable.value_fields_update", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const variable = await prisma.variable.findUnique({
       where: { id: variableId },
       include: { icp: { include: { market: true } } },
     });
-    if (!variable) throw new Error("Variable not found");
+    if (!variable) throw new Error(t("validity.action.variableNotFound"));
     const workspaceId = variable.icp.market.workspaceId;
     await assertWorkspaceAccess(userId, workspaceId);
     if (fields.parentVariableId) {
@@ -339,7 +347,7 @@ export async function updateVariableValueFieldsAction(input: unknown): Promise<A
         where: { id: fields.parentVariableId, icp: { market: { workspaceId } } },
       });
       if (!parent || parent.id === variable.id)
-        throw new Error("Parent variable not found in workspace");
+        throw new Error(t("validity.action.parentVariableNotInWorkspace"));
     }
     const changed = (Object.keys(fields) as Array<keyof typeof fields>).filter(
       (k) => fields[k] !== undefined,
@@ -377,26 +385,27 @@ type ExperimentFields = Omit<
 >;
 
 async function verifyExperimentTargets(opportunityId: string, d: ExperimentFields) {
+  const t = await getT();
   if (d.causalLinkId) {
     const link = await prisma.causalLink.findFirst({
       where: { id: d.causalLinkId, opportunityId },
       select: { id: true },
     });
-    if (!link) throw new Error("Causal link not found on this opportunity");
+    if (!link) throw new Error(t("validity.action.causalLinkNotOnOpportunity"));
   }
   if (d.assumptionId) {
     const a = await prisma.assumption.findFirst({
       where: { id: d.assumptionId, opportunityId },
       select: { id: true },
     });
-    if (!a) throw new Error("Assumption not found on this opportunity");
+    if (!a) throw new Error(t("validity.action.assumptionNotOnOpportunity"));
   }
   if (d.valueChainNodeId) {
     const n = await prisma.valueChainNode.findFirst({
       where: { id: d.valueChainNodeId, opportunityId },
       select: { id: true },
     });
-    if (!n) throw new Error("Value chain level not found on this opportunity");
+    if (!n) throw new Error(t("validity.action.ladderLevelNotOnOpportunity"));
   }
 }
 
@@ -450,7 +459,7 @@ export async function createExperimentAction(
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
@@ -479,17 +488,18 @@ export async function updateExperimentAction(input: unknown): Promise<ActionResu
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
   return safeAction("experiment.update", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const exp = await prisma.experiment.findUnique({
       where: { id: d.experimentId },
       include: { opportunity: { select: { id: true, workspaceId: true } } },
     });
-    if (!exp) throw new Error("Experiment not found");
+    if (!exp) throw new Error(t("validity.action.experimentNotFound"));
     await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
     await verifyExperimentTargets(exp.opportunityId, d);
     const startedAt =
@@ -512,12 +522,15 @@ export async function updateExperimentAction(input: unknown): Promise<ActionResu
 }
 
 export interface ExperimentValiditySummary {
+  /** Checks, threats, unknowns, downgrades and explanation are SystemMessages. */
   assessment: InternalValidityAssessment;
-  /** System-generated, language-gated interpretation. */
-  interpretation: string;
+  /** System-generated, language-gated interpretation (also persisted as `interpretationMessage`). */
+  interpretation: SystemMessage;
   gatedLevel: InternalValidityAssessment["designEffective"];
-  caveats: string[];
+  caveats: SystemMessage[];
+  /** English phrases the wording must not use at the gated level (not translated). */
   forbidden: string[];
+  /** English rendering of the scope (`describeScope(scope)`); the UI re-renders from `scope`. */
   scopeText: string;
   observed: string | null;
 }
@@ -528,7 +541,8 @@ export interface ExperimentCompletion {
   evidenceId: string | null;
   outcome: "SUPPORTED" | "CONTRADICTED" | "INCONCLUSIVE" | "INVALID";
   outcomeSource: "THRESHOLD" | "USER";
-  outcomeExplanation: string;
+  /** How the outcome was decided; a SystemMessage here, a string when the threshold engine decided. */
+  outcomeExplanation: LocalizedText;
   validity: ExperimentValiditySummary;
   knowledgeChangeId: string | null;
   diff: KnowledgeDiff | null;
@@ -548,12 +562,13 @@ export async function completeExperimentAction(
   if (!parsed.success)
     return {
       ok: false,
-      error: "Check the fields.",
+      error: (await getT())("validity.action.checkFields"),
       fieldErrors: zodFieldErrors(parsed.error.issues),
     };
   const d = parsed.data;
   return safeAction("experiment.complete", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const exp = await prisma.experiment.findUnique({
       where: { id: d.experimentId },
       include: {
@@ -579,8 +594,8 @@ export async function completeExperimentAction(
         valueChainNode: { select: { id: true, level: true, statement: true } },
       },
     });
-    if (!exp) throw new Error("Experiment not found");
-    if (exp.resultRecord) throw new Error("This experiment already has a result");
+    if (!exp) throw new Error(t("validity.action.experimentNotFound"));
+    if (exp.resultRecord) throw new Error(t("validity.action.experimentHasResult"));
     await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
     const workspaceId = exp.opportunity.workspaceId;
 
@@ -598,14 +613,14 @@ export async function completeExperimentAction(
           ? decided.outcome
           : (d.outcome ?? "INCONCLUSIVE");
     const outcomeSource = d.outcome === "INVALID" ? "USER" : decided ? "THRESHOLD" : "USER";
-    const outcomeExplanation =
+    const outcomeExplanation: LocalizedText =
       d.outcome === "INVALID"
-        ? "Declared INVALID by you: the run cannot be trusted and produces no evidence."
+        ? msg("validity.complete.outcome.invalid")
         : decided
           ? decided.explanation
           : d.outcome
-            ? "No deterministic threshold could decide; classified explicitly by you."
-            : "No thresholds and no explicit classification: the result stays INCONCLUSIVE.";
+            ? msg("validity.complete.outcome.userClassified")
+            : msg("validity.complete.outcome.inconclusive");
 
     // 2. Raw evidence referenced must belong to the workspace.
     const rawEvidence = d.rawEvidenceIds.length
@@ -698,7 +713,8 @@ export async function completeExperimentAction(
             caveats: interpretation.caveats,
           }),
         ),
-        interpretation: interpretation.sentence,
+        interpretation: interpretation.sentence.text,
+        interpretationMessage: JSON.parse(JSON.stringify(interpretation.sentence)),
         scope: scope ? JSON.parse(JSON.stringify(scope)) : undefined,
         organizationCount: d.organizationCount ?? validityInputs.organizationCount ?? null,
         userCount: d.userCount ?? validityInputs.userCount ?? null,
@@ -724,7 +740,7 @@ export async function completeExperimentAction(
       const excerpt = [
         `EXPERIMENT RESULT (${outcome}, ${outcomeSource === "THRESHOLD" ? "decided by thresholds" : "classified by the user"}).`,
         observed,
-        interpretation.sentence,
+        interpretation.sentence.text,
         d.resultSummary,
         d.limitations ? `Limitations: ${d.limitations}` : null,
         d.confounders ? `Confounders: ${d.confounders}` : null,
@@ -902,11 +918,12 @@ async function refreshAssumptionFromLinks(assumptionId: string) {
 export async function deleteExperimentAction(experimentId: string): Promise<ActionResult> {
   return safeAction("experiment.delete", async () => {
     const userId = await requireUserId();
+    const t = await getT();
     const exp = await prisma.experiment.findUnique({
       where: { id: experimentId },
       include: { opportunity: { select: { id: true, workspaceId: true } } },
     });
-    if (!exp) throw new Error("Experiment not found");
+    if (!exp) throw new Error(t("validity.action.experimentNotFound"));
     await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
     // Evidence produced by the experiment is kept (it is external material now);
     // its experiment reference is nulled by the schema.

@@ -11,8 +11,9 @@ import type {
   GeneralizationStatus,
   InternalValidity,
 } from "@/generated/prisma/enums";
+import { msg, type SystemMessage } from "@/i18n/messages";
 import { claimNature, CLAIM_STATEMENTS } from "./claim-taxonomy";
-import { DESIGN_LEVEL_LABELS, designAtLeast } from "./experimental-validity";
+import { designAtLeast } from "./experimental-validity";
 
 export interface CausalLanguageInput {
   designLevel: ExperimentDesignLevel;
@@ -30,12 +31,16 @@ export interface CausalLanguageInput {
 export interface CausalLanguage {
   /** The level the wording was actually gated at (validity can lower it). */
   gatedLevel: ExperimentDesignLevel;
-  sentence: string;
-  /** Verbs and phrases allowed at this level. */
+  sentence: SystemMessage;
+  /**
+   * Verbs and phrases allowed at this level. English vocabulary by design:
+   * `languageViolations` matches these phrases against English text, so the
+   * lists are plain strings and are not translated.
+   */
   allowed: string[];
-  /** Phrases that must not be used at this level. */
+  /** Phrases that must not be used at this level (English, see `allowed`). */
   forbidden: string[];
-  caveats: string[];
+  caveats: SystemMessage[];
 }
 
 const ALLOWED: Record<ExperimentDesignLevel, string[]> = {
@@ -93,7 +98,7 @@ function lower(s: string): string {
 export function causalLanguage(input: CausalLanguageInput): CausalLanguage {
   const validity = input.internalValidity ?? null;
   let level = input.designLevel;
-  const caveats: string[] = [];
+  const caveats: SystemMessage[] = [];
   const order: ExperimentDesignLevel[] = [
     "ANECDOTAL",
     "OBSERVATIONAL",
@@ -102,63 +107,33 @@ export function causalLanguage(input: CausalLanguageInput): CausalLanguage {
     "CONTROLLED",
     "RANDOMIZED",
   ];
-  const lowerBy = (n: number, why: string) => {
+  const lowerBy = (n: number, why: SystemMessage) => {
     const i = Math.max(0, order.indexOf(level) - n);
     if (order[i] !== level) {
       caveats.push(why);
       level = order[i];
     }
   };
-  if (validity === "LOW")
-    lowerBy(3, "Internal validity is low: the wording is gated three levels down.");
-  else if (validity === "INDETERMINATE")
-    lowerBy(
-      1,
-      "Internal validity is indeterminate (critical facts not recorded): the wording is gated one level down.",
-    );
+  if (validity === "LOW") lowerBy(3, msg("validity.gate.caveat.low"));
+  else if (validity === "INDETERMINATE") lowerBy(1, msg("validity.gate.caveat.indeterminate"));
   else if (validity === "MEDIUM" && designAtLeast(level, "CONTROLLED"))
-    caveats.push("Internal validity is medium: the conclusion holds with recorded threats.");
+    caveats.push(msg("validity.gate.caveat.medium"));
 
-  const mech = lower(input.mechanism || "the intervention");
-  const out = lower(input.outcome || "the variable changed");
-  const scope = input.scope?.trim() || "the tested scope";
-  const contradicts = input.direction === "CONTRADICTS";
-  let sentence: string;
-  switch (level) {
-    case "ANECDOTAL":
-      sentence = contradicts
-        ? `Customers report that ${out} did not follow ${mech} (${scope}).`
-        : `Customers report that ${out} after ${mech} (${scope}).`;
-      break;
-    case "OBSERVATIONAL":
-      sentence = contradicts
-        ? `${cap(mech)} is not associated with ${out} in ${scope}.`
-        : `${cap(mech)} is associated with ${out} in ${scope}.`;
-      break;
-    case "BEFORE_AFTER":
-      sentence = contradicts
-        ? `${cap(out)} did not change after ${mech} in ${scope}; the observation does not support an effect.`
-        : `${cap(out)} changed after ${mech} in ${scope}; the observation is consistent with an effect, not proof of one.`;
-      break;
-    case "MATCHED_COMPARISON":
-      sentence = contradicts
-        ? `Treated units did not improve more than the matched comparison group in ${scope}; the evidence does not support a causal effect.`
-        : `Treated units improved more than the matched comparison group in ${scope}; the evidence supports a causal effect within this scope.`;
-      break;
-    case "CONTROLLED":
-      sentence = contradicts
-        ? `The controlled experiment does not support the conclusion that ${mech} causes ${out} in ${scope}.`
-        : `The controlled experiment supports the conclusion that ${mech} causes ${out} within ${scope}.`;
-      break;
-    default:
-      sentence = contradicts
-        ? `The randomized experiment shows that ${mech} did not cause ${out} within the tested population (${scope}).`
-        : `${cap(mech)} caused ${out} within the tested population (${scope}).`;
-  }
-  sentence += " Not established beyond this scope.";
+  // User content in lower case and with a capital first letter; the template
+  // of each level picks the form its sentence position needs.
+  const mech = input.mechanism ? lower(input.mechanism) : null;
+  const out = input.outcome ? lower(input.outcome) : null;
+  const params = {
+    mechanism: mech ?? msg("validity.gate.default.mechanism"),
+    mechanismCap: mech !== null ? cap(mech) : msg("validity.gate.default.mechanismCap"),
+    outcome: out ?? msg("validity.gate.default.outcome"),
+    outcomeCap: out !== null ? cap(out) : msg("validity.gate.default.outcomeCap"),
+    scope: input.scope?.trim() || msg("validity.gate.default.scope"),
+  };
+  const direction = input.direction === "CONTRADICTS" ? "contradicts" : "supports";
   return {
     gatedLevel: level,
-    sentence,
+    sentence: msg(`validity.gate.sentence.${level}.${direction}`, params),
     allowed: ALLOWED[level],
     forbidden: FORBIDDEN_BY_LEVEL[level],
     caveats,
@@ -211,48 +186,61 @@ export function inferenceSentence(params: {
   generalization?: GeneralizationStatus | null;
   bestFitBand?: "HIGH" | "MEDIUM" | "LOW" | "NONE" | null;
   designLevel?: ExperimentDesignLevel | null;
-}): string {
-  const what = CLAIM_STATEMENTS[params.claimType] ?? "the claim holds";
-  const scope = params.scopeText?.trim();
-  const inScope = scope ? ` within ${scope}` : " within the observed scope";
+}): SystemMessage {
+  const known = params.claimType in CLAIM_STATEMENTS;
+  const what = known
+    ? msg(`labels.claimStatement.${params.claimType}`)
+    : msg("validity.inference.defaultClaim");
+  const whatCap = known
+    ? msg(`validity.claimStatementCap.${params.claimType}`)
+    : msg("validity.inference.defaultClaimCap");
+  const scope = params.scopeText?.trim() || null;
   const gen = params.generalization ?? null;
-  const tail =
-    gen === "SEGMENT_SUPPORTED"
-      ? " Observed across enough independent cases to support the segment; not the whole market."
-      : gen === "SAMPLE_SUPPORTED"
-        ? " Observed in a sample; not established for the market."
-        : gen === "CASE_ONLY"
-          ? " One case; not established elsewhere."
-          : gen === "BROADER_HYPOTHESIS"
-            ? " The broader claim remains a hypothesis."
-            : gen === "CONTRADICTED_ACROSS_CONTEXTS"
-              ? " Contradicted in other contexts."
-              : "";
+  const tail = gen && gen !== "UNTESTED" ? msg(`validity.inference.tail.${gen}`) : null;
+  const common = {
+    what,
+    hasScope: scope !== null,
+    scope,
+    hasTail: tail !== null,
+    tail,
+  };
   const causal = claimNature(params.claimType) === "CAUSAL";
   switch (params.status) {
     case "OBSERVED":
-      return `${cap(what)}: observed${inScope}.${tail}`;
+      return msg("validity.inference.observed", { ...common, what: whatCap });
     case "STRONGLY_SUPPORTED":
-      return causal
-        ? `Evidence strongly supports that ${what}${scope ? ` (${scope})` : ""}${params.designLevel ? `, at ${DESIGN_LEVEL_LABELS[params.designLevel].toLowerCase()} design strength` : ""}. Nothing has measured it directly.${tail}`
-        : `Evidence strongly supports that ${what}${scope ? ` (${scope})` : ""}. Nothing has measured it directly.${tail}`;
+      return causal && params.designLevel
+        ? msg("validity.inference.stronglySupportedDesign", {
+            ...common,
+            level: msg(`validity.designLevelLower.${params.designLevel}`),
+          })
+        : msg("validity.inference.stronglySupported", common);
     case "SUPPORTED":
       return params.bestFitBand === "LOW"
-        ? `Relevant testimony, but weak evidence that ${what}: the linked evidence has low fit for this claim.`
-        : `Evidence supports that ${what}${scope ? ` (${scope})` : ""}; it does not establish it.${tail}`;
+        ? msg("validity.inference.supportedLowFit", { what })
+        : msg("validity.inference.supported", common);
     case "MIXED":
-      return `Mixed evidence: high-fit evidence both supports and contradicts that ${what}. Nothing can be concluded until the contradiction is resolved.`;
+      return msg("validity.inference.mixed", { what });
     case "CONTRADICTED":
-      return `Evidence contradicts that ${what}.`;
+      return msg("validity.inference.contradicted", { what });
     case "UNPROVEN":
       return params.bestFitBand === "LOW" || params.bestFitBand === "NONE"
-        ? `Stated, with evidence that does not fit the claim: nothing admissible establishes that ${what}.`
-        : `Stated; the linked evidence is not sufficient to establish that ${what}.`;
+        ? msg("validity.inference.unprovenLowFit", { what })
+        : msg("validity.inference.unproven", { what });
     case "HYPOTHESIS":
-      return `Hypothesis: nothing tested whether ${what}.`;
+      return msg("validity.inference.hypothesis", { what });
     default:
-      return "Not stated.";
+      return msg("validity.inference.notStated");
   }
+}
+
+export interface ExperimentInterpretation {
+  /** The system interpretation shown on the result; the user never edits it. */
+  sentence: SystemMessage;
+  gatedLevel: ExperimentDesignLevel;
+  caveats: SystemMessage[];
+  /** English phrases the wording must not use at this level (see CausalLanguage). */
+  forbidden: string[];
 }
 
 /**
@@ -269,15 +257,10 @@ export function experimentInterpretation(params: {
   scope: string;
   direction: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
   outcomeLabel: "SUPPORTED" | "CONTRADICTED" | "INCONCLUSIVE" | "INVALID";
-}): {
-  sentence: string;
-  gatedLevel: ExperimentDesignLevel;
-  caveats: string[];
-  forbidden: string[];
-} {
+}): ExperimentInterpretation {
   if (params.outcomeLabel === "INVALID") {
     return {
-      sentence: "The run was declared invalid: it cannot be trusted and establishes nothing.",
+      sentence: msg("validity.interpretation.invalid"),
       gatedLevel: params.designLevel,
       caveats: [],
       forbidden: FORBIDDEN_BY_LEVEL[params.designLevel],
@@ -285,7 +268,10 @@ export function experimentInterpretation(params: {
   }
   if (params.outcomeLabel === "INCONCLUSIVE") {
     return {
-      sentence: `Inconclusive: ${lower(params.outcome)} in ${params.scope} decides nothing either way. The claim stays where it was.`,
+      sentence: msg("validity.interpretation.inconclusive", {
+        outcome: lower(params.outcome),
+        scope: params.scope,
+      }),
       gatedLevel: params.designLevel,
       caveats: [],
       forbidden: FORBIDDEN_BY_LEVEL[params.designLevel],
@@ -307,20 +293,25 @@ export function experimentInterpretation(params: {
       forbidden: gate.forbidden,
     };
   }
-  const validityNote =
+  const note =
     params.internalValidity === "LOW"
-      ? " Internal validity is low: treat the observation with caution."
+      ? msg("validity.interpretation.caveat.low")
       : params.internalValidity === "INDETERMINATE"
-        ? " Internal validity is indeterminate: critical facts about the run were not recorded."
-        : "";
-  const sentence =
-    params.direction === "CONTRADICTS"
-      ? `${cap(lower(params.outcome))} was observed in ${params.scope}; it does not support the claim.${validityNote} Not established beyond this scope.`
-      : `${cap(lower(params.outcome))} was observed in ${params.scope}.${validityNote} Observed within this scope only; not established beyond it.`;
+        ? msg("validity.interpretation.caveat.indeterminate")
+        : null;
+  const sentence = msg(
+    `validity.interpretation.observed.${params.direction === "CONTRADICTS" ? "contradicts" : "supports"}`,
+    {
+      outcomeCap: cap(lower(params.outcome)),
+      scope: params.scope,
+      hasNote: note !== null,
+      note,
+    },
+  );
   return {
     sentence,
     gatedLevel: params.designLevel,
-    caveats: validityNote ? [validityNote.trim()] : [],
+    caveats: note ? [note] : [],
     forbidden: FORBIDDEN_BY_LEVEL[params.designLevel],
   };
 }

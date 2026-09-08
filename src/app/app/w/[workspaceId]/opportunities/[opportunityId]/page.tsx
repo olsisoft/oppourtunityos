@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -29,7 +30,7 @@ import { ReportLadder } from "@/components/value/report-ladder";
 import { Scorecard } from "@/components/value/scorecard";
 import { ValueStrengthEditor } from "@/components/value/value-strength-editor";
 import { assertWorkspaceAccess, getWorkspaceGraph } from "@/db/workspaces";
-import { ASSUMPTION_KIND_LABELS, CONFIDENCE_LABELS, VERDICT_DESCRIPTIONS } from "@/domain/enums";
+import { getT } from "@/i18n/server";
 import { ForbiddenError, requireUser } from "@/lib/session";
 import type { InterviewGuide } from "@/services/ai/schemas";
 import { buildOpportunityReport, reportToMarkdown } from "@/services/report/opportunity-report";
@@ -40,7 +41,11 @@ import {
   fieldStatus,
   polarityOf,
 } from "@/services/value/variable-semantics";
-import { VARIABLE_POLARITY_LABELS } from "@/domain/enums";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("report.meta.title") };
+}
 
 export default async function OpportunityReportPage({
   params,
@@ -55,6 +60,7 @@ export default async function OpportunityReportPage({
     if (error instanceof ForbiddenError) notFound();
     throw error;
   }
+  const t = await getT();
   const graph = await getWorkspaceGraph(workspaceId);
   const o = graph.opportunities.find((x) => x.id === opportunityId);
   if (!o) notFound();
@@ -68,12 +74,14 @@ export default async function OpportunityReportPage({
     mechanisms,
     insights.primaryAction,
     insights.primaryValueAction,
+    t,
   );
-  const markdown = reportToMarkdown(report);
+  const markdown = reportToMarkdown(report, t);
   const guide =
     (o.interviewGuide as unknown as (InterviewGuide & { source?: string }) | null) ?? null;
   const v = o.variable;
   const riskiest = insights.riskiestAssumption;
+  const polarity = v ? polarityOf(v.variableType, v.variablePolarity) : null;
 
   return (
     <div className="h-full scrollbar-thin overflow-y-auto">
@@ -88,11 +96,15 @@ export default async function OpportunityReportPage({
             <div className="flex flex-wrap items-center gap-2">
               <VerdictBadge verdict={o.verdict} />
               <ProvenanceBadge provenance={o.provenance} short={false} />
-              <Badge variant="outline">{CONFIDENCE_LABELS[o.confidence]} confidence</Badge>
+              <Badge variant="outline">
+                {t("report.page.confidence", {
+                  confidence: t(`labels.confidence.${o.confidence}`),
+                })}
+              </Badge>
             </div>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight">{o.title}</h1>
             <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
-              {VERDICT_DESCRIPTIONS[o.verdict]}
+              {t(`labels.verdictDescription.${o.verdict}`)}
             </p>
           </div>
           {/* K. Scorecard — four independent questions */}
@@ -105,18 +117,15 @@ export default async function OpportunityReportPage({
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <CardTitle>Opportunity report</CardTitle>
-                    <CardDescription>
-                      The artifact of this discovery. Hypotheses stay labelled; UNKNOWN is an honest
-                      answer. Each field of the valuable variable carries its own status.
-                    </CardDescription>
+                    <CardTitle>{t("report.page.title")}</CardTitle>
+                    <CardDescription>{t("report.page.description")}</CardDescription>
                   </div>
                   <CopyReportButton markdown={markdown} />
                 </div>
               </CardHeader>
               <CardContent className="grid gap-4 text-sm sm:grid-cols-2">
                 {/* A. ICP */}
-                <Section title="A · ICP" provenance={report.icp?.provenance}>
+                <Section title={t("report.page.section.icp")} provenance={report.icp?.provenance}>
                   {report.icp ? (
                     <>
                       <p className="font-medium">{report.icp.name}</p>
@@ -129,20 +138,28 @@ export default async function OpportunityReportPage({
                   )}
                 </Section>
                 {/* B. Valuable variable */}
-                <Section title="B · Valuable variable" provenance={report.variable?.provenance}>
+                <Section
+                  title={t("report.page.section.variable")}
+                  provenance={report.variable?.provenance}
+                >
                   {report.variable && v ? (
                     <>
                       <p className="font-medium">{compactLabel(v.desiredDirection, v.name)}</p>
                       <p className="text-muted-foreground text-xs">
-                        Action: {report.variable.direction} · Type:{" "}
-                        {v.variableType?.trim() ? v.variableType : "UNKNOWN"}
-                        {polarityOf(v.variableType, v.variablePolarity)
-                          ? ` (${VARIABLE_POLARITY_LABELS[polarityOf(v.variableType, v.variablePolarity)!].toLowerCase()})`
-                          : ""}
+                        {t("report.page.variable.actionType", {
+                          direction: report.variable.direction,
+                          type: v.variableType?.trim() ? v.variableType : "UNKNOWN",
+                          hasPolarity: Boolean(polarity),
+                          polarity: polarity
+                            ? t(`labels.variablePolarity.${polarity}`).toLowerCase()
+                            : "",
+                        })}
                       </p>
                       {v.parent && (
                         <p className="mt-1 text-xs">
-                          <span className="text-muted-foreground">Parent economic variable: </span>
+                          <span className="text-muted-foreground">
+                            {t("report.page.variable.parentLabel")}{" "}
+                          </span>
                           {directionGlyph(v.parentDirection ?? v.parent.desiredDirection)}{" "}
                           {v.parent.name}
                           <FieldStatusBadge
@@ -159,52 +176,52 @@ export default async function OpportunityReportPage({
                 {v && report.variableDetail && (
                   <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-3">
                     <VariableField
-                      label="Type"
+                      label={t("report.page.variable.field.type")}
                       f={report.variableDetail.variableType}
                       status={fieldStatus(v, "variableType")}
                     />
                     <VariableField
-                      label="Target"
+                      label={t("report.page.variable.field.target")}
                       f={report.variableDetail.target}
                       status={fieldStatus(v, "target")}
                     />
                     <VariableField
-                      label="Scope"
+                      label={t("report.page.variable.field.scope")}
                       f={report.variableDetail.scope}
                       status={fieldStatus(v, "scope")}
                     />
                     <VariableField
-                      label="Current state"
+                      label={t("report.page.variable.field.currentState")}
                       f={report.variableDetail.currentState}
                       status={fieldStatus(v, "currentState")}
                     />
                     <VariableField
-                      label="Desired state"
+                      label={t("report.page.variable.field.desiredState")}
                       f={report.variableDetail.desiredState}
                       status={fieldStatus(v, "desiredState")}
                     />
                     <VariableField
-                      label="Unit"
+                      label={t("report.page.variable.field.unit")}
                       f={report.variableDetail.unit}
                       status={fieldStatus(v, "unit")}
                     />
                     <VariableField
-                      label="Importance"
+                      label={t("report.page.variable.field.importance")}
                       f={report.variableDetail.importance}
                       status={fieldStatus(v, "importanceScore")}
                     />
                     <VariableField
-                      label="Parent economic variable"
+                      label={t("report.page.variable.field.parentVariable")}
                       f={report.variableDetail.parentVariable}
                       status={fieldStatus(v, "parentVariableId")}
                     />
                     <VariableField
-                      label="Who values it"
+                      label={t("report.page.variable.field.whoValuesIt")}
                       f={report.variableDetail.whoValuesIt}
                       status={fieldStatus(v, "whoValuesIt")}
                     />
                     <VariableField
-                      label="Why it matters"
+                      label={t("report.page.variable.field.whyItMatters")}
                       f={report.variableDetail.whyItMatters}
                       status={fieldStatus(v, "whyItMatters")}
                       className="sm:col-span-2"
@@ -212,15 +229,15 @@ export default async function OpportunityReportPage({
                   </div>
                 )}
                 {/* C. Pain */}
-                <Section title="C · Pain / economic consequence" className="sm:col-span-2">
+                <Section title={t("report.page.section.pain")} className="sm:col-span-2">
                   {report.economicPain}
                 </Section>
                 {/* D. Trigger */}
-                <Section title="D · Trigger" className="sm:col-span-2">
+                <Section title={t("report.page.section.trigger")} className="sm:col-span-2">
                   {report.trigger}
                 </Section>
                 {/* E. Alternatives */}
-                <Section title="E · Current alternatives" className="sm:col-span-2">
+                <Section title={t("report.page.section.alternatives")} className="sm:col-span-2">
                   {report.alternatives.length ? (
                     <ul className="space-y-1">
                       {report.alternatives.map((a) => (
@@ -230,7 +247,7 @@ export default async function OpportunityReportPage({
                             <span className="text-muted-foreground"> — {a.failure}</span>
                           </span>
                           <Badge variant="outline" className="shrink-0">
-                            weakness {a.weakness}/10
+                            {t("report.page.alternatives.weakness", { weakness: a.weakness })}
                           </Badge>
                         </li>
                       ))}
@@ -240,7 +257,7 @@ export default async function OpportunityReportPage({
                   )}
                 </Section>
                 {/* F. Mechanisms */}
-                <Section title="F · Mechanisms explored" className="sm:col-span-2">
+                <Section title={t("report.page.section.mechanisms")} className="sm:col-span-2">
                   {report.mechanisms.length ? (
                     <div className="flex flex-wrap gap-1.5">
                       {report.mechanisms.map((m) => (
@@ -251,17 +268,21 @@ export default async function OpportunityReportPage({
                     </div>
                   ) : (
                     <span className="text-muted-foreground">
-                      None explored yet. Problem ≠ product.
+                      {t("report.page.mechanisms.empty")}
                     </span>
                   )}
                 </Section>
                 {/* G. Product hypothesis · H. Value proposition */}
-                <Section title="G · Product hypothesis">{report.productHypothesis}</Section>
-                <Section title="H · Value proposition">{report.valueProposition}</Section>
-                <Section title="Metric that proves value" className="sm:col-span-2">
+                <Section title={t("report.page.section.productHypothesis")}>
+                  {report.productHypothesis}
+                </Section>
+                <Section title={t("report.page.section.valueProposition")}>
+                  {report.valueProposition}
+                </Section>
+                <Section title={t("report.page.section.metric")} className="sm:col-span-2">
                   {report.metric}
                 </Section>
-                <Section title="Risks" className="sm:col-span-2">
+                <Section title={t("report.page.section.risks")} className="sm:col-span-2">
                   {report.risks.length ? (
                     <ul className="list-disc space-y-0.5 pl-4">
                       {report.risks.map((r) => (
@@ -269,7 +290,7 @@ export default async function OpportunityReportPage({
                       ))}
                     </ul>
                   ) : (
-                    <span className="text-muted-foreground">None recorded.</span>
+                    <span className="text-muted-foreground">{t("report.page.risks.empty")}</span>
                   )}
                 </Section>
               </CardContent>
@@ -278,39 +299,41 @@ export default async function OpportunityReportPage({
             {/* I. Value causality ladder · J. Proof frontier */}
             <Card>
               <CardHeader>
-                <CardTitle>I · Value causality ladder</CardTitle>
-                <CardDescription>
-                  Mechanism → Capability → Transformation → Operational value → Economic value →
-                  Strategic outcome. Each level shows its epistemic status; each arrow is a testable
-                  causal assumption. Click to link evidence, add an assumption or plan an
-                  experiment.
-                </CardDescription>
+                <CardTitle>{t("report.page.section.ladder")}</CardTitle>
+                <CardDescription>{t("report.page.ladder.description")}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <ReportLadder opportunity={o} graph={graph} frontier={insights.frontier} />
                 <div className="bg-muted/40 rounded-md border border-dashed p-3 text-sm">
                   <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-                    J · Proof frontier
+                    {t("report.page.section.frontier")}
                   </p>
                   <p className="mt-1">{report.frontier.text}</p>
                   <p className="mt-1 text-xs">
-                    <span className="text-muted-foreground">Scope: </span>
-                    {report.frontier.scope}
-                    {report.frontier.generalization ? ` · ${report.frontier.generalization}` : ""}
+                    <span className="text-muted-foreground">
+                      {t("report.page.frontier.scopeLabel")}{" "}
+                    </span>
+                    {t("report.page.frontier.scopeLine", {
+                      scope: report.frontier.scope,
+                      hasGeneralization: Boolean(report.frontier.generalization),
+                      generalization: report.frontier.generalization,
+                    })}
                     <span className="text-muted-foreground">
                       {" "}
-                      — what was reached, and where it was observed.
+                      {t("report.page.frontier.scopeHint")}
                     </span>
                   </p>
                   <p className="mt-1 text-xs">
-                    <span className="text-muted-foreground">Why the frontier stops here: </span>
+                    <span className="text-muted-foreground">
+                      {t("report.page.frontier.whyStopsLabel")}{" "}
+                    </span>
                     {report.frontier.whyStops}
                   </p>
                   {insights.frontier?.blockedAt &&
                     (insights.frontier.blockedAt.blockers?.length ?? 0) > 1 && (
                       <ul className="text-muted-foreground mt-1 list-disc pl-4 text-xs">
                         {insights.frontier.blockedAt.blockers.slice(1).map((b) => (
-                          <li key={b.message}>{b.message}</li>
+                          <li key={t(b.message)}>{t(b.message)}</li>
                         ))}
                       </ul>
                     )}
@@ -321,33 +344,27 @@ export default async function OpportunityReportPage({
             {/* L. Riskiest assumption + ledger */}
             <Card>
               <CardHeader>
-                <CardTitle>L · Riskiest assumption</CardTitle>
+                <CardTitle>{t("report.page.section.riskiest")}</CardTitle>
                 <CardDescription>
-                  {insights.untestedAssumptions > 0
-                    ? `${insights.untestedAssumptions} assumption${insights.untestedAssumptions === 1 ? "" : "s"} remain untested. Causal and value assumptions rank first.`
-                    : "Link evidence to support or contradict each assumption."}
+                  {t("report.page.riskiest.description", { count: insights.untestedAssumptions })}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {riskiest ? (
                   <div className="rounded-md border p-3 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">{ASSUMPTION_KIND_LABELS[riskiest.kind]}</Badge>
+                      <Badge variant="outline">{t(`labels.assumptionKind.${riskiest.kind}`)}</Badge>
                       <span className="text-muted-foreground font-mono text-xs">
-                        importance {riskiest.importance}/10
+                        {t("report.page.riskiest.importance", { importance: riskiest.importance })}
                       </span>
                     </div>
                     <p className="mt-1 font-medium">{riskiest.statement}</p>
                     <p className="text-muted-foreground mt-1 text-xs">
-                      If this assumption is false, the opportunity collapses. It has not been
-                      tested.
+                      {t("report.page.riskiest.collapse")}
                     </p>
                   </div>
                 ) : (
-                  <p className="text-muted-foreground text-sm">
-                    No untested assumption recorded. Either everything is verified or nothing was
-                    written down.
-                  </p>
+                  <p className="text-muted-foreground text-sm">{t("report.page.riskiest.empty")}</p>
                 )}
                 <AssumptionLedger graph={graph} opportunityId={o.id} />
               </CardContent>
@@ -356,12 +373,8 @@ export default async function OpportunityReportPage({
             {report.commercial.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Commercial ladder</CardTitle>
-                  <CardDescription>
-                    Existing spend → purchase intent → stated willingness to pay → price acceptance
-                    → actual purchase. Each rung is its own claim with its own evidence; support for
-                    one rung never moves the rungs above it.
-                  </CardDescription>
+                  <CardTitle>{t("report.page.commercial.title")}</CardTitle>
+                  <CardDescription>{t("report.page.commercial.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ol className="flex flex-wrap items-center gap-2 text-sm">
@@ -370,10 +383,12 @@ export default async function OpportunityReportPage({
                         <span className="rounded-md border px-2 py-1">
                           <span className="font-medium">{c.label}</span>{" "}
                           <span className="text-muted-foreground font-mono text-[10px]">
-                            {c.status}
-                            {c.evidenceCount
-                              ? ` · ${c.evidenceCount} admissible · fit ${c.bestFit}`
-                              : ""}
+                            {t("report.page.commercial.rung", {
+                              status: c.status,
+                              hasEvidence: Boolean(c.evidenceCount),
+                              count: c.evidenceCount,
+                              fit: c.bestFit,
+                            })}
                           </span>
                         </span>
                         {i < report.commercial.length - 1 && (
@@ -388,12 +403,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Experiments</CardTitle>
-                <CardDescription>
-                  Assumption → experiment → result → evidence → knowledge update → frontier movement
-                  → verdict. Record a result and see exactly what it changed. Each result carries
-                  its design level, internal validity and a language-gated interpretation.
-                </CardDescription>
+                <CardTitle>{t("report.page.experiments.title")}</CardTitle>
+                <CardDescription>{t("report.page.experiments.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ExperimentsList
@@ -412,11 +423,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Learning history</CardTitle>
-                <CardDescription>
-                  How we came to believe what we believe: every change of a claim, a score, the
-                  Proof Frontier or the verdict, with what caused it.
-                </CardDescription>
+                <CardTitle>{t("report.page.learning.title")}</CardTitle>
+                <CardDescription>{t("report.page.learning.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <LearningHistory changes={o.knowledgeChanges} />
@@ -425,11 +433,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Interview guide</CardTitle>
-                <CardDescription>
-                  Generated when an opportunity is worth customer discovery. Save what you hear as
-                  evidence.
-                </CardDescription>
+                <CardTitle>{t("report.page.interview.title")}</CardTitle>
+                <CardDescription>{t("report.page.interview.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <InterviewGuideSection opportunityId={o.id} guide={guide} verdict={o.verdict} />
@@ -455,17 +460,20 @@ export default async function OpportunityReportPage({
             {insights.valueActions.length > 1 && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Then</CardTitle>
-                  <CardDescription>Lower-priority uncertainties, in order.</CardDescription>
+                  <CardTitle>{t("report.page.then.title")}</CardTitle>
+                  <CardDescription>{t("report.page.then.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ol className="space-y-2 text-sm">
                     {insights.valueActions.slice(1, 4).map((a) => (
-                      <li key={`${a.type}-${a.priority}-${a.what}`} className="flex gap-2">
+                      <li key={`${a.type}-${a.priority}-${t(a.what)}`} className="flex gap-2">
                         <span className="text-muted-foreground font-mono text-xs">
-                          {a.priority} · {a.priorityScore}
+                          {t("report.page.then.item", {
+                            priority: a.priority,
+                            score: a.priorityScore,
+                          })}
                         </span>
-                        <span>{a.what}</span>
+                        <span>{t(a.what)}</span>
                       </li>
                     ))}
                   </ol>
@@ -475,11 +483,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Why this verdict</CardTitle>
-                <CardDescription>
-                  Deterministic rules over the four scores and the frontier. The analyst never
-                  decides this.
-                </CardDescription>
+                <CardTitle>{t("report.page.verdict.title")}</CardTitle>
+                <CardDescription>{t("report.page.verdict.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <VerdictExplanation result={insights.verdictResult} />
@@ -489,7 +494,7 @@ export default async function OpportunityReportPage({
             {/* N. Kill criteria */}
             <Card>
               <CardHeader>
-                <CardTitle>N · Kill criteria</CardTitle>
+                <CardTitle>{t("report.page.section.killCriteria")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <KillCriteria warnings={insights.killWarnings} />
@@ -498,11 +503,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Why this Value Strength</CardTitle>
-                <CardDescription>
-                  Geometric mean of importance, magnitude, frequency, population and
-                  attributability. A missing dimension makes the score INCOMPLETE, never zero.
-                </CardDescription>
+                <CardTitle>{t("report.page.valueStrength.title")}</CardTitle>
+                <CardDescription>{t("report.page.valueStrength.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <ValueStrengthEditor opportunity={o} />
@@ -511,56 +513,44 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Why this Causal Confidence</CardTitle>
+                <CardTitle>{t("report.page.causal.title")}</CardTitle>
                 <CardDescription>
-                  The weakest critical causal link decides. A link with no evidence makes the score
-                  INCOMPLETE
-                  {insights.causal
-                    ? ` · ${insights.causal.completeness} chain links validated`
-                    : ""}
-                  {insights.causal?.blocking
-                    ? ` · blocked by ${insights.causal.blocking.label}`
-                    : ""}
-                  .
+                  {t("report.page.causal.description", {
+                    hasCompleteness: Boolean(insights.causal),
+                    completeness: insights.causal?.completeness,
+                    hasBlocking: Boolean(insights.causal?.blocking),
+                    blocking: insights.causal?.blocking ? t(insights.causal.blocking.label) : "",
+                  })}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-1 text-xs">
-                  {(
-                    insights.causal?.explanation ?? [
-                      "Not computed yet — state the value chain first.",
-                    ]
-                  ).map((l, i) => (
-                    <li key={i} className="text-muted-foreground">
-                      {l}
-                    </li>
-                  ))}
+                  {(insights.causal?.explanation ?? [t("report.page.causal.notComputed")]).map(
+                    (l, i) => (
+                      <li key={i} className="text-muted-foreground">
+                        {t(l)}
+                      </li>
+                    ),
+                  )}
                 </ul>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Why this Opportunity Potential</CardTitle>
-                <CardDescription>
-                  Importance 20% · Pain 20% · Frequency 15% · Gap 15% · Willingness to pay 20% ·
-                  Alternative weakness 10%
-                </CardDescription>
+                <CardTitle>{t("report.page.potential.title")}</CardTitle>
+                <CardDescription>{t("report.page.potential.description")}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <OpportunityScoreBreakdown result={insights.scoreBreakdown} />
                 <Tabs defaultValue="closed">
                   <TabsList>
-                    <TabsTrigger value="closed">Inputs</TabsTrigger>
-                    <TabsTrigger value="edit">Edit inputs</TabsTrigger>
+                    <TabsTrigger value="closed">{t("report.page.potential.inputs")}</TabsTrigger>
+                    <TabsTrigger value="edit">{t("report.page.potential.editInputs")}</TabsTrigger>
                   </TabsList>
                   <TabsContent value="closed">
                     <p className="text-muted-foreground text-xs">
-                      Inputs were{" "}
-                      {o.provenance === "USER"
-                        ? "set by you"
-                        : "proposed by the analyst (hypothesis)"}
-                      . Edit them to reflect what you actually know.
+                      {t("report.page.potential.inputsOrigin", { origin: o.provenance })}
                     </p>
                   </TabsContent>
                   <TabsContent value="edit">
@@ -582,11 +572,8 @@ export default async function OpportunityReportPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Why this Evidence Confidence</CardTitle>
-                <CardDescription>
-                  Direct customer 25 · Explicit pain 20 · Economic impact 20 · Workaround 10 ·
-                  Purchase intent 15 · Diversity 5 · Recency 5. Contradictions subtract.
-                </CardDescription>
+                <CardTitle>{t("report.page.evidenceConfidence.title")}</CardTitle>
+                <CardDescription>{t("report.page.evidenceConfidence.description")}</CardDescription>
               </CardHeader>
               <CardContent>
                 <EvidenceScoreBreakdown result={insights.evidenceBreakdown} />
@@ -597,11 +584,8 @@ export default async function OpportunityReportPage({
 
         <Card>
           <CardHeader>
-            <CardTitle>Evidence</CardTitle>
-            <CardDescription>
-              Items linked to this opportunity, its pain or one of its claims. Each item says which
-              claims it supports or contradicts; the engine decides what that proves.
-            </CardDescription>
+            <CardTitle>{t("report.page.evidence.title")}</CardTitle>
+            <CardDescription>{t("report.page.evidence.description")}</CardDescription>
           </CardHeader>
           <CardContent>
             <EvidencePanel

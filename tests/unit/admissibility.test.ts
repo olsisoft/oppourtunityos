@@ -89,7 +89,14 @@ describe("admissibility matrix", () => {
     const r = admissibility("INTERVIEW", "PAIN_EXISTS");
     expect(r.version).toBe(ADMISSIBILITY_VERSION);
     expect(["source", "family", "default"]).toContain(r.ruleSource);
-    expect(r.explanation).toMatch(/rule|default/);
+    expect(r.explanation.text).toMatch(/rule|default/);
+    expect(admissibility("INTERVIEW", "CAUSAL_EFFECT").explanation.text).toBe(
+      "Low: family rule (self-reported sources) for this claim type.",
+    );
+    expect(admissibility("AB_TEST", "CAUSAL_EFFECT").explanation.text).toBe(
+      `High: source-specific rule for this claim type (matrix ${ADMISSIBILITY_VERSION}).`,
+    );
+    expect(admissibility("OTHER", "PAIN_EXISTS").explanation.text).toMatch(/unknown provenance/);
   });
 
   it("unknown provenance and untyped claims never get a strong judgement", () => {

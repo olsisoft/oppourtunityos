@@ -1,5 +1,9 @@
+"use client";
+
 import { scoreTone } from "@/components/shared/score-pill";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useT } from "@/i18n/client";
+import type { LocalizedText } from "@/i18n/messages";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,23 +21,29 @@ export function ScoreTile({
   size = "md",
   className,
 }: {
-  label: string;
-  question: string;
+  label: LocalizedText;
+  question: LocalizedText;
   value: number | null;
-  lines: string[];
+  lines: LocalizedText[];
   /** e.g. "4/5" — shown next to INCOMPLETE. */
-  completeness?: string | null;
-  /** e.g. "Population affected" — shown under INCOMPLETE. */
-  missing?: string | null;
+  completeness?: LocalizedText | null;
+  /** e.g. "Population affected" (or a list of items) — shown under INCOMPLETE. */
+  missing?: LocalizedText | LocalizedText[] | null;
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
+  const t = useT();
+  const missingText = Array.isArray(missing)
+    ? missing.map((m) => t(m)).join(", ")
+    : missing
+      ? t(missing)
+      : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <div className={cn("cursor-help", className)}>
           <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-            {label}
+            {t(label)}
           </p>
           {value === null ? (
             <>
@@ -43,16 +53,16 @@ export function ScoreTile({
                   size === "lg" ? "text-xl" : size === "md" ? "text-sm" : "text-xs",
                 )}
               >
-                INCOMPLETE
+                {t("value.incomplete")}
                 {completeness ? (
-                  <span className="text-muted-foreground font-normal"> · {completeness}</span>
+                  <span className="text-muted-foreground font-normal"> · {t(completeness)}</span>
                 ) : null}
               </p>
-              {missing && (
+              {missingText && (
                 <p
                   className={cn("text-muted-foreground", size === "lg" ? "text-xs" : "text-[10px]")}
                 >
-                  Missing: {missing}
+                  {t("value.scorecard.missing", { missing: missingText })}
                 </p>
               )}
             </>
@@ -65,16 +75,18 @@ export function ScoreTile({
               )}
             >
               {value}
-              <span className="text-muted-foreground text-[0.6em] font-normal">/100</span>
+              <span className="text-muted-foreground text-[0.6em] font-normal">
+                {t("common.outOf100")}
+              </span>
             </p>
           )}
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm">
-        <p className="mb-1 font-medium">{question}</p>
+        <p className="mb-1 font-medium">{t(question)}</p>
         <ul className="space-y-0.5">
           {lines.slice(0, 12).map((l, i) => (
-            <li key={i}>{l}</li>
+            <li key={i}>{t(l)}</li>
           ))}
         </ul>
       </TooltipContent>

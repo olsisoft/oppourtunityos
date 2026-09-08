@@ -3,7 +3,20 @@
  * was actually made (ValidityScope). Both share one shape so they can be
  * compared. Scope comparison is deterministic and dimension by dimension:
  * every mismatch and every unknown is reported, never averaged away silently.
+ *
+ * Text: `scopeMessage(scope)` builds the compact description as a
+ * SystemMessage (English text + key/params, so engines can embed it in their
+ * own sentences); `describeScope(scope, locale)` renders it for display.
  */
+import type { Locale } from "@/i18n/locales";
+import {
+  isSystemMessage,
+  msg,
+  renderMessage,
+  type LocalizedText,
+  type SystemMessage,
+} from "@/i18n/messages";
+
 export interface Scope {
   population?: string | null;
   icp?: string | null;
@@ -178,7 +191,7 @@ export type DimensionMatch = "MATCH" | "PARTIAL" | "MISMATCH" | "UNKNOWN";
 
 export interface ScopeDimensionResult {
   key: ScopeDimension;
-  label: string;
+  label: SystemMessage;
   claim: string | null;
   evidence: string | null;
   result: DimensionMatch;
@@ -192,7 +205,7 @@ export interface ScopeMatchResult {
   matched: ScopeDimension[];
   mismatched: ScopeDimension[];
   unknown: ScopeDimension[];
-  explanation: string;
+  explanation: SystemMessage;
 }
 
 export const SCOPE_MATCH_DEFAULTS = {
@@ -227,8 +240,7 @@ export function scopeMatch(
       matched: [],
       mismatched: [],
       unknown: [],
-      explanation:
-        "The claim declares no scope; the evidence cannot mismatch it, but nothing confirms it applies.",
+      explanation: msg("frontier.scopeMatch.claimUndeclared"),
     };
   }
   if (evidenceEmpty) {
@@ -239,8 +251,7 @@ export function scopeMatch(
       matched: [],
       mismatched: [],
       unknown: COMPARED.map((c) => c.key),
-      explanation:
-        "The evidence records no scope: where and under which conditions it was observed is unknown.",
+      explanation: msg("frontier.scopeMatch.evidenceUnknown"),
     };
   }
   let weightSum = 0;
@@ -276,7 +287,7 @@ export function scopeMatch(
         mismatched.push(key);
       }
     }
-    dims.push({ key, label: SCOPE_LABELS[key], claim: c, evidence: e, result });
+    dims.push({ key, label: msg(`labels.scopeDimension.${key}`), claim: c, evidence: e, result });
   }
   const score =
     weightSum === 0 ? SCOPE_MATCH_DEFAULTS.claimUndeclared : round2(scoreSum / weightSum);
@@ -286,24 +297,33 @@ export function scopeMatch(
       : mismatched.length > 0 || unknown.length > 0
         ? "PARTIAL"
         : "MATCH";
+  const dimensionList = (keys: ScopeDimension[]) => listMessage(keys.map(dimensionInSentence));
   const explanation =
     status === "MATCH"
-      ? `Scope matches on ${matched.map((k) => SCOPE_LABELS[k].toLowerCase()).join(", ")}.`
-      : [
-          matched.length
-            ? `matches ${matched.map((k) => SCOPE_LABELS[k].toLowerCase()).join(", ")}`
-            : null,
-          mismatched.length
-            ? `differs on ${mismatched.map((k) => SCOPE_LABELS[k].toLowerCase()).join(", ")}`
-            : null,
-          unknown.length
-            ? `unknown for ${unknown.map((k) => SCOPE_LABELS[k].toLowerCase()).join(", ")}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join("; ")
-          .replace(/^./, (c) => c.toUpperCase()) + ".";
+      ? msg("frontier.scopeMatch.match", { matched: dimensionList(matched) })
+      : msg("frontier.scopeMatch.partial", {
+          shape: `${matched.length ? "M" : ""}${mismatched.length ? "D" : ""}${unknown.length ? "U" : ""}`,
+          ...(matched.length ? { matched: dimensionList(matched) } : {}),
+          ...(mismatched.length ? { mismatched: dimensionList(mismatched) } : {}),
+          ...(unknown.length ? { unknown: dimensionList(unknown) } : {}),
+        });
   return { score, status, dimensions: dims, matched, mismatched, unknown, explanation };
+}
+
+/** A dimension name as it reads inside a sentence ("company size"). */
+export function dimensionInSentence(key: ScopeDimension): SystemMessage {
+  return msg(`frontier.scope.dimension.${key}`);
+}
+
+/**
+ * Join translated items into one message by nesting pairs ("{head}, {tail}"),
+ * so the list renders in any locale. `items` must not be empty.
+ */
+export function listMessage(items: LocalizedText[], key = "frontier.list.comma"): SystemMessage {
+  const last = items[items.length - 1] ?? "";
+  let out: SystemMessage = isSystemMessage(last) ? last : msg("frontier.plain", { text: last });
+  for (let i = items.length - 2; i >= 0; i -= 1) out = msg(key, { head: items[i], tail: out });
+  return out;
 }
 
 function systemsOverlap(a: string[], b: string[]): number {
@@ -343,20 +363,30 @@ export function mergeScopes(scopes: Array<Scope | null | undefined>): Scope | nu
   return out;
 }
 
-/** Compact, human description: "5 salons · 3 POS configurations · founder-assisted · 1 month". */
-export function describeScope(scope: Scope | null | undefined, max = 6): string {
-  if (isEmptyScope(scope)) return "scope not recorded";
+/**
+ * Compact description of a scope as a message: "5 organizations · independent
+ * hair salons · 3 configurations (POS A, POS B, POS C) · founder-assisted".
+ * User values are carried verbatim; counts and the "scope not recorded"
+ * fallback are translated. Engines embed it in their own sentences.
+ */
+export function scopeMessage(scope: Scope | null | undefined, max = 6): SystemMessage {
+  if (isEmptyScope(scope)) return msg("frontier.scope.notRecorded");
   const s = scope!;
-  const parts: string[] = [];
+  const parts: LocalizedText[] = [];
   if (s.organizationCount)
-    parts.push(`${s.organizationCount} organization${s.organizationCount === 1 ? "" : "s"}`);
-  else if (s.sampleSize) parts.push(`n = ${s.sampleSize}`);
+    parts.push(msg("frontier.scope.organizations", { count: s.organizationCount }));
+  else if (s.sampleSize) parts.push(msg("frontier.scope.sampleSize", { count: s.sampleSize }));
   if (s.population)
     parts.push(s.population.length > 90 ? `${s.population.slice(0, 87)}…` : s.population);
   else if (s.icp) parts.push(s.icp);
   if (s.systems?.length)
     parts.push(
-      `${s.systems.length === 1 ? s.systems[0] : `${s.systems.length} configurations (${s.systems.join(", ")})`}`,
+      s.systems.length === 1
+        ? s.systems[0]
+        : msg("frontier.scope.configurations", {
+            count: s.systems.length,
+            systems: s.systems.join(", "),
+          }),
     );
   if (s.environment) parts.push(s.environment);
   if (s.conditions) parts.push(s.conditions);
@@ -364,7 +394,16 @@ export function describeScope(scope: Scope | null | undefined, max = 6): string 
   if (s.geography) parts.push(s.geography);
   if (s.companySize && !s.population) parts.push(s.companySize);
   if (s.industry && !s.population) parts.push(s.industry);
-  return parts.slice(0, max).join(" · ");
+  return listMessage(parts.slice(0, max), "frontier.scope.join");
+}
+
+/** Compact, human description rendered in the locale (display time). */
+export function describeScope(
+  scope: Scope | null | undefined,
+  locale: Locale = "en",
+  max = 6,
+): string {
+  return renderMessage(scopeMessage(scope, max), locale);
 }
 
 /** Number of distinct configurations across observation scopes (for diversity thresholds). */
