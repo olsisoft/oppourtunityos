@@ -19,6 +19,7 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
     const { prisma } = await import("@/db/prisma");
     const { getWorkspaceGraph } = await import("@/db/workspaces");
     const { recomputeOpportunity } = await import("@/services/scoring/recompute");
+    const { isEvidenceBacked } = await import("@/services/value/epistemic");
 
     const demo = await prisma.workspace.findFirst({
       where: { isDemo: true, name: { contains: "Beauty Salons" } },
@@ -54,15 +55,15 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
       expect(["DEMO", "USER_CAPTURED", "INTERVIEW", "RESEARCH_PROVIDER"]).toContain(e.origin);
     }
 
-    // No ladder node is PROVEN or SUPPORTED without linked evidence.
+    // No ladder node is evidence-backed without linked evidence.
     for (const o of after.opportunities) {
       for (const n of o.valueChainNodes) {
-        if (n.status === "PROVEN" || n.status === "SUPPORTED") {
+        if (isEvidenceBacked(n.status)) {
           expect(n.evidenceLinks.length).toBeGreaterThan(0);
         }
       }
       for (const l of o.causalLinks) {
-        if (l.status === "PROVEN" || l.status === "SUPPORTED") {
+        if (isEvidenceBacked(l.status)) {
           expect(l.evidenceLinks.length).toBeGreaterThan(0);
         }
       }
@@ -75,14 +76,54 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
     expect(noShow?.valueStrength).toBeNull(); // population/attributability UNKNOWN → INCOMPLETE
     expect(noShow?.causalConfidence).toBeNull(); // no causal evidence → INCOMPLETE
 
-    // Leakage: manual reconciliation is documented by evidence, the software
-    // capability is blocked by an untested feasibility assumption.
+    // Leakage: the problem is well evidenced; the mechanism is documented only
+    // by interviews, a job posting and a forum thread — evidence that exists
+    // but does not fit a feasibility claim. The frontier stops at the economic
+    // pain and names the fitness gap.
     const leakage = after.opportunities.find(
       (o) => o.title === "Employee revenue leakage detection",
     );
-    expect(leakage?.proofFrontierRung).toBe("MECHANISM");
+    expect(leakage?.proofFrontierRung).toBe("ECONOMIC_PAIN");
     expect(leakage?.valueStrength).not.toBeNull();
     expect(leakage?.verdict).toBe("TEST");
+    const leakageFrontier = leakage?.proofFrontier as unknown as {
+      blockedAt: { rung: string; blockers: Array<{ kind: string }> } | null;
+      frontierScope: { text: string; generalization: string | null };
+      commercial: {
+        highestSupported: string | null;
+        rungs: Array<{ claimType: string; status: string }>;
+      };
+    };
+    expect(leakageFrontier.blockedAt?.rung).toBe("MECHANISM");
+    expect(leakageFrontier.blockedAt?.blockers.map((b) => b.kind)).toContain("LOW_FIT");
+    expect(leakageFrontier.frontierScope.text).toMatch(/independent hair salon/);
+    const mechanism = leakage?.valueChainNodes.find((n) => n.level === "MECHANISM");
+    expect(mechanism?.status).toBe("UNPROVEN");
+    expect(mechanism?.generalization).toBe("UNTESTED");
+    // Evidence fitness is persisted on every claim link, per claim.
+    for (const l of leakage?.claimLinks ?? []) {
+      expect(l.fitScore).not.toBeNull();
+      expect(l.admissibility).not.toBeNull();
+      expect(l.fitVersion).toBeTruthy();
+    }
+    const interviewOnMechanism = mechanism?.evidenceLinks.find((l) =>
+      /12 chairs/.test(l.evidence.sourceTitle),
+    );
+    expect(interviewOnMechanism?.admissibility).toBe("LOW");
+    expect(interviewOnMechanism?.fitScore ?? 100).toBeLessThanOrEqual(39);
+    // Commercial ladder: the accountant is existing spend, not willingness to pay.
+    expect(leakageFrontier.commercial.highestSupported).not.toBe("ACTUAL_PURCHASE");
+    expect(
+      leakageFrontier.commercial.rungs.find((r) => r.claimType === "EXISTING_SPEND")?.status,
+    ).toBe("SUPPORTED");
+    expect(
+      ["HYPOTHESIS", "UNPROVEN", "SUPPORTED"].includes(
+        leakageFrontier.commercial.rungs.find((r) => r.claimType === "WILLINGNESS_TO_PAY")!.status,
+      ),
+    ).toBe(true);
+    expect(
+      leakageFrontier.commercial.rungs.find((r) => r.claimType === "ACTUAL_PURCHASE")?.status,
+    ).toBe("HYPOTHESIS");
 
     // Variable semantics: the direct variable is a Leakage (Reduce is coherent);
     // the parent economic variable is a separate, hypothetical relation.
@@ -94,14 +135,16 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
     ).toBe("ok");
     expect(leakage?.variable?.parent?.name).toMatch(/Net revenue/);
 
-    // Learning history: the second seed pass recorded the frontier moving from
-    // the economic pain to the mechanism once the interview evidence was linked.
-    const forward = leakage?.knowledgeChanges.find(
-      (c) => c.previousFrontier === "ECONOMIC_PAIN" && c.newFrontier === "MECHANISM",
-    );
-    expect(forward).toBeTruthy();
-    expect(forward?.trigger).toBe("EVIDENCE_LINKED");
-    expect(forward?.evidence?.sourceTitle).toMatch(/12 chairs/);
+    // Learning history: the second seed pass recorded what linking the
+    // interview evidence changed — the mechanism went from HYPOTHESIS to
+    // UNPROVEN (low-fit evidence informs it) without moving the frontier.
+    const linked = leakage?.knowledgeChanges.find((c) => c.trigger === "EVIDENCE_LINKED");
+    expect(linked).toBeTruthy();
+    expect(linked?.evidence?.sourceTitle).toMatch(/12 chairs/);
+    expect(linked?.previousFrontier).toBe("ECONOMIC_PAIN");
+    expect(linked?.newFrontier).toBe("ECONOMIC_PAIN");
+    const strengthened = linked?.claimsStrengthened as Array<{ key: string }> | undefined;
+    expect(strengthened?.some((d) => d.key === "node:MECHANISM")).toBe(true);
 
     // The migration kept every existing provenance: no variable lost its record-level
     // provenance and inferred fields stay HYPOTHESIS or UNKNOWN.
@@ -120,9 +163,9 @@ describe.skipIf(!hasDb)("demo workspace (integration)", () => {
         }
 
     // A primary value path exists for opportunities with a ladder.
-    expect(leakage?.valuePaths.some((p) => p.isPrimary && p.proofFrontier === "MECHANISM")).toBe(
-      true,
-    );
+    expect(
+      leakage?.valuePaths.some((p) => p.isPrimary && p.proofFrontier === "ECONOMIC_PAIN"),
+    ).toBe(true);
 
     await prisma.$disconnect();
   });

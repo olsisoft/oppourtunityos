@@ -16,8 +16,30 @@ import {
 } from "@/actions/value";
 import { CausalDistanceBadge, EpistemicBadge } from "@/components/value/epistemic-badge";
 import { ExperimentPlanDialog } from "@/components/value/experiment-plan-dialog";
+import { FitBadge, GeneralizationBadge, readFit } from "@/components/value/fit-badge";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { LadderSelection } from "@/components/value/value-ladder";
+import { highAdmissibilitySources } from "@/services/value/admissibility";
+import {
+  claimTypeForLevel,
+  claimTypeForLink,
+  CLAIM_STATEMENTS,
+} from "@/services/value/claim-taxonomy";
+import { DESIGN_LEVEL_LABELS } from "@/services/value/experimental-validity";
+import {
+  FRONTIER_DESIGN_REQUIRED,
+  FRONTIER_FIT_THRESHOLDS,
+  FRONTIER_THRESHOLDS,
+  type FrontierClaimSummary,
+  type FrontierRungState,
+  type ProofRung,
+} from "@/services/value/proof-frontier";
+import type {
+  ClaimType,
+  EvidenceAdmissibility,
+  GeneralizationStatus,
+} from "@/generated/prisma/enums";
+import { EVIDENCE_SOURCE_TYPE_LABELS } from "@/domain/enums";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,8 +170,14 @@ function Body({
     );
   }
 
+  const insights = deriveOpportunityInsights(opportunity, graph.mechanisms.length);
+  const rungOf = (rung: ProofRung): FrontierRungState | undefined =>
+    insights.frontier?.rungs.find((r) => r.rung === rung);
+
   if (selection.kind === "node") {
     const node = selection.node;
+    const claimType = claimTypeForLevel(node.level);
+    const rung = rungOf(node.level as ProofRung);
     return (
       <div className="space-y-5 p-4 pt-10">
         <SheetHeader className="p-0">
@@ -159,13 +187,23 @@ function Body({
             </span>
             <EpistemicBadge status={node.status} confidence={node.confidence} />
             <CausalDistanceBadge distance={node.causalDistance} />
+            <GeneralizationBadge status={node.generalization} />
           </div>
           <SheetTitle className="text-base">{node.statement}</SheetTitle>
           <SheetDescription>
-            {VALUE_CHAIN_LEVEL_HELP[node.level]} Status is computed from linked evidence; the
-            statement itself is a hypothesis until then.
+            {VALUE_CHAIN_LEVEL_HELP[node.level]} Status is computed from linked evidence weighted by
+            its fit for this claim; the statement itself is a hypothesis until then.
           </SheetDescription>
         </SheetHeader>
+        <ClaimDetail
+          claimType={claimType}
+          rung={node.level as ProofRung}
+          summary={rung?.summary ?? null}
+          eligible={rung?.eligible ?? false}
+          blockers={rung?.eligible ? [] : (rung?.reasons ?? [])}
+          inference={node.inference}
+          generalization={node.generalization}
+        />
         <NodeForm
           level={node.level}
           initial={node.statement}
@@ -192,7 +230,7 @@ function Body({
               () =>
                 linkEvidenceClaimAction({
                   evidenceId,
-                  claimType: "VALUE_CHAIN_NODE",
+                  claimType,
                   valueChainNodeId: node.id,
                   direction,
                 }),
@@ -235,6 +273,9 @@ function Body({
   }
 
   const link = selection.link;
+  const linkClaimType = claimTypeForLink(link.fromNode.level, link.toNode.level);
+  const linkRung = rungOf(link.toNode.level as ProofRung);
+  const linkState = linkRung?.linkFromPrevious ?? null;
   return (
     <div className="space-y-5 p-4 pt-10">
       <SheetHeader className="p-0">
@@ -245,13 +286,25 @@ function Body({
           </span>
           <EpistemicBadge status={link.status} confidence={link.confidence} />
           <Badge variant="outline">{CRITICALITY_LABELS[link.criticality]}</Badge>
+          <GeneralizationBadge status={link.generalization} />
         </div>
         <SheetTitle className="text-base">{link.statement}</SheetTitle>
         <SheetDescription>
           This arrow is itself an assumption that can fail. From “{link.fromNode.statement}” to “
-          {link.toNode.statement}”. A critical link gates the Proof Frontier.
+          {link.toNode.statement}”. A critical link gates the Proof Frontier; a causal claim needs
+          methodological evidence, not testimony.
         </SheetDescription>
       </SheetHeader>
+      <ClaimDetail
+        claimType={linkClaimType}
+        rung={link.toNode.level as ProofRung}
+        summary={linkState?.summary ?? null}
+        eligible={linkState?.eligible ?? false}
+        blockers={linkState?.eligible ? [] : (linkState?.reasons ?? [])}
+        inference={link.inference}
+        generalization={link.generalization}
+        isLink
+      />
       <LinkForm
         fromLevel={link.fromNode.level}
         toLevel={link.toNode.level}
@@ -282,7 +335,7 @@ function Body({
             () =>
               linkEvidenceClaimAction({
                 evidenceId,
-                claimType: "CAUSAL_LINK",
+                claimType: linkClaimType,
                 causalLinkId: link.id,
                 direction,
               }),
@@ -326,6 +379,132 @@ function Body({
         >
           <Trash2 /> Remove link
         </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * CLAIM DETAIL — the claim, its type, status, evidence fitness, current
+ * inference, scope, generalization, frontier effect and what would
+ * strengthen it. Everything shown here is computed; nothing is editable.
+ */
+function ClaimDetail({
+  claimType,
+  rung,
+  summary,
+  eligible,
+  blockers,
+  inference,
+  generalization,
+  isLink = false,
+}: {
+  claimType: ClaimType;
+  rung: ProofRung;
+  summary: FrontierClaimSummary | null;
+  eligible: boolean;
+  blockers: string[];
+  inference: string | null;
+  generalization: GeneralizationStatus;
+  isLink?: boolean;
+}) {
+  const requiredDesign = isLink ? FRONTIER_DESIGN_REQUIRED[rung] : undefined;
+  const strengthen = highAdmissibilitySources(claimType).slice(0, 5);
+  return (
+    <div className="space-y-2 rounded-md border p-3 text-xs">
+      <p className="text-[10px] font-semibold tracking-wider uppercase">Claim detail</p>
+      <p>
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">Claim</span>{" "}
+        {CLAIM_STATEMENTS[claimType].replace(/^./, (c) => c.toUpperCase())}
+        <span className="text-muted-foreground">
+          {" "}
+          · {claimType.toLowerCase().replace(/_/g, " ")}
+        </span>
+      </p>
+      {inference && (
+        <p className="bg-muted/60 rounded px-2 py-1.5">
+          <span className="text-muted-foreground font-mono text-[10px] uppercase">
+            Current inference
+          </span>{" "}
+          {inference}
+        </p>
+      )}
+      <div className="grid gap-x-3 gap-y-1 sm:grid-cols-3">
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] uppercase">Fit</p>
+          <p>
+            {summary && summary.total > 0
+              ? `best ${summary.bestFit}/100 · ${summary.admissible}/${summary.total} admissible`
+              : "no evidence"}
+          </p>
+          <p className="text-muted-foreground">
+            required ≥ {FRONTIER_FIT_THRESHOLDS[rung]} fit · ≥ {FRONTIER_THRESHOLDS[rung]}{" "}
+            confidence
+            {requiredDesign
+              ? ` · ≥ ${DESIGN_LEVEL_LABELS[requiredDesign].toLowerCase()} design`
+              : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] uppercase">Scope</p>
+          <p>
+            {summary?.scopeText ?? (summary?.observed ? "not recorded" : "not observed directly")}
+          </p>
+          <p className="text-muted-foreground">
+            {summary?.independentOrigins ?? 0} independent origin
+            {(summary?.independentOrigins ?? 0) === 1 ? "" : "s"}
+            {summary?.designLevel
+              ? ` · ${DESIGN_LEVEL_LABELS[summary.designLevel].toLowerCase()}`
+              : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground font-mono text-[10px] uppercase">Generalization</p>
+          <GeneralizationBadge status={generalization} className="mt-0.5" />
+          {summary?.generalizationGap && (
+            <p className="text-muted-foreground mt-0.5">{summary.generalizationGap}</p>
+          )}
+        </div>
+      </div>
+      {summary?.nextGeneralizationQuestion && (
+        <p>
+          <span className="text-muted-foreground font-mono text-[10px] uppercase">
+            Next generalization question
+          </span>{" "}
+          {summary.nextGeneralizationQuestion}
+        </p>
+      )}
+      <div>
+        <p className="text-muted-foreground font-mono text-[10px] uppercase">Frontier effect</p>
+        {eligible ? (
+          <p>Evidence-backed with fitting evidence: this claim can carry the Proof Frontier.</p>
+        ) : blockers.length ? (
+          <ul className="list-disc space-y-0.5 pl-4">
+            {blockers.slice(0, 3).map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">Reachable only once earlier levels are supported.</p>
+        )}
+      </div>
+      <div>
+        <p className="text-muted-foreground font-mono text-[10px] uppercase">
+          What would strengthen this claim
+        </p>
+        <p>
+          {strengthen.length
+            ? `High-admissibility evidence: ${strengthen
+                .map((t) => EVIDENCE_SOURCE_TYPE_LABELS[t].toLowerCase())
+                .join(", ")}.`
+            : "No source type is high-admissibility for this claim."}
+          {summary?.lowFitOnly
+            ? " The evidence linked so far is low-fit: more of it will not establish the claim."
+            : ""}
+          {requiredDesign
+            ? ` Causal attribution at this level requires at least a ${DESIGN_LEVEL_LABELS[requiredDesign].toLowerCase()} design.`
+            : ""}
+        </p>
       </div>
     </div>
   );
@@ -479,7 +658,17 @@ function ClaimEvidence({
   links: Array<{
     id: string;
     direction: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
-    evidence: { id: string; sourceTitle: string; type: string; isDemo: boolean; isMocked: boolean };
+    fitScore: number | null;
+    admissibility: EvidenceAdmissibility | null;
+    fitBreakdown: unknown;
+    evidence: {
+      id: string;
+      sourceTitle: string;
+      type: string;
+      sourceType: keyof typeof EVIDENCE_SOURCE_TYPE_LABELS;
+      isDemo: boolean;
+      isMocked: boolean;
+    };
   }>;
   graph: WorkspaceGraph;
   onLink: (evidenceId: string, direction: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL") => void;
@@ -500,40 +689,51 @@ function ClaimEvidence({
         </p>
       )}
       <ul className="space-y-1">
-        {links.map((l) => (
-          <li
-            key={l.id}
-            className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs"
-          >
-            <span className="min-w-0 truncate">
-              <span
-                className={
-                  l.direction === "SUPPORTS"
-                    ? "text-tone-positive"
-                    : l.direction === "CONTRADICTS"
-                      ? "text-tone-negative"
-                      : "text-muted-foreground"
-                }
-              >
-                {l.direction.toLowerCase()}
-              </span>{" "}
-              · {l.evidence.sourceTitle}
-              {l.evidence.isDemo && (
-                <Badge variant="warning" className="ml-1 px-1 py-0 text-[9px]">
-                  DEMO
-                </Badge>
-              )}
-            </span>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground shrink-0"
-              onClick={() => onUnlink(l.id)}
-              disabled={saving}
-            >
-              unlink
-            </button>
-          </li>
-        ))}
+        {links.map((l) => {
+          const fit = readFit(l);
+          return (
+            <li key={l.id} className="space-y-0.5 rounded-md border px-2 py-1.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">
+                  <span
+                    className={
+                      l.direction === "SUPPORTS"
+                        ? "text-tone-positive"
+                        : l.direction === "CONTRADICTS"
+                          ? "text-tone-negative"
+                          : "text-muted-foreground"
+                    }
+                  >
+                    {l.direction.toLowerCase()}
+                  </span>{" "}
+                  · {l.evidence.sourceTitle}
+                  {l.evidence.isDemo && (
+                    <Badge variant="warning" className="ml-1 px-1 py-0 text-[9px]">
+                      DEMO
+                    </Badge>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <FitBadge fit={fit} />
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground shrink-0"
+                    onClick={() => onUnlink(l.id)}
+                    disabled={saving}
+                  >
+                    unlink
+                  </button>
+                </span>
+              </div>
+              <p className="text-muted-foreground text-[11px]">
+                {EVIDENCE_SOURCE_TYPE_LABELS[l.evidence.sourceType]}
+                {fit.summary
+                  ? ` — ${fit.summary.replace(/^[A-Z ]+ fit \(\d+\/100\) for "[^"]*" — /, "")}`
+                  : ""}
+              </p>
+            </li>
+          );
+        })}
       </ul>
       {available.length > 0 ? (
         <div className="flex flex-col gap-2 sm:flex-row">

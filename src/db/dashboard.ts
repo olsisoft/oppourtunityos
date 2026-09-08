@@ -20,6 +20,15 @@ export const EVIDENCE_GAP_LABELS: Record<EvidenceGapKind, string> = {
   FEASIBILITY: "Mechanism feasibility gap",
 };
 
+/** Evidence exists but does not fit the claim it is linked to. */
+export type FitnessGapKind = "NOT_ADMISSIBLE" | "LOW_FIT" | "WEAK_DESIGN";
+
+export const FITNESS_GAP_LABELS: Record<FitnessGapKind, string> = {
+  NOT_ADMISSIBLE: "Evidence not admissible",
+  LOW_FIT: "Evidence does not fit the claim",
+  WEAK_DESIGN: "Design too weak for causality",
+};
+
 /** Causal and value assumptions are the ones that collapse an opportunity. */
 const KIND_BONUS: Record<AssumptionKind, number> = {
   CAUSAL: 9,
@@ -144,6 +153,50 @@ export async function getDashboardData(userId: string) {
     })
     .slice(0, 10);
 
+  // EVIDENCE FITNESS GAPS — the frontier is blocked by evidence that exists
+  // but is not admissible, does not fit, or comes from too weak a design.
+  const fitnessGaps = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .flatMap(({ opportunity: o, insights }) => {
+      const blocked = insights.frontier?.blockedAt;
+      if (!blocked) return [];
+      return blocked.blockers
+        .filter(
+          (b) => b.kind === "LOW_FIT" || b.kind === "NOT_ADMISSIBLE" || b.kind === "WEAK_DESIGN",
+        )
+        .slice(0, 1)
+        .map((b) => ({
+          opportunity: o,
+          kind: b.kind as FitnessGapKind,
+          claim: blocked.label,
+          detail: b.message,
+        }));
+    })
+    .slice(0, 8);
+
+  // GENERALIZATION GAPS — a level is observed, but only in a case or a sample.
+  const generalizationGaps = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .flatMap(({ opportunity: o, insights }) => {
+      const f = insights.frontier;
+      if (!f || f.frontier === "NONE") return [];
+      const rung = f.rungs.find((r) => r.rung === f.frontier);
+      const gen = rung?.summary?.generalization ?? null;
+      if (gen !== "CASE_ONLY" && gen !== "SAMPLE_SUPPORTED" && gen !== "BROADER_HYPOTHESIS")
+        return [];
+      return [
+        {
+          opportunity: o,
+          level: f.frontierLabel,
+          generalization: gen,
+          scope: f.frontierScope.text,
+          detail: rung?.summary?.generalizationGap ?? "",
+          question: rung?.summary?.nextGeneralizationQuestion ?? null,
+        },
+      ];
+    })
+    .slice(0, 8);
+
   const candidate =
     enriched.find(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE") ?? null;
   const nextAction:
@@ -230,6 +283,8 @@ export async function getDashboardData(userId: string) {
     strongest: enriched.slice(0, 5),
     byVerdict,
     evidenceGaps,
+    fitnessGaps,
+    generalizationGaps,
     weakestAssumptions,
     nextAction,
     nextValueAction,

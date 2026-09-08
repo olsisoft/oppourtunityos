@@ -8,14 +8,17 @@ import { toast } from "sonner";
 import { deleteEvidenceAction } from "@/actions/evidence";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FitBadge, readFit } from "@/components/value/fit-badge";
 import type { GraphEvidence } from "@/db/workspaces";
 import {
   CLAIM_TYPE_LABELS,
-  EVIDENCE_TYPE_LABELS,
+  EVIDENCE_SOURCE_TYPE_LABELS,
   SENTIMENT_LABELS,
   VALUE_CHAIN_LEVEL_LABELS,
 } from "@/domain/enums";
 import { cn, formatDate, truncate } from "@/lib/utils";
+import { SOURCE_FAMILY_LABELS, sourceFamily } from "@/services/value/evidence-sources";
+import { describeScope, parseScope } from "@/services/value/scope";
 
 const SENTIMENT_TONE = { POSITIVE: "positive", NEGATIVE: "negative", NEUTRAL: "muted" } as const;
 const DIRECTION_TONE = {
@@ -44,6 +47,8 @@ export function EvidenceItem({
     e.hasPurchaseIntent && "purchase intent",
   ].filter(Boolean) as string[];
   const claims = e.claimLinks ?? [];
+  const scope = parseScope(e.scope);
+  const family = sourceFamily(e.sourceType);
 
   const remove = async () => {
     if (!confirm("Delete this evidence? Scores will be recomputed.")) return;
@@ -59,7 +64,10 @@ export function EvidenceItem({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{EVIDENCE_TYPE_LABELS[e.type]}</Badge>
+            <Badge variant="outline">{EVIDENCE_SOURCE_TYPE_LABELS[e.sourceType]}</Badge>
+            <Badge variant="muted" className="font-normal">
+              {SOURCE_FAMILY_LABELS[family].toLowerCase()}
+            </Badge>
             <Badge variant={SENTIMENT_TONE[e.sentiment]}>{SENTIMENT_LABELS[e.sentiment]}</Badge>
             {e.isDemo && <Badge variant="warning">DEMO DATA</Badge>}
             {e.isMocked && <Badge variant="warning">MOCKED</Badge>}
@@ -117,6 +125,13 @@ export function EvidenceItem({
           {e.limitations ? `Limitations: ${e.limitations}` : ""}
         </p>
       )}
+      {(scope || e.sourceOriginId || e.organizationCount !== null) && (
+        <p className="text-muted-foreground mt-1.5 text-[11px]">
+          <span className="font-medium tracking-wider uppercase">Scope</span>{" "}
+          {scope ? describeScope(scope) : "not recorded"}
+          {e.sourceOriginId ? ` · origin: ${e.sourceOriginId}` : ""}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         <span className="font-mono tabular-nums">strength {e.strengthScore}/10</span>
         <span className="font-mono tabular-nums">relevance {e.relevanceScore}/10</span>
@@ -128,27 +143,38 @@ export function EvidenceItem({
       </div>
       <div className="mt-2 border-t pt-2">
         <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
-          Claims affected
+          Fit to claim
         </p>
         {claims.length === 0 ? (
           <p className="text-muted-foreground mt-0.5 text-[11px]">
             Not linked to a specific claim. It counts toward the pain or opportunity it is attached
-            to; link it to a claim to move a value chain level or a causal link.
+            to; link it to a claim to see how well it fits that claim — evidence existing is not
+            evidence fitting.
           </p>
         ) : (
-          <ul className="mt-1 flex flex-wrap gap-1">
+          <ul className="mt-1 space-y-1">
             {claims.map((c) => {
               const target = c.valueChainNode
                 ? `${VALUE_CHAIN_LEVEL_LABELS[c.valueChainNode.level]}: ${truncate(c.valueChainNode.statement, 50)}`
                 : c.causalLink
-                  ? `Causal link: ${truncate(c.causalLink.statement, 50)}`
+                  ? `${CLAIM_TYPE_LABELS[c.claimType]}: ${truncate(c.causalLink.statement, 50)}`
                   : CLAIM_TYPE_LABELS[c.claimType];
+              const fit = readFit(c);
               return (
-                <li key={c.id} className="rounded border px-1.5 py-0.5 text-[11px]">
+                <li
+                  key={c.id}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border px-1.5 py-1 text-[11px]"
+                >
                   <span className={cn("font-medium", DIRECTION_TONE[c.direction])}>
                     {c.direction.toLowerCase()}
-                  </span>{" "}
-                  <span className="text-muted-foreground">{target}</span>
+                  </span>
+                  <span className="text-muted-foreground min-w-0 flex-1 truncate">{target}</span>
+                  <FitBadge fit={fit} compact={compact} />
+                  {!compact && fit.summary && (
+                    <span className="text-muted-foreground w-full text-[10px]">
+                      {fit.summary.replace(/^[A-Z ]+ fit \(\d+\/100\) for "[^"]*" — /, "")}
+                    </span>
+                  )}
                 </li>
               );
             })}

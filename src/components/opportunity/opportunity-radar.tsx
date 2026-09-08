@@ -179,7 +179,7 @@ export function OpportunityRadar({
                               ...(insights.causal.blocking
                                 ? [`Blocking: ${insights.causal.blocking.label}`]
                                 : []),
-                              `Proof frontier: ${frontierText(o.proofFrontierRung)}`,
+                              `Proof frontier: ${frontierText(o.proofFrontierRung)}${insights.frontier?.frontierScope?.text ? ` · scope: ${insights.frontier.frontierScope.text}` : ""}`,
                               ...insights.causal.links.map(
                                 (l) =>
                                   `${l.label}: ${l.missingLink ? "UNKNOWN" : `${l.status}${l.confidence ? ` ${l.confidence}` : ""}`}`,

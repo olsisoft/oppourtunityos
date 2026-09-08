@@ -294,6 +294,15 @@ export default async function OpportunityReportPage({
                   </p>
                   <p className="mt-1">{report.frontier.text}</p>
                   <p className="mt-1 text-xs">
+                    <span className="text-muted-foreground">Scope: </span>
+                    {report.frontier.scope}
+                    {report.frontier.generalization ? ` · ${report.frontier.generalization}` : ""}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      — what was reached, and where it was observed.
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs">
                     <span className="text-muted-foreground">Why the frontier stops here: </span>
                     {report.frontier.whyStops}
                   </p>
@@ -344,12 +353,46 @@ export default async function OpportunityReportPage({
               </CardContent>
             </Card>
 
+            {report.commercial.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Commercial ladder</CardTitle>
+                  <CardDescription>
+                    Existing spend → purchase intent → stated willingness to pay → price acceptance
+                    → actual purchase. Each rung is its own claim with its own evidence; support for
+                    one rung never moves the rungs above it.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ol className="flex flex-wrap items-center gap-2 text-sm">
+                    {report.commercial.map((c, i) => (
+                      <li key={c.label} className="flex items-center gap-2">
+                        <span className="rounded-md border px-2 py-1">
+                          <span className="font-medium">{c.label}</span>{" "}
+                          <span className="text-muted-foreground font-mono text-[10px]">
+                            {c.status}
+                            {c.evidenceCount
+                              ? ` · ${c.evidenceCount} admissible · fit ${c.bestFit}`
+                              : ""}
+                          </span>
+                        </span>
+                        {i < report.commercial.length - 1 && (
+                          <span className="text-muted-foreground text-xs">→</span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Experiments</CardTitle>
                 <CardDescription>
                   Assumption → experiment → result → evidence → knowledge update → frontier movement
-                  → verdict. Record a result and see exactly what it changed.
+                  → verdict. Record a result and see exactly what it changed. Each result carries
+                  its design level, internal validity and a language-gated interpretation.
                 </CardDescription>
               </CardHeader>
               <CardContent>

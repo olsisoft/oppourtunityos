@@ -25,6 +25,9 @@ import {
   fieldStatus,
   polarityOf,
 } from "@/services/value/variable-semantics";
+import { EpistemicBadge } from "@/components/value/epistemic-badge";
+import { GeneralizationBadge } from "@/components/value/fit-badge";
+import { UNCERTAINTY_LABELS } from "@/services/value/next-value-action";
 
 /**
  * VALUE tab — OpportunityOS as a value-engineering instrument. Per opportunity:
@@ -159,16 +162,68 @@ export function ValuePanel({ graph }: { graph: WorkspaceGraph }) {
               />
             </div>
 
-            {/* PROOF FRONTIER */}
+            {/* PROOF FRONTIER — level and scope */}
             <div className="bg-muted/40 rounded-md border border-dashed px-2.5 py-2 text-xs">
               <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
                 Proof frontier
               </p>
-              <p className="text-sm font-medium">{frontierText(o.proofFrontierRung)}</p>
+              <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                {frontierText(o.proofFrontierRung)}
+                <GeneralizationBadge status={insights.frontier?.frontierScope?.generalization} />
+              </p>
+              <p className="text-muted-foreground mt-0.5">
+                Scope: {insights.frontier?.frontierScope?.text ?? "not computed yet"}
+              </p>
               <p className="text-muted-foreground mt-0.5">
                 Why it stops: {insights.frontier?.whyStops ?? "Not computed yet."}
               </p>
             </div>
+
+            {/* COMMERCIAL LADDER — each rung is its own claim */}
+            {insights.frontier?.commercial && (
+              <div className="text-xs">
+                <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+                  Commercial ladder
+                </p>
+                <ol className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {insights.frontier.commercial.rungs.map((r, i) => (
+                    <li key={r.claimType} className="flex items-center gap-1.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={cn(
+                              "flex cursor-help items-center gap-1 rounded border px-1.5 py-0.5",
+                              r.supported ? "border-foreground" : "border-dashed",
+                            )}
+                          >
+                            <span className="font-medium">{r.label}</span>
+                            <EpistemicBadge status={r.status} confidence={r.confidence} />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p>{r.statement.replace(/^./, (c) => c.toUpperCase())}.</p>
+                          <p className="mt-1">
+                            {r.evidenceCount
+                              ? `${r.evidenceCount} admissible item${r.evidenceCount === 1 ? "" : "s"}, best fit ${r.bestFit}/100.`
+                              : "No admissible evidence yet."}
+                          </p>
+                          <p className="text-muted-foreground mt-1">{r.evidenceToMove}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      {i < insights.frontier!.commercial!.rungs.length - 1 && (
+                        <span className="text-muted-foreground">→</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <p className="text-muted-foreground mt-1">
+                  Existing spend is not willingness to pay; stated willingness is not a purchase.
+                  {insights.frontier.commercial.next
+                    ? ` Next: ${insights.frontier.commercial.next.question}`
+                    : ""}
+                </p>
+              </div>
+            )}
 
             {/* VALUE STRENGTH · CAUSAL CONFIDENCE */}
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -260,8 +315,16 @@ export function ValuePanel({ graph }: { graph: WorkspaceGraph }) {
                     : cc?.nextQuestion
                       ? "Next causal question"
                       : "Next best action"}
+                  {insights.primaryValueAction
+                    ? ` · ${UNCERTAINTY_LABELS[insights.primaryValueAction.uncertainty].toLowerCase()}`
+                    : ""}
                 </p>
                 <p className="mt-0.5 text-sm">{nextValueQuestion}</p>
+                {insights.primaryValueAction?.whatThisCouldChange && (
+                  <p className="text-muted-foreground mt-1 text-xs">
+                    What this could change: {insights.primaryValueAction.whatThisCouldChange}
+                  </p>
+                )}
               </div>
             )}
 

@@ -20,6 +20,8 @@ import { deriveAssumptionStatus } from "@/services/scoring/assumption-status";
 import { CAUSAL_DISTANCE_BY_LEVEL } from "@/services/value/epistemic";
 import { signalWeight } from "@/services/scoring/evidence-score";
 import { recomputeOpportunity, toEvidenceSignal } from "@/services/scoring/recompute";
+import { sourceTypeForLegacy } from "@/services/value/evidence-sources";
+import type { EvidenceSourceType, EvidenceType } from "@/generated/prisma/enums";
 
 const DEMO_EMAIL = "demo@opportunityos.dev";
 const DEMO_PASSWORD = "demo1234";
@@ -611,14 +613,36 @@ async function seedBeautySalons(userId: string) {
   });
 
   // ---- evidence (all DEMO DATA)
-  const ev = async (data: Parameters<typeof prisma.evidence.create>[0]["data"]) =>
-    prisma.evidence.create({ data: { ...data, isDemo: true, origin: "DEMO" } });
+  // Every demo item carries its source taxonomy (what it IS), its origin
+  // lineage (derivatives of one interview count once) and the scope it was
+  // observed in. The engine decides what each item can establish.
+  const ev = async (
+    data: Parameters<typeof prisma.evidence.create>[0]["data"] & {
+      sourceType?: EvidenceSourceType;
+    },
+  ) =>
+    prisma.evidence.create({
+      data: {
+        sourceType: sourceTypeForLegacy(data.type as EvidenceType),
+        ...data,
+        isDemo: true,
+        origin: "DEMO",
+      },
+    });
+  const salonScope = (detail: string, extra: Record<string, unknown> = {}) => ({
+    population: `independent hair salon, ${detail}`,
+    industry: "beauty salons",
+    ...extra,
+  });
 
   const e1 = await ev({
     workspaceId: workspace.id,
     painId: noShowPain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, 8 chairs (demo)",
+    sourceOriginId: "demo:owner-a",
+    organizationCount: 1,
+    scope: salonScope("8 chairs"),
     sourceExcerpt:
       "DEMO DATA. “Saturdays we lose two or three appointments to no-shows. That's easily €300 a week, so around €1,200 a month. We WhatsApp everyone the day before and it still happens.”",
     sourceDate: daysAgo(21),
@@ -636,6 +660,9 @@ async function seedBeautySalons(userId: string) {
     painId: noShowPain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, 5 chairs (demo)",
+    sourceOriginId: "demo:owner-b",
+    organizationCount: 1,
+    scope: salonScope("5 chairs"),
     sourceExcerpt:
       "DEMO DATA. “We started asking for a €20 deposit for colour appointments after too many people didn't show. Bookings dipped for a week then came back. I'd pay for something that handles it automatically.”",
     sourceDate: daysAgo(14),
@@ -653,6 +680,7 @@ async function seedBeautySalons(userId: string) {
     painId: noShowPain.id,
     type: "COMPETITOR_REVIEW",
     sourceTitle: "Review of a booking tool mentioning no-shows (demo)",
+    sourceOriginId: "demo:review-booking-tool",
     sourceExcerpt:
       "DEMO DATA. “The reminders are fine but they go to everyone. I still can't tell who is going to flake, and there is no waitlist.”",
     sourceDate: daysAgo(60),
@@ -666,6 +694,7 @@ async function seedBeautySalons(userId: string) {
     painId: noShowPain.id,
     type: "REDDIT",
     sourceTitle: "r/hairstylist thread on cancellation policies (demo)",
+    sourceOriginId: "demo:reddit-cancellation-thread",
     sourceExcerpt:
       "DEMO DATA. Several stylists describe charging deposits or blocking repeat offenders. One says no-shows are 'just part of the job' and not worth the hassle.",
     sourceDate: daysAgo(120),
@@ -679,6 +708,7 @@ async function seedBeautySalons(userId: string) {
     painId: noShowPain.id,
     type: "REDDIT",
     sourceTitle: "Comment: reminders already solve it (demo)",
+    sourceOriginId: "demo:reddit-cancellation-thread",
     sourceExcerpt:
       "DEMO DATA. “Honestly since our software sends reminders we barely get no-shows anymore. Maybe one a week.” — contradicts the assumption that reminders are insufficient.",
     sourceDate: daysAgo(90),
@@ -692,6 +722,9 @@ async function seedBeautySalons(userId: string) {
     painId: leakagePain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, 12 chairs (demo)",
+    sourceOriginId: "demo:owner-c",
+    organizationCount: 1,
+    scope: salonScope("12 chairs", { systems: ["Paper book + till"] }),
     sourceExcerpt:
       "DEMO DATA. “When my senior colourist left I found about €9,000 of services over six months that were never rung up. I now spend Sunday evenings comparing the book with the till.”",
     sourceDate: daysAgo(18),
@@ -709,6 +742,9 @@ async function seedBeautySalons(userId: string) {
     painId: leakagePain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, 6 chairs (demo)",
+    sourceOriginId: "demo:owner-d",
+    organizationCount: 1,
+    scope: salonScope("6 chairs"),
     sourceExcerpt:
       "DEMO DATA. “I pay an accountant €150 a month partly to spot this. If software did it weekly I'd switch tomorrow.”",
     sourceDate: daysAgo(9),
@@ -726,6 +762,10 @@ async function seedBeautySalons(userId: string) {
     painId: leakagePain.id,
     type: "SURVEY",
     sourceTitle: "Survey of 40 salon owners — revenue control (demo)",
+    sourceOriginId: "demo:survey-revenue-control",
+    sampleSize: 40,
+    organizationCount: 40,
+    scope: salonScope("40 owners surveyed"),
     sourceExcerpt:
       "DEMO DATA. 28 of 40 respondents said they suspect unrecorded services; 11 had caught a case in the last year; 19 would pay €50+/month for weekly reconciliation.",
     sourceDate: daysAgo(40),
@@ -741,6 +781,8 @@ async function seedBeautySalons(userId: string) {
     painId: leakagePain.id,
     type: "JOB_POSTING",
     sourceTitle: "Job posting: salon manager, 'daily till reconciliation' (demo)",
+    sourceOriginId: "demo:job-posting-manager",
+    organizationCount: 1,
     sourceExcerpt:
       "DEMO DATA. Duties include reconciling appointments against payments daily and reporting discrepancies to the owner.",
     sourceDate: daysAgo(30),
@@ -755,6 +797,7 @@ async function seedBeautySalons(userId: string) {
     painId: leakagePain.id,
     type: "FORUM_POST",
     sourceTitle: "Salon owners forum: 'how do you catch stylists skimming?' (demo)",
+    sourceOriginId: "demo:forum-skimming-thread",
     sourceExcerpt:
       "DEMO DATA. Long thread; owners share spreadsheet templates and camera setups. Strong emotional language about trust.",
     sourceDate: daysAgo(200),
@@ -770,6 +813,9 @@ async function seedBeautySalons(userId: string) {
     painId: idlePain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, 8 chairs, mid-week (demo)",
+    sourceOriginId: "demo:owner-a",
+    organizationCount: 1,
+    scope: salonScope("8 chairs"),
     sourceExcerpt:
       "DEMO DATA. “Tuesday afternoons I have three stylists and maybe four clients. That's wages for nothing. I post a 20% off story on Instagram and hope.”",
     sourceDate: daysAgo(25),
@@ -815,6 +861,9 @@ async function seedBeautySalons(userId: string) {
     painId: retentionPain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner on retention (demo)",
+    sourceOriginId: "demo:owner-b",
+    organizationCount: 1,
+    scope: salonScope("5 chairs"),
     sourceExcerpt:
       "DEMO DATA. “Clients leaving? Sure, some do. The booking app already sends rebooking reminders and we have a stamp card. I wouldn't pay more for that.”",
     sourceDate: daysAgo(12),
@@ -830,6 +879,9 @@ async function seedBeautySalons(userId: string) {
     painId: retentionPain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner, retention tooling (demo)",
+    sourceOriginId: "demo:owner-c",
+    organizationCount: 1,
+    scope: salonScope("12 chairs"),
     sourceExcerpt:
       "DEMO DATA. “Retention is the stylist's job, not software's. If someone leaves it's because they didn't like the cut.”",
     sourceDate: daysAgo(15),
@@ -845,6 +897,9 @@ async function seedBeautySalons(userId: string) {
     painId: retentionPain.id,
     type: "INTERVIEW",
     sourceTitle: "Interview — salon owner quantifying churn (demo)",
+    sourceOriginId: "demo:owner-a",
+    organizationCount: 1,
+    scope: salonScope("8 chairs"),
     sourceExcerpt:
       "DEMO DATA. “Maybe two or three clients a month don't come back. That's €200, perhaps €300. It's real, but it's not a problem I'd spend money on.”",
     sourceDate: daysAgo(20),
@@ -1224,41 +1279,47 @@ async function seedBeautySalons(userId: string) {
   // Leakage: manual reconciliation is a documented practice (interview, job
   // posting, forum) and it revealed €9,000 of unrecorded services → the
   // mechanism and the capability have evidence. Nothing downstream has any.
-  await claim(e6.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+  await claim(e6.id, leakageOpp.id, "MECHANISM_FEASIBLE", {
     valueChainNodeId: leakageLadder.node("MECHANISM"),
   });
-  await claim(e9.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+  await claim(e9.id, leakageOpp.id, "MECHANISM_FEASIBLE", {
     valueChainNodeId: leakageLadder.node("MECHANISM"),
   });
-  await claim(e10.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+  await claim(e10.id, leakageOpp.id, "MECHANISM_FEASIBLE", {
     valueChainNodeId: leakageLadder.node("MECHANISM"),
   });
-  await claim(e6.id, leakageOpp.id, "VALUE_CHAIN_NODE", {
+  await claim(e6.id, leakageOpp.id, "CAPABILITY_EXISTS", {
     valueChainNodeId: leakageLadder.node("CAPABILITY"),
   });
-  await claim(e6.id, leakageOpp.id, "CAUSAL_LINK", {
+  await claim(e6.id, leakageOpp.id, "MECHANISM_CAUSES_CAPABILITY", {
     causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
   });
-  await claim(e9.id, leakageOpp.id, "CAUSAL_LINK", {
+  await claim(e9.id, leakageOpp.id, "MECHANISM_CAUSES_CAPABILITY", {
     causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
   });
   // Owner C changed behaviour after finding the gap (acts on discrepancies) —
   // but nothing shows the leakage then stopped: the transformation stays a hypothesis.
-  await claim(e6.id, leakageOpp.id, "CAUSAL_LINK", {
+  await claim(e6.id, leakageOpp.id, "CAPABILITY_CAUSES_TRANSFORMATION", {
     causalLinkId: leakageLadder.link("CAPABILITY", "TRANSFORMATION"),
   });
-  await claim(e7.id, leakageOpp.id, "WILLINGNESS_TO_PAY");
+  // Commercial ladder, rung by rung. "I pay an accountant €150 a month" is
+  // existing spend on an alternative — not willingness to pay for this. "I'd
+  // switch tomorrow" is stated purchase intent. "19 would pay €50+/month" in a
+  // survey is stated willingness to pay (a survey is low-admissibility for it).
+  await claim(e7.id, leakageOpp.id, "EXISTING_SPEND");
+  await claim(e7.id, leakageOpp.id, "PURCHASE_INTENT");
   await claim(e8.id, leakageOpp.id, "WILLINGNESS_TO_PAY");
+  await claim(e8.id, leakageOpp.id, "POPULATION_AFFECTED");
   await claim(e6.id, leakageOpp.id, "MAGNITUDE");
-  await claim(e8.id, leakageOpp.id, "FREQUENCY");
+  await claim(e8.id, leakageOpp.id, "PAIN_FREQUENCY");
 
   // No-show: the problem is well evidenced, the ladder is not. One comment
   // contradicts the premise that reminders are insufficient.
   await claim(e1.id, noShowOpp.id, "MAGNITUDE");
-  await claim(e1.id, noShowOpp.id, "FREQUENCY");
-  await claim(e2.id, noShowOpp.id, "WILLINGNESS_TO_PAY");
-  await claim(e3.id, noShowOpp.id, "ALTERNATIVE");
-  await claim(e5.id, noShowOpp.id, "ALTERNATIVE", {}, "CONTRADICTS");
+  await claim(e1.id, noShowOpp.id, "PAIN_FREQUENCY");
+  await claim(e2.id, noShowOpp.id, "PURCHASE_INTENT");
+  await claim(e3.id, noShowOpp.id, "ALTERNATIVE_EXISTS");
+  await claim(e5.id, noShowOpp.id, "ALTERNATIVE_EXISTS", {}, "CONTRADICTS");
 
   // ---- assumptions with evidence links
   const link = async (
@@ -1478,13 +1539,26 @@ async function seedBeautySalons(userId: string) {
   });
 
   // ---- one planned experiment on the first unproven leakage link.
+  // A data feasibility test establishes MECHANISM_FEASIBLE (technical evidence,
+  // high admissibility) — within the tested scope only. It says nothing about
+  // the causal link, leakage decreasing, revenue, or salons in general.
   await prisma.experiment.create({
     data: {
       opportunityId: leakageOpp.id,
-      causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
+      valueChainNodeId: leakageLadder.node("MECHANISM"),
       assumptionId: a7.id,
       title: "Concierge reconciliation for five salons",
       experimentType: "DATA_FEASIBILITY_TEST",
+      designLevel: "OBSERVATIONAL",
+      validityPlan: { sameMeasurement: true, organizationCount: 5, durationDays: 30 },
+      scope: {
+        population: "independent hair salons, 8–12 chairs",
+        industry: "beauty salons",
+        systems: ["POS A", "POS B", "Booking tool C"],
+        environment: "founder-assisted matching",
+        timePeriod: "one month of exports",
+        organizationCount: 5,
+      },
       hypothesis:
         "Exports from the two most common POS and booking tools are enough to match at least 95% of appointments to payments.",
       decisionQuestion:

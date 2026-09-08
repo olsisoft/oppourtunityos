@@ -5,11 +5,13 @@
 import { z } from "zod";
 import {
   AlternativeCategory,
+  AssignmentMethod,
   AssumptionKind,
   AssumptionStatus,
   ClaimType,
   Criticality,
   DesiredDirection,
+  ExperimentDesignLevel,
   ExperimentOutcome,
   ExperimentStatus,
   ExperimentType,
@@ -17,10 +19,13 @@ import {
   VariablePolarity,
   EntryMode,
   EvidenceSentiment,
+  EvidenceSourceType,
   EvidenceType,
   MechanismCategory,
   VariableCategory,
 } from "@/generated/prisma/enums";
+import type { ValidityInputs } from "@/services/value/experimental-validity";
+import { parseScope, type Scope } from "@/services/value/scope";
 
 const score10 = z.coerce.number().int().min(0).max(10);
 const shortText = z.string().trim().min(1).max(200);
@@ -63,6 +68,97 @@ export const updateWorkspaceSchema = z.object({
   entryMode: z.nativeEnum(EntryMode).optional(),
   ideaStatement: optionalLong,
 });
+
+/** Tri-state form value: "" / undefined = not recorded, "yes" | true, "no" | false. */
+const triState = z
+  .union([z.boolean(), z.enum(["", "yes", "no"]), z.null()])
+  .optional()
+  .transform((v) =>
+    v === true || v === "yes" ? true : v === false || v === "no" ? false : undefined,
+  );
+const optionalCount = z
+  .union([z.coerce.number().int().min(0), z.null(), z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined || v === null ? undefined : v));
+const optionalPercent = z
+  .union([z.coerce.number().min(0).max(100), z.null(), z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined || v === null ? undefined : v));
+const optionalEnum = <T extends Record<string, string>>(e: T) =>
+  z
+    .union([z.nativeEnum(e), z.null(), z.literal("")])
+    .optional()
+    .transform((v) => (v === "" || v === null ? undefined : v));
+
+/** Scope of an observation or of a claim (ValidityScope / ClaimScope) as flat form fields. */
+export const scopeFields = {
+  scopePopulation: optionalLong,
+  scopeGeography: optionalLong,
+  scopeIndustry: optionalLong,
+  scopeCompanySize: optionalLong,
+  /** Comma-separated systems / tools / configurations. */
+  scopeSystems: optionalLong,
+  scopeWorkflow: optionalLong,
+  scopeEnvironment: optionalLong,
+  scopeTimePeriod: optionalLong,
+  scopeConditions: optionalLong,
+  scopeExclusions: optionalLong,
+};
+export type ScopeFields = z.infer<z.ZodObject<typeof scopeFields>>;
+
+export function scopeFromFields(
+  d: Partial<ScopeFields>,
+  extra: {
+    sampleSize?: number | null;
+    organizationCount?: number | null;
+    userCount?: number | null;
+  } = {},
+): Scope | null {
+  return parseScope({
+    population: d.scopePopulation,
+    geography: d.scopeGeography,
+    industry: d.scopeIndustry,
+    companySize: d.scopeCompanySize,
+    systems: d.scopeSystems,
+    workflow: d.scopeWorkflow,
+    environment: d.scopeEnvironment,
+    timePeriod: d.scopeTimePeriod,
+    conditions: d.scopeConditions,
+    exclusions: d.scopeExclusions,
+    sampleSize: extra.sampleSize ?? undefined,
+    organizationCount: extra.organizationCount ?? undefined,
+    userCount: extra.userCount ?? undefined,
+  });
+}
+
+/** Experimental validity facts (planned on an experiment, actual on a result). */
+export const validityFields = {
+  baselineMeasured: triState,
+  comparisonGroup: triState,
+  assignmentMethod: optionalEnum(AssignmentMethod),
+  sameMeasurement: triState,
+  interventionIsolated: triState,
+  confoundersControlled: triState,
+  attritionPercent: optionalPercent,
+  instrumentationChanged: triState,
+  durationDays: optionalCount,
+  dataCompletenessPercent: optionalPercent,
+  contaminationRisk: triState,
+  seasonalityRisk: triState,
+  concurrentChanges: triState,
+  organizationCount: optionalCount,
+  userCount: optionalCount,
+};
+export type ValidityFields = z.infer<z.ZodObject<typeof validityFields>>;
+
+export function validityInputsFromFields(d: Partial<ValidityFields>): ValidityInputs {
+  const out: ValidityInputs = {};
+  for (const key of Object.keys(validityFields) as Array<keyof ValidityFields>) {
+    const v = d[key];
+    if (v !== undefined && v !== null) (out as Record<string, unknown>)[key] = v;
+  }
+  return out;
+}
 
 export const evidenceClaimInputSchema = z.object({
   claimType: z.nativeEnum(ClaimType),
@@ -108,6 +204,13 @@ export const createEvidenceSchema = z.object({
   hasWorkaround: z.coerce.boolean().default(false),
   hasPurchaseIntent: z.coerce.boolean().default(false),
   isInterview: z.coerce.boolean().default(false),
+  /** Evidence Fitness inputs: source taxonomy, origin lineage, scope, sample. */
+  sourceType: optionalEnum(EvidenceSourceType),
+  sourceOriginId: optionalLong,
+  sampleSize: optionalCount,
+  organizationCount: optionalCount,
+  userCount: optionalCount,
+  ...scopeFields,
   /** "What claim does this evidence affect?" — one item may affect several claims. */
   claims: z.array(evidenceClaimInputSchema).max(40).default([]),
 });
@@ -279,6 +382,10 @@ const experimentFields = {
   timeEstimate: optionalLong,
   owner: optionalLong,
   notes: optionalLong,
+  /** Experimental validity plan: declared design and the planned checklist. */
+  designLevel: optionalEnum(ExperimentDesignLevel),
+  ...validityFields,
+  ...scopeFields,
 };
 
 export const createExperimentSchema = z.object({
@@ -324,6 +431,10 @@ export const completeExperimentSchema = z.object({
   claims: z.array(evidenceClaimInputSchema).max(40).default([]),
   /** Ids of raw evidence items captured alongside (already in the workspace). */
   rawEvidenceIds: z.array(z.string().min(1)).max(50).default([]),
+  /** Experimental validity facts of the run, and the scope actually observed. */
+  designLevel: optionalEnum(ExperimentDesignLevel),
+  ...validityFields,
+  ...scopeFields,
 });
 export type CompleteExperimentInput = z.infer<typeof completeExperimentSchema>;
 

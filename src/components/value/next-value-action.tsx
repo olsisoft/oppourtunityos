@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { OpportunityWithRelations } from "@/db/workspaces";
 import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
-import type { ValueAction } from "@/services/value/next-value-action";
+import { UNCERTAINTY_LABELS, type ValueAction } from "@/services/value/next-value-action";
 
 export function NextValueActionCard({
   action,
@@ -52,6 +52,13 @@ export function NextValueActionCard({
         <Row label="Affects" value={action.affects} />
         <Row label="If false" value={action.ifFalse} />
         <Row label="Evidence that would move the frontier" value={action.evidenceToMove} />
+        {action.whatThisCouldChange && (
+          <Row
+            label="What this could change"
+            value={action.whatThisCouldChange}
+            className="sm:col-span-2"
+          />
+        )}
         {!compact && action.experiment && (
           <Row label="Recommended experiment" value={action.experiment} className="sm:col-span-2" />
         )}
@@ -71,6 +78,11 @@ export function NextValueActionCard({
         <Badge variant="outline" className="border-background/30 text-background">
           {action.type.replace(/_/g, " ").toLowerCase()}
         </Badge>
+        {action.uncertainty && (
+          <Badge variant="outline" className="border-background/30 text-background">
+            {UNCERTAINTY_LABELS[action.uncertainty].toLowerCase()}
+          </Badge>
+        )}
         <Button size="sm" variant="secondary" onClick={() => setPlanOpen(true)}>
           <FlaskConical /> Plan this experiment
         </Button>

@@ -23,6 +23,11 @@ import {
 import { formatDate } from "@/lib/utils";
 import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
 import { experimentWarnings } from "@/services/value/experiment-outcome";
+import {
+  DESIGN_LEVEL_LABELS,
+  INTERNAL_VALIDITY_LABELS,
+} from "@/services/value/experimental-validity";
+import { describeScope, parseScope } from "@/services/value/scope";
 
 const STATUS_TONE = {
   PLANNED: "info",
@@ -131,6 +136,14 @@ export function ExperimentsList({
                         {e.unit ? ` ${e.unit}` : ""}
                       </p>
                     )}
+                    {!result && e.designLevel && (
+                      <p className="text-muted-foreground mt-0.5 text-xs">
+                        Planned design: {DESIGN_LEVEL_LABELS[e.designLevel]}
+                        {parseScope(e.scope)
+                          ? ` · scope: ${describeScope(parseScope(e.scope))}`
+                          : ""}
+                      </p>
+                    )}
                     {result && (
                       <div className="mt-2 rounded-md border border-dashed p-2 text-xs">
                         <p>
@@ -140,6 +153,42 @@ export function ExperimentsList({
                             : ""}
                           {result.resultSummary}
                         </p>
+                        {(result.designLevel || result.internalValidity) && (
+                          <p className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {result.designLevel && (
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                design · {DESIGN_LEVEL_LABELS[result.designLevel]}
+                              </Badge>
+                            )}
+                            {result.internalValidity && (
+                              <Badge
+                                variant={
+                                  result.internalValidity === "HIGH"
+                                    ? "positive"
+                                    : result.internalValidity === "MEDIUM"
+                                      ? "info"
+                                      : result.internalValidity === "LOW"
+                                        ? "negative"
+                                        : "warning"
+                                }
+                                className="font-mono text-[10px]"
+                              >
+                                validity · {INTERNAL_VALIDITY_LABELS[result.internalValidity]}
+                              </Badge>
+                            )}
+                            {parseScope(result.scope) && (
+                              <Badge variant="muted" className="font-mono text-[10px]">
+                                scope · {describeScope(parseScope(result.scope))}
+                              </Badge>
+                            )}
+                          </p>
+                        )}
+                        {result.interpretation && (
+                          <p className="mt-1">
+                            <span className="text-muted-foreground">Interpretation: </span>
+                            {result.interpretation}
+                          </p>
+                        )}
                         {result.limitations && (
                           <p className="text-muted-foreground mt-0.5">
                             Limitations: {result.limitations}

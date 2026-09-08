@@ -23,7 +23,17 @@ import type { NextAction } from "@/services/scoring/next-action";
 import type { VerdictResult } from "@/services/scoring/verdict";
 import { CAUSAL_DISTANCE_LABELS } from "@/services/value/epistemic";
 import type { ValueAction } from "@/services/value/next-value-action";
-import { PROOF_RUNG_LABELS, type FrontierPosition } from "@/services/value/proof-frontier";
+import {
+  PROOF_RUNG_LABELS,
+  type FrontierPosition,
+  type ProofFrontierResult,
+} from "@/services/value/proof-frontier";
+import { GENERALIZATION_LABELS } from "@/services/value/language-gate";
+import {
+  DESIGN_LEVEL_LABELS,
+  INTERNAL_VALIDITY_LABELS,
+} from "@/services/value/experimental-validity";
+import { describeScope, parseScope } from "@/services/value/scope";
 import { FIELD_STATUS_LABELS, fieldStatus } from "@/services/value/variable-semantics";
 
 export interface ReportEvidenceItem {
@@ -49,6 +59,12 @@ export interface ReportLadderNode {
   causalDistance: string;
   evidenceCount: number;
   assumptionCount: number;
+  /** Evidence fitness and scope of generalization (computed). */
+  bestFit: number | null;
+  admissible: number;
+  scope: string | null;
+  generalization: string;
+  inference: string | null;
 }
 
 export interface ReportCausalLink {
@@ -57,6 +73,27 @@ export interface ReportCausalLink {
   statement: string;
   status: string;
   criticality: string;
+  bestFit: number | null;
+  designLevel: string | null;
+  generalization: string;
+  inference: string | null;
+}
+
+export interface ReportExperimentValidity {
+  title: string;
+  outcome: string;
+  design: string;
+  internalValidity: string;
+  scope: string;
+  interpretation: string;
+  threats: string[];
+}
+
+export interface ReportCommercialRung {
+  label: string;
+  status: string;
+  evidenceCount: number;
+  bestFit: number;
 }
 
 export interface OpportunityReport {
@@ -89,8 +126,19 @@ export interface OpportunityReport {
   /** I. Value causality ladder. */
   ladder: ReportLadderNode[];
   causalLinks: ReportCausalLink[];
-  /** J. Proof frontier. */
-  frontier: { position: FrontierPosition; label: string; text: string; whyStops: string };
+  /** J. Proof frontier — level and scope. */
+  frontier: {
+    position: FrontierPosition;
+    label: string;
+    text: string;
+    whyStops: string;
+    scope: string;
+    generalization: string | null;
+  };
+  /** Commercial ladder: each rung is its own claim. */
+  commercial: ReportCommercialRung[];
+  /** Experimental validity of completed experiments. */
+  experimentValidity: ReportExperimentValidity[];
   /** K. Scorecard. null = INCOMPLETE. */
   scorecard: {
     opportunityPotential: number;
@@ -149,7 +197,8 @@ export function buildOpportunityReport(
   const killWarnings = (o.killWarnings as unknown as KillWarning[] | null) ?? [];
   const v = o.variable;
   const frontierPosition = (o.proofFrontierRung as FrontierPosition | null) ?? "NONE";
-  const storedFrontier = o.proofFrontier as unknown as { whyStops?: string } | null;
+  const storedFrontier = o.proofFrontier as unknown as ProofFrontierResult | null;
+  const rungOf = (rung: string) => storedFrontier?.rungs?.find((r) => r.rung === rung) ?? null;
   const valueBreakdown = o.valueStrengthBreakdown as unknown as {
     completeness?: string;
     missing?: string[];
@@ -216,28 +265,68 @@ export function buildOpportunityReport(
     productHypothesis: o.productHypothesis ?? "Not yet formed",
     valueProposition: o.valueProposition ?? "Not yet formed",
     metric: o.metric ?? "UNKNOWN — no measurable outcome defined",
-    ladder: o.valueChainNodes.map((n) => ({
-      level: VALUE_CHAIN_LEVEL_LABELS[n.level],
-      statement: n.statement,
-      status: EPISTEMIC_LABELS[n.status],
-      confidence: n.confidence,
-      causalDistance: CAUSAL_DISTANCE_LABELS[n.causalDistance]?.code ?? `CD${n.causalDistance}`,
-      evidenceCount: n.evidenceLinks.length,
-      assumptionCount: n.assumptions.length,
-    })),
-    causalLinks: o.causalLinks.map((l) => ({
-      from: VALUE_CHAIN_LEVEL_LABELS[l.fromNode.level],
-      to: VALUE_CHAIN_LEVEL_LABELS[l.toNode.level],
-      statement: l.statement,
-      status: EPISTEMIC_LABELS[l.status],
-      criticality: CRITICALITY_LABELS[l.criticality],
-    })),
+    ladder: o.valueChainNodes.map((n) => {
+      const summary = rungOf(n.level)?.summary ?? null;
+      return {
+        level: VALUE_CHAIN_LEVEL_LABELS[n.level],
+        statement: n.statement,
+        status: EPISTEMIC_LABELS[n.status],
+        confidence: n.confidence,
+        causalDistance: CAUSAL_DISTANCE_LABELS[n.causalDistance]?.code ?? `CD${n.causalDistance}`,
+        evidenceCount: n.evidenceLinks.length,
+        assumptionCount: n.assumptions.length,
+        bestFit: summary && summary.total > 0 ? summary.bestFit : null,
+        admissible: summary?.admissible ?? 0,
+        scope: n.observedScope ? describeScope(parseScope(n.observedScope)) : null,
+        generalization: GENERALIZATION_LABELS[n.generalization],
+        inference: n.inference,
+      };
+    }),
+    causalLinks: o.causalLinks.map((l) => {
+      const summary = rungOf(l.toNode.level)?.linkFromPrevious?.summary ?? null;
+      return {
+        from: VALUE_CHAIN_LEVEL_LABELS[l.fromNode.level],
+        to: VALUE_CHAIN_LEVEL_LABELS[l.toNode.level],
+        statement: l.statement,
+        status: EPISTEMIC_LABELS[l.status],
+        criticality: CRITICALITY_LABELS[l.criticality],
+        bestFit: summary && summary.total > 0 ? summary.bestFit : null,
+        designLevel: summary?.designLevel ? DESIGN_LEVEL_LABELS[summary.designLevel] : null,
+        generalization: GENERALIZATION_LABELS[l.generalization],
+        inference: l.inference,
+      };
+    }),
     frontier: {
       position: frontierPosition,
       label: PROOF_RUNG_LABELS[frontierPosition],
       text: frontierSentence(frontierPosition),
       whyStops: storedFrontier?.whyStops ?? "Not computed yet.",
+      scope: storedFrontier?.frontierScope?.text ?? "not computed",
+      generalization: storedFrontier?.frontierScope?.generalizationLabel ?? null,
     },
+    commercial: (storedFrontier?.commercial?.rungs ?? []).map((r) => ({
+      label: r.label,
+      status: EPISTEMIC_LABELS[r.status],
+      evidenceCount: r.evidenceCount,
+      bestFit: r.bestFit,
+    })),
+    experimentValidity: o.experiments
+      .filter((e) => e.resultRecord)
+      .map((e) => {
+        const r = e.resultRecord!;
+        const assessment = (r.validityAssessment ?? null) as { threats?: string[] } | null;
+        return {
+          title: e.title,
+          outcome: r.outcome,
+          design: r.designLevel ? DESIGN_LEVEL_LABELS[r.designLevel] : "not recorded",
+          internalValidity: r.internalValidity
+            ? INTERNAL_VALIDITY_LABELS[r.internalValidity]
+            : "not assessed",
+          scope: describeScope(parseScope(r.scope)),
+          interpretation: r.interpretation ?? "",
+          threats: assessment?.threats ?? [],
+        };
+      }),
     scorecard: {
       opportunityPotential: o.opportunityScore,
       evidenceConfidence: o.evidenceScore,
@@ -341,20 +430,32 @@ export function reportToMarkdown(r: OpportunityReport): string {
               (n, i) =>
                 `${i === 0 ? "" : "↓\n"}**${n.level}** [${n.status}${n.confidence ? ` ${n.confidence}` : ""} · ${n.causalDistance}] — ${n.statement}` +
                 (n.evidenceCount || n.assumptionCount
-                  ? ` _(${n.evidenceCount} evidence, ${n.assumptionCount} assumptions)_`
-                  : ""),
+                  ? ` _(${n.evidenceCount} evidence, ${n.admissible} admissible${n.bestFit !== null ? `, best fit ${n.bestFit}` : ""}, ${n.assumptionCount} assumptions)_`
+                  : "") +
+                (n.scope ? `\n  Scope: ${n.scope} · ${n.generalization}` : "") +
+                (n.inference ? `\n  Inference: ${n.inference}` : ""),
             )
             .join("\n")
         : "No value chain stated yet."
     }${
       r.causalLinks.length
-        ? `\n\nCausal links (testable assumptions):\n${r.causalLinks.map((l) => `- ${l.from} → ${l.to} [${l.status}, ${l.criticality}]: ${l.statement}`).join("\n")}`
+        ? `\n\nCausal links (testable assumptions):\n${r.causalLinks.map((l) => `- ${l.from} → ${l.to} [${l.status}, ${l.criticality}${l.bestFit !== null ? `, best fit ${l.bestFit}` : ""}${l.designLevel ? `, ${l.designLevel.toLowerCase()} design` : ""}]: ${l.statement}${l.inference ? ` — ${l.inference}` : ""}`).join("\n")}`
         : ""
     }`,
   );
   lines.push(
-    `## J. Proof frontier\n${r.frontier.text}\n\nWhy the frontier stops here: ${r.frontier.whyStops}`,
+    `## J. Proof frontier\n${r.frontier.text}\n\nScope: ${r.frontier.scope}${r.frontier.generalization ? ` (${r.frontier.generalization})` : ""}. Observed in a sample does not mean proven for the market.\n\nWhy the frontier stops here: ${r.frontier.whyStops}`,
   );
+  if (r.commercial.length) {
+    lines.push(
+      `## Commercial ladder\n${r.commercial.map((c) => `- ${c.label}: ${c.status}${c.evidenceCount ? ` (${c.evidenceCount} admissible, best fit ${c.bestFit})` : ""}`).join("\n")}\n\nEach rung is its own claim: existing spend is not willingness to pay; stated willingness is not a purchase.`,
+    );
+  }
+  if (r.experimentValidity.length) {
+    lines.push(
+      `## Experimental validity\n${r.experimentValidity.map((e) => `- **${e.title}** — ${e.outcome}; design ${e.design}; internal validity ${e.internalValidity}; scope ${e.scope}.\n  ${e.interpretation}${e.threats.length ? `\n  Threats: ${e.threats.join(" ")}` : ""}`).join("\n")}`,
+    );
+  }
   const vs =
     r.scorecard.valueStrength === null
       ? `INCOMPLETE · ${r.scorecard.valueCompleteness ?? "?"}${r.scorecard.valueMissing.length ? ` (missing: ${r.scorecard.valueMissing.join(", ")})` : ""}`

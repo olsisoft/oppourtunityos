@@ -28,14 +28,34 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AdmissibilityBadge } from "@/components/value/fit-badge";
 import type { WorkspaceGraph } from "@/db/workspaces";
 import {
-  EVIDENCE_TYPE_LABELS,
-  EvidenceType,
+  EVIDENCE_SOURCE_TYPE_LABELS,
+  EvidenceSourceType,
   SENTIMENT_LABELS,
   EvidenceSentiment,
 } from "@/domain/enums";
 import { cn } from "@/lib/utils";
+import { admissibilityLevel } from "@/services/value/admissibility";
+import {
+  legacyTypeForSource,
+  SOURCE_FAMILY,
+  SOURCE_FAMILY_LABELS,
+  SOURCE_TYPES,
+  type EvidenceSourceFamily,
+} from "@/services/value/evidence-sources";
+
+const FAMILY_ORDER: EvidenceSourceFamily[] = [
+  "SELF_REPORTED",
+  "BEHAVIORAL",
+  "OPERATIONAL",
+  "MARKET",
+  "EXPERIMENTAL",
+  "TECHNICAL",
+  "COMMERCIAL",
+  "UNKNOWN",
+];
 
 export interface PainOption {
   id: string;
@@ -79,8 +99,18 @@ export function AddEvidenceDialog({
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
+  const [scopeOpen, setScopeOpen] = useState(false);
   const [form, setForm] = useState({
-    type: "CUSTOMER_QUOTE" as EvidenceType,
+    sourceType: "CUSTOMER_QUOTE" as EvidenceSourceType,
+    sourceOriginId: "",
+    sampleSize: "",
+    organizationCount: "",
+    scopePopulation: "",
+    scopeSystems: "",
+    scopeEnvironment: "",
+    scopeTimePeriod: "",
+    scopeConditions: "",
+    scopeGeography: "",
     sourceTitle: "",
     sourceUrl: "",
     sourceExcerpt: "",
@@ -165,7 +195,12 @@ export function AddEvidenceDialog({
         causalLinkId: t.causalLinkId,
         direction: claims[t.key],
       }));
-    const r = await createEvidenceAction({ workspaceId, ...form, claims: claimInputs });
+    const r = await createEvidenceAction({
+      workspaceId,
+      ...form,
+      type: legacyTypeForSource(form.sourceType),
+      claims: claimInputs,
+    });
     setSaving(false);
     if (!r.ok) {
       toast.error(r.error);
@@ -197,19 +232,33 @@ export function AddEvidenceDialog({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => set("type", v as EvidenceType)}>
+              <Label>Source type</Label>
+              <Select
+                value={form.sourceType}
+                onValueChange={(v) => set("sourceType", v as EvidenceSourceType)}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.values(EvidenceType).map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {EVIDENCE_TYPE_LABELS[t]}
-                    </SelectItem>
+                  {FAMILY_ORDER.map((family) => (
+                    <div key={family}>
+                      <p className="text-muted-foreground px-2 pt-1.5 pb-0.5 text-[10px] font-medium tracking-wider uppercase">
+                        {SOURCE_FAMILY_LABELS[family]}
+                      </p>
+                      {SOURCE_TYPES.filter((t) => SOURCE_FAMILY[t] === family).map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {EVIDENCE_SOURCE_TYPE_LABELS[t]}
+                        </SelectItem>
+                      ))}
+                    </div>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-muted-foreground text-[11px]">
+                What the evidence <em>is</em> decides which claims it can establish. An interview
+                establishes a pain; it does not establish causality or a purchase.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ev-title">Source title</Label>
@@ -390,6 +439,113 @@ export function AddEvidenceDialog({
             </div>
           </div>
 
+          <fieldset className="space-y-2 rounded-md border p-3">
+            <legend className="px-1 text-xs font-semibold tracking-wider uppercase">
+              Where was this observed? (scope)
+            </legend>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-muted-foreground text-xs">
+                Evidence counts within the scope it was observed in. Recording it lets the engine
+                judge scope match and how far a claim generalizes.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setScopeOpen((v) => !v)}
+              >
+                {scopeOpen ? "Hide" : "Record scope"}
+              </Button>
+            </div>
+            {scopeOpen && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-origin">Source origin (lineage)</Label>
+                  <Input
+                    id="ev-origin"
+                    value={form.sourceOriginId}
+                    onChange={(e) => set("sourceOriginId", e.target.value)}
+                    placeholder="e.g. interview:owner-a — derivatives of one source count once"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ev-orgs">Organizations</Label>
+                    <Input
+                      id="ev-orgs"
+                      type="number"
+                      min={0}
+                      value={form.organizationCount}
+                      onChange={(e) => set("organizationCount", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ev-n">Sample size</Label>
+                    <Input
+                      id="ev-n"
+                      type="number"
+                      min={0}
+                      value={form.sampleSize}
+                      onChange={(e) => set("sampleSize", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-pop">Population</Label>
+                  <Input
+                    id="ev-pop"
+                    value={form.scopePopulation}
+                    onChange={(e) => set("scopePopulation", e.target.value)}
+                    placeholder="independent hair salons, 8–12 chairs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-systems">Systems / tools (comma-separated)</Label>
+                  <Input
+                    id="ev-systems"
+                    value={form.scopeSystems}
+                    onChange={(e) => set("scopeSystems", e.target.value)}
+                    placeholder="POS A, Booking tool B"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-env">Environment / conditions</Label>
+                  <Input
+                    id="ev-env"
+                    value={form.scopeEnvironment}
+                    onChange={(e) => set("scopeEnvironment", e.target.value)}
+                    placeholder="founder-assisted, unassisted…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-period">Time period</Label>
+                  <Input
+                    id="ev-period"
+                    value={form.scopeTimePeriod}
+                    onChange={(e) => set("scopeTimePeriod", e.target.value)}
+                    placeholder="one month, Q2 2026"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-geo">Geography</Label>
+                  <Input
+                    id="ev-geo"
+                    value={form.scopeGeography}
+                    onChange={(e) => set("scopeGeography", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ev-cond">Other conditions</Label>
+                  <Input
+                    id="ev-cond"
+                    value={form.scopeConditions}
+                    onChange={(e) => set("scopeConditions", e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </fieldset>
+
           {graph && (
             <fieldset className="space-y-2 rounded-md border p-3">
               <legend className="px-1 text-xs font-semibold tracking-wider uppercase">
@@ -407,7 +563,10 @@ export function AddEvidenceDialog({
                 <>
                   <p className="text-muted-foreground text-xs">
                     Tick each claim and say whether the source supports, contradicts or is neutral
-                    about it. The engine reassesses the claim; nothing becomes proven automatically.
+                    about it. The badge shows how admissible a{" "}
+                    {EVIDENCE_SOURCE_TYPE_LABELS[form.sourceType].toLowerCase()} is for that claim;
+                    the engine computes the fit and reassesses the claim — nothing becomes proven
+                    automatically.
                   </p>
                   {groups.map(([group, items]) => (
                     <div key={group} className="space-y-1">
@@ -432,7 +591,12 @@ export function AddEvidenceDialog({
                                 aria-label={`Affects ${t.label}`}
                               />
                               <div className="min-w-0 flex-1">
-                                <p className="font-medium">{t.label}</p>
+                                <p className="flex items-center gap-1.5 font-medium">
+                                  {t.label}
+                                  <AdmissibilityBadge
+                                    level={admissibilityLevel(form.sourceType, t.claimType)}
+                                  />
+                                </p>
                                 {t.detail && (
                                   <p className="text-muted-foreground truncate">{t.detail}</p>
                                 )}

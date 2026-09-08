@@ -3,9 +3,10 @@
  * snapshots of an opportunity's epistemic state; the persisted record is the
  * audit trail of how the workspace came to believe what it believes.
  */
-import type { EpistemicStatus, Verdict } from "@/generated/prisma/enums";
+import type { EpistemicStatus, GeneralizationStatus, Verdict } from "@/generated/prisma/enums";
 import { EPISTEMIC_LABELS } from "@/domain/enums";
-import { isEvidenceBacked } from "./epistemic";
+import { EPISTEMIC_RANK, isEvidenceBacked } from "./epistemic";
+import { GENERALIZATION_LABELS } from "./language-gate";
 import {
   frontierMovement,
   PROOF_RUNG_LABELS,
@@ -19,6 +20,9 @@ export interface KnowledgeClaim {
   label: string;
   status: EpistemicStatus;
   confidence: number;
+  /** Scope in which the claim was observed (OBSERVED), if any. */
+  scope?: string | null;
+  generalization?: GeneralizationStatus | null;
 }
 
 export interface KnowledgeSnapshot {
@@ -35,8 +39,17 @@ export interface KnowledgeSnapshot {
 export interface ClaimDelta {
   key: string;
   label: string;
-  before: { status: EpistemicStatus; confidence: number };
-  after: { status: EpistemicStatus; confidence: number };
+  before: {
+    status: EpistemicStatus;
+    confidence: number;
+    generalization?: GeneralizationStatus | null;
+  };
+  after: {
+    status: EpistemicStatus;
+    confidence: number;
+    scope?: string | null;
+    generalization?: GeneralizationStatus | null;
+  };
   text: string;
 }
 
@@ -50,17 +63,11 @@ export interface KnowledgeDiff {
   lines: string[];
 }
 
-const STATUS_RANK: Record<EpistemicStatus, number> = {
-  CONTRADICTED: 0,
-  UNKNOWN: 1,
-  HYPOTHESIS: 2,
-  UNPROVEN: 3,
-  SUPPORTED: 4,
-  PROVEN: 5,
-};
+const STATUS_RANK = EPISTEMIC_RANK;
 
 function fmt(status: EpistemicStatus, confidence: number): string {
-  return `${EPISTEMIC_LABELS[status]}${isEvidenceBacked(status) || confidence > 0 ? ` ${confidence}` : ""}`;
+  const label = (EPISTEMIC_LABELS as Record<string, string>)[status] ?? status;
+  return `${label}${isEvidenceBacked(status) || confidence > 0 ? ` ${confidence}` : ""}`;
 }
 
 function scoreText(n: number | null, completeness?: string): string {
@@ -75,14 +82,34 @@ export function diffKnowledge(before: KnowledgeSnapshot, after: KnowledgeSnapsho
 
   for (const claim of after.claims) {
     const prev = beforeByKey.get(claim.key);
-    const b = prev ?? { status: "UNKNOWN" as EpistemicStatus, confidence: 0 };
-    if (b.status === claim.status && b.confidence === claim.confidence) continue;
+    const b: Pick<KnowledgeClaim, "status" | "confidence" | "generalization"> = prev ?? {
+      status: "UNKNOWN",
+      confidence: 0,
+      generalization: null,
+    };
+    const genChanged = (b.generalization ?? null) !== (claim.generalization ?? null);
+    if (b.status === claim.status && b.confidence === claim.confidence && !genChanged) continue;
+    const scopeText =
+      claim.status === "OBSERVED" && claim.scope ? ` (in tested scope: ${claim.scope})` : "";
+    const genText =
+      genChanged && claim.generalization
+        ? ` · generalization ${b.generalization ? GENERALIZATION_LABELS[b.generalization] : "—"} → ${GENERALIZATION_LABELS[claim.generalization]}`
+        : "";
     const delta: ClaimDelta = {
       key: claim.key,
       label: claim.label,
-      before: { status: b.status, confidence: b.confidence },
-      after: { status: claim.status, confidence: claim.confidence },
-      text: `${claim.label}: ${fmt(b.status, b.confidence)} → ${fmt(claim.status, claim.confidence)}`,
+      before: {
+        status: b.status,
+        confidence: b.confidence,
+        generalization: b.generalization ?? null,
+      },
+      after: {
+        status: claim.status,
+        confidence: claim.confidence,
+        scope: claim.scope ?? null,
+        generalization: claim.generalization ?? null,
+      },
+      text: `${claim.label}: ${fmt(b.status, b.confidence)} → ${fmt(claim.status, claim.confidence)}${scopeText}${genText}`,
     };
     if (claim.status === "CONTRADICTED" && b.status !== "CONTRADICTED") contradicted.push(delta);
     else if (

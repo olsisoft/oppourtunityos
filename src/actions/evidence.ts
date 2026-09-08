@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
-import { createEvidenceSchema } from "@/domain/schemas";
+import { createEvidenceSchema, scopeFromFields } from "@/domain/schemas";
+import { sourceTypeForLegacy } from "@/services/value/evidence-sources";
 import { logger } from "@/lib/logger";
 import { cleanText, cleanUrl } from "@/lib/sanitize";
 import { requireUserId } from "@/lib/session";
@@ -59,13 +60,27 @@ export async function createEvidenceAction(input: unknown): Promise<ActionResult
     }
 
     const sourceDate = d.sourceDate ? new Date(d.sourceDate) : null;
+    const legacyType = d.isInterview ? "INTERVIEW" : d.type;
+    // Source taxonomy: explicit, else derived from the legacy type. Never a model choice.
+    const sourceType = d.sourceType ?? sourceTypeForLegacy(legacyType);
+    const scope = scopeFromFields(d, {
+      sampleSize: d.sampleSize ?? null,
+      organizationCount: d.organizationCount ?? null,
+      userCount: d.userCount ?? null,
+    });
     const evidence = await prisma.evidence.create({
       data: {
         workspaceId: d.workspaceId,
         painId: d.painId ?? null,
         opportunityId: d.opportunityId ?? null,
-        type: d.isInterview ? "INTERVIEW" : d.type,
+        type: legacyType,
         origin: d.isInterview ? "INTERVIEW" : "USER_CAPTURED",
+        sourceType,
+        sourceOriginId: d.sourceOriginId ? cleanText(d.sourceOriginId, 200) : null,
+        sampleSize: d.sampleSize ?? null,
+        organizationCount: d.organizationCount ?? null,
+        userCount: d.userCount ?? null,
+        scope: scope ? JSON.parse(JSON.stringify(scope)) : undefined,
         sourceTitle: cleanText(d.sourceTitle, 200),
         sourceUrl: cleanUrl(d.sourceUrl),
         sourceExcerpt: cleanText(d.sourceExcerpt, 4000),

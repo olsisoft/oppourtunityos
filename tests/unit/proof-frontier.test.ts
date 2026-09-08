@@ -165,7 +165,7 @@ describe("computeProofFrontier", () => {
     expect(r.blockedAt?.rung).toBe("TRANSFORMATION");
     const op = r.rungs.find((x) => x.rung === "OPERATIONAL_VALUE");
     expect(op?.eligible).toBe(false);
-    expect(op?.status).toBe("PROVEN");
+    expect(op?.status).toBe("STRONGLY_SUPPORTED");
   });
 
   it("requires the link itself, not only the nodes, to be supported", () => {

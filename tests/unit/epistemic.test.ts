@@ -52,7 +52,7 @@ describe("assessClaim", () => {
     }
   });
 
-  it("becomes SUPPORTED then PROVEN as evidence accumulates, using the evidence engine", () => {
+  it("becomes SUPPORTED then STRONGLY_SUPPORTED as evidence accumulates, using the evidence engine", () => {
     const weak = assessClaim({
       hasStatement: true,
       generatedBy: "AI_HYPOTHESIS",
@@ -84,7 +84,7 @@ describe("assessClaim", () => {
       ],
       now: NOW,
     });
-    expect(many.status).toBe("PROVEN");
+    expect(many.status).toBe("STRONGLY_SUPPORTED");
     expect(many.confidence).toBeGreaterThanOrEqual(75);
   });
 

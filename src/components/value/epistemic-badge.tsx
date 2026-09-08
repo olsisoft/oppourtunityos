@@ -24,8 +24,10 @@ export function EpistemicBadge({
         >
           {EPISTEMIC_LABELS[status]}
           {typeof confidence === "number" &&
-          (status === "PROVEN" ||
+          (status === "OBSERVED" ||
+            status === "STRONGLY_SUPPORTED" ||
             status === "SUPPORTED" ||
+            status === "MIXED" ||
             status === "CONTRADICTED" ||
             status === "UNPROVEN") &&
           confidence > 0

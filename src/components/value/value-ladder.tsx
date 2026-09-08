@@ -4,6 +4,11 @@ import { ArrowDown, Plus } from "lucide-react";
 
 import { CausalDistanceBadge, EpistemicBadge } from "@/components/value/epistemic-badge";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EPISTEMIC_LABELS } from "@/domain/enums";
+import { DESIGN_LEVEL_LABELS } from "@/services/value/experimental-validity";
+import { GENERALIZATION_LABELS } from "@/services/value/language-gate";
+import { FIT_BAND_LABELS } from "@/components/value/fit-badge";
 import type {
   GraphCausalLink,
   GraphValueChainNode,
@@ -14,12 +19,64 @@ import type { ValueChainLevel } from "@/generated/prisma/enums";
 import { cn } from "@/lib/utils";
 import { VALUE_CHAIN_LEVEL_ORDER } from "@/services/value/epistemic";
 import {
+  FRONTIER_DESIGN_REQUIRED,
   PROOF_RUNG_LABELS,
   rungIndex,
+  type FrontierClaimSummary,
   type FrontierPosition,
   type ProofFrontierResult,
   type ProofRung,
 } from "@/services/value/proof-frontier";
+
+/** STATUS / FIT / SCOPE of a claim, shown on hover of a ladder node or link. */
+function ClaimHover({
+  title,
+  status,
+  confidence,
+  summary,
+  requiredDesign,
+  blockers,
+}: {
+  title: string;
+  status: keyof typeof EPISTEMIC_LABELS;
+  confidence: number;
+  summary: FrontierClaimSummary | null | undefined;
+  requiredDesign?: ProofRung | null;
+  blockers?: string[];
+}) {
+  const design = requiredDesign ? FRONTIER_DESIGN_REQUIRED[requiredDesign] : undefined;
+  return (
+    <div className="max-w-sm space-y-1 text-xs">
+      <p className="font-medium">{title}</p>
+      <p>
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">Status</span>{" "}
+        {EPISTEMIC_LABELS[status]}
+        {confidence ? ` ${confidence}/100` : ""}
+      </p>
+      <p>
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">Fit</span>{" "}
+        {summary && summary.total > 0
+          ? `best ${summary.bestFit}/100 (${FIT_BAND_LABELS[summary.bestBand]}) · ${summary.admissible}/${summary.total} admissible · ${summary.independentOrigins} independent origin${summary.independentOrigins === 1 ? "" : "s"}${summary.lowFitOnly ? " · low-fit only" : ""}`
+          : "no evidence linked"}
+        {summary?.designLevel
+          ? ` · ${DESIGN_LEVEL_LABELS[summary.designLevel].toLowerCase()} design`
+          : ""}
+        {design ? ` (requires ≥ ${DESIGN_LEVEL_LABELS[design].toLowerCase()})` : ""}
+      </p>
+      <p>
+        <span className="text-muted-foreground font-mono text-[10px] uppercase">Scope</span>{" "}
+        {summary?.observed
+          ? `observed in ${summary.scopeText ?? "an unrecorded scope"}`
+          : summary?.scopeText
+            ? summary.scopeText
+            : "not observed directly"}
+        {summary?.generalization ? ` · ${GENERALIZATION_LABELS[summary.generalization]}` : ""}
+      </p>
+      {summary?.inference && <p className="text-muted-foreground">{summary.inference}</p>}
+      {blockers && blockers.length > 0 && <p className="text-tone-warning">{blockers[0]}</p>}
+    </div>
+  );
+}
 
 export type LadderSelection =
   | { kind: "node"; node: GraphValueChainNode }
@@ -54,12 +111,32 @@ export function ValueLadder({
   const rungState = (rung: ProofRung) => frontier?.rungs.find((r) => r.rung === rung);
   const interactive = Boolean(onSelect);
 
+  const scopeText = frontier?.frontierScope?.text ?? null;
   const frontierDivider = (
     <div className="my-1 flex items-center gap-2" aria-label="Proof frontier">
       <div className="bg-foreground h-px flex-1" />
-      <span className="bg-foreground text-background rounded px-2 py-0.5 font-mono text-[10px] tracking-wider uppercase">
-        Proof frontier · {PROOF_RUNG_LABELS[frontierPos]}
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="bg-foreground text-background max-w-full truncate rounded px-2 py-0.5 font-mono text-[10px] tracking-wider uppercase">
+            Proof frontier · {PROOF_RUNG_LABELS[frontierPos]}
+            {!compact && frontierPos !== "NONE" && scopeText ? ` · ${scopeText}` : ""}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm text-xs">
+          <p className="font-medium">Level: {PROOF_RUNG_LABELS[frontierPos]}</p>
+          <p>
+            Scope: {scopeText ?? "not computed"}
+            {frontier?.frontierScope?.generalizationLabel
+              ? ` · ${frontier.frontierScope.generalizationLabel}`
+              : ""}
+          </p>
+          <p className="text-muted-foreground mt-1">
+            {frontierPos === "NONE"
+              ? "Nothing is supported by fitting evidence yet."
+              : "What was reached, and where it was observed. Beyond this scope the claim is a hypothesis."}
+          </p>
+        </TooltipContent>
+      </Tooltip>
       <div className="bg-foreground h-px flex-1" />
     </div>
   );
@@ -85,10 +162,25 @@ export function ValueLadder({
                     <p className="text-muted-foreground truncate text-xs">{state.reasons[0]}</p>
                   ) : null}
                 </div>
-                <EpistemicBadge
-                  status={state?.status ?? "UNKNOWN"}
-                  confidence={state?.confidence}
-                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <EpistemicBadge
+                        status={state?.status ?? "UNKNOWN"}
+                        confidence={state?.confidence}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <ClaimHover
+                      title={PROOF_RUNG_LABELS[rung]}
+                      status={state?.status ?? "UNKNOWN"}
+                      confidence={state?.confidence ?? 0}
+                      summary={state?.summary}
+                      blockers={state?.eligible ? [] : state?.reasons}
+                    />
+                  </TooltipContent>
+                </Tooltip>
               </div>
               {frontierPos === rung && frontierDivider}
             </div>
@@ -132,7 +224,23 @@ export function ValueLadder({
                           {link.criticality.toLowerCase()}
                         </Badge>
                       )}
-                      <EpistemicBadge status={link.status} confidence={link.confidence} />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span>
+                            <EpistemicBadge status={link.status} confidence={link.confidence} />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <ClaimHover
+                            title={`${VALUE_CHAIN_LEVEL_LABELS[link.fromNode.level]} → ${VALUE_CHAIN_LEVEL_LABELS[link.toNode.level]}`}
+                            status={link.status}
+                            confidence={link.confidence}
+                            summary={rungState(level as ProofRung)?.linkFromPrevious?.summary}
+                            requiredDesign={level as ProofRung}
+                            blockers={rungState(level as ProofRung)?.linkFromPrevious?.reasons}
+                          />
+                        </TooltipContent>
+                      </Tooltip>
                     </span>
                   </button>
                 ) : prevNode && node ? (
@@ -178,10 +286,35 @@ export function ValueLadder({
                     <p className="text-muted-foreground mt-0.5 text-[11px]">
                       {node.evidenceLinks.length} evidence · {node.assumptions.length} assumption
                       {node.assumptions.length === 1 ? "" : "s"}
+                      {rungState(level as ProofRung)?.summary?.total
+                        ? ` · best fit ${rungState(level as ProofRung)!.summary!.bestFit}`
+                        : ""}
+                      {node.status === "OBSERVED" && node.observedScope
+                        ? ` · scope: ${rungState(level as ProofRung)?.summary?.scopeText ?? "recorded"}`
+                        : ""}
                     </p>
                   )}
                 </div>
-                <EpistemicBadge status={node.status} confidence={node.confidence} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <EpistemicBadge status={node.status} confidence={node.confidence} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <ClaimHover
+                      title={`${VALUE_CHAIN_LEVEL_LABELS[level]}: ${node.statement}`}
+                      status={node.status}
+                      confidence={node.confidence}
+                      summary={rungState(level as ProofRung)?.summary}
+                      blockers={
+                        rungState(level as ProofRung)?.eligible
+                          ? []
+                          : rungState(level as ProofRung)?.reasons
+                      }
+                    />
+                  </TooltipContent>
+                </Tooltip>
               </button>
             ) : (
               <button

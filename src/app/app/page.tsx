@@ -18,7 +18,13 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
-import { EVIDENCE_GAP_LABELS, STALLED_AFTER_DAYS, getDashboardData } from "@/db/dashboard";
+import {
+  EVIDENCE_GAP_LABELS,
+  FITNESS_GAP_LABELS,
+  STALLED_AFTER_DAYS,
+  getDashboardData,
+} from "@/db/dashboard";
+import { GENERALIZATION_LABELS } from "@/services/value/language-gate";
 import { formatDate } from "@/lib/utils";
 import {
   ASSUMPTION_KIND_LABELS,
@@ -381,6 +387,93 @@ export default async function DashboardPage({
                           <p className="text-muted-foreground text-xs">{detail}</p>
                         </li>
                       ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Evidence fitness gaps</CardTitle>
+                  <CardDescription>
+                    Where the Proof Frontier is blocked by evidence that exists but cannot establish
+                    the claim: not admissible, low fit, or a design too weak for causality. More of
+                    the same evidence will not help.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.fitnessGaps.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      No live opportunity is blocked by ill-fitting evidence.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.fitnessGaps.map(({ opportunity: o, kind, claim, detail }) => (
+                        <li key={`${o.id}-${kind}`} className="text-sm">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px]">
+                              {FITNESS_GAP_LABELS[kind]}
+                            </Badge>
+                            <Link
+                              href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
+                              className="font-medium hover:underline"
+                            >
+                              {o.title}
+                            </Link>
+                            <span className="text-muted-foreground text-xs">· {claim}</span>
+                          </div>
+                          <details className="text-muted-foreground text-xs">
+                            <summary className="cursor-pointer">Why</summary>
+                            <p className="mt-0.5">{detail}</p>
+                          </details>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Generalization gaps</CardTitle>
+                  <CardDescription>
+                    Levels observed in one case or a small sample. Observed in a sample does not
+                    mean proven for the market; the next question widens the scope.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.generalizationGaps.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      No observed level is waiting for generalization.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.generalizationGaps.map(
+                        ({ opportunity: o, level, generalization, scope, detail, question }) => (
+                          <li key={o.id} className="text-sm">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge variant="outline" className="text-[10px]">
+                                {GENERALIZATION_LABELS[generalization]}
+                              </Badge>
+                              <Link
+                                href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
+                                className="font-medium hover:underline"
+                              >
+                                {o.title}
+                              </Link>
+                              <span className="text-muted-foreground text-xs">
+                                · {level} · {scope}
+                              </span>
+                            </div>
+                            <details className="text-muted-foreground text-xs">
+                              <summary className="cursor-pointer">{question ?? "Why"}</summary>
+                              <p className="mt-0.5">{detail}</p>
+                            </details>
+                          </li>
+                        ),
+                      )}
                     </ul>
                   )}
                 </CardContent>

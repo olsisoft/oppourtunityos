@@ -93,6 +93,13 @@ const VALIDATION_LOOP = [
   "Decision",
 ];
 
+const EVIDENCE_FIT_EXAMPLES: Array<[string, string, string]> = [
+  ["Interview", "that a pain exists and how it is described", "its magnitude, nor causality"],
+  ["Operational data", "frequency and magnitude, as measured", "that a mechanism caused a change"],
+  ["Controlled test", "a causal effect within the tested scope", "the whole market"],
+  ["Purchase", "willingness to pay and actual purchase", "that the product created value"],
+];
+
 const FOUR_QUESTIONS = [
   ["Opportunity Potential", "Is the problem structurally attractive?"],
   ["Evidence Confidence", "Do we have credible evidence that the problem is real?"],
@@ -187,7 +194,8 @@ export function LandingSections({ appHref }: { appHref: string }) {
           <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
             The analyst proposes hypotheses and asks questions. Four independent scores, the
             epistemic status of every claim, the Proof Frontier and the verdict are computed
-            deterministically from the evidence you capture. UNKNOWN stays UNKNOWN.
+            deterministically from the evidence you capture. UNKNOWN stays UNKNOWN. And not every
+            piece of evidence can prove every claim.
           </p>
           <div className="mt-6 grid gap-4 md:grid-cols-4">
             {FOUR_QUESTIONS.map(([title, question]) => (
@@ -209,6 +217,34 @@ export function LandingSections({ appHref }: { appHref: string }) {
             unproven causal link.
           </p>
         </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-16">
+        <h2 className="text-2xl font-semibold tracking-tight">
+          Not all evidence proves the same thing
+        </h2>
+        <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
+          Evidence isn&apos;t just a source. It has to fit the claim. Every piece of evidence is
+          judged against the specific claim it is linked to — admissibility, directness, method,
+          independence, scope, sample, recency — and a claim is only as established as its
+          best-fitting evidence, within the scope where it was observed.
+        </p>
+        <div className="mt-6 grid gap-3 text-sm md:grid-cols-4">
+          {EVIDENCE_FIT_EXAMPLES.map(([source, proves, cannot]) => (
+            <div key={source} className="bg-muted/40 rounded-lg border p-4">
+              <p className="text-[10px] font-medium tracking-wider uppercase">{source}</p>
+              <p className="mt-1">
+                <span className="text-muted-foreground">establishes</span> {proves}
+              </p>
+              <p className="text-muted-foreground mt-1 text-xs">not {cannot}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-muted-foreground mt-6 text-sm">
+          Interviews cannot establish causality. Existing spend is not willingness to pay. A
+          before/after change is consistent with an effect, not proof of one. Observed in five
+          salons means observed in five salons.
+        </p>
       </section>
 
       <section className="mx-auto max-w-6xl px-6 py-16">

@@ -69,7 +69,8 @@ export default async function LandingPage() {
           </div>
           <p className="text-muted-foreground mt-6 text-xs">
             Hypothesis ≠ Evidence. Every opportunity carries four independent scores and a Proof
-            Frontier. The AI doesn&apos;t decide what&apos;s true. Evidence does.
+            Frontier. The AI doesn&apos;t decide what&apos;s true. Evidence does. And evidence
+            isn&apos;t just a source: it has to fit the claim.
           </p>
         </section>
 

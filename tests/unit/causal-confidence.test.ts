@@ -23,6 +23,7 @@ function link(
   n: number,
   criticality: CausalLinkInput["criticality"] = "CRITICAL",
   direction: "SUPPORTS" | "CONTRADICTS" = "SUPPORTS",
+  designLevel: "ANECDOTAL" | "BEFORE_AFTER" | "CONTROLLED" = "CONTROLLED",
 ): CausalLinkInput {
   return {
     from,
@@ -32,7 +33,9 @@ function link(
     assessment: assessClaim({
       hasStatement: true,
       generatedBy: "AI_HYPOTHESIS",
-      evidence: Array.from({ length: n }, () => ({ signal: base, direction })),
+      // Controlled design by default so the chain arithmetic is visible; the
+      // design ceiling is tested separately.
+      evidence: Array.from({ length: n }, () => ({ signal: base, direction, designLevel })),
       now: NOW,
     }),
   };
@@ -71,6 +74,26 @@ describe("computeCausalConfidence", () => {
     expect(r.weakest?.from).toBe("TRANSFORMATION");
     const avg = strongLinks.reduce((s, l) => s + l.assessment.confidence, 0) / 4;
     expect(r.score as number).toBeLessThan(avg);
+  });
+
+  it("interview-only (anecdotal) evidence cannot push a causal link above the design ceiling", () => {
+    const anecdotal = computeCausalConfidence([
+      link("MECHANISM", "CAPABILITY", 4, "CRITICAL", "SUPPORTS", "ANECDOTAL"),
+      link("CAPABILITY", "TRANSFORMATION", 4, "CRITICAL", "SUPPORTS", "ANECDOTAL"),
+      link("TRANSFORMATION", "OPERATIONAL_VALUE", 4, "CRITICAL", "SUPPORTS", "ANECDOTAL"),
+      link("OPERATIONAL_VALUE", "ECONOMIC_VALUE", 4, "CRITICAL", "SUPPORTS", "ANECDOTAL"),
+    ]);
+    expect(anecdotal.status).toBe("COMPLETE");
+    expect(anecdotal.score as number).toBeLessThanOrEqual(30);
+    expect(anecdotal.weakest?.cappedBy).toMatch(/anecdotal/);
+    const beforeAfter = computeCausalConfidence([
+      link("MECHANISM", "CAPABILITY", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
+      link("CAPABILITY", "TRANSFORMATION", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
+      link("TRANSFORMATION", "OPERATIONAL_VALUE", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
+      link("OPERATIONAL_VALUE", "ECONOMIC_VALUE", 4, "CRITICAL", "SUPPORTS", "BEFORE_AFTER"),
+    ]);
+    expect(beforeAfter.score as number).toBeGreaterThan(anecdotal.score as number);
+    expect(beforeAfter.score as number).toBeLessThanOrEqual(60);
   });
 
   it("caps a contradicted critical link", () => {

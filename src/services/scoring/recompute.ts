@@ -1,8 +1,8 @@
 /**
  * Loads an opportunity with its evidence, value chain and assumptions, runs
  * the pure scoring functions and persists the computed values. This is the
- * only place where scores, statuses, the Proof Frontier and verdicts are
- * written to the database.
+ * only place where scores, statuses, evidence fitness, the Proof Frontier
+ * and verdicts are written to the database.
  *
  * Four independent scores:
  *   Opportunity Potential  ← six structural 0–10 inputs
@@ -10,18 +10,25 @@
  *   Value Strength         ← five value dimensions (null = INCOMPLETE)
  *   Causal Confidence      ← evidence on the mechanism → value causal links
  *
+ * Every claim is assessed from evidence weighted by its fitness for THAT
+ * claim (admissibility × directness × method × independence × scope × sample
+ * × recency). Fit is persisted on every evidence→claim link so the UI can
+ * show it; it is never edited by a user or a model.
+ *
  * Every recompute that changes something records a KnowledgeChange: the
  * audit trail of how the workspace came to believe what it believes.
  */
 import { prisma } from "@/db/prisma";
 import { logger } from "@/lib/logger";
 import { VALUE_CHAIN_LEVEL_LABELS } from "@/domain/enums";
+import { Prisma } from "@/generated/prisma/client";
 import type {
   ClaimType,
   Evidence,
   EvidenceLinkDirection,
+  ExperimentDesignLevel,
+  InternalValidity,
   KnowledgeTrigger,
-  Prisma,
 } from "@/generated/prisma/client";
 import type { EpistemicStatus, ValueChainLevel } from "@/generated/prisma/enums";
 import { computeOpportunityScore } from "./opportunity-score";
@@ -37,6 +44,23 @@ import {
   type ClaimAssumptionInput,
   type ClaimEvidenceInput,
 } from "@/services/value/epistemic";
+import {
+  claimTypeForLevel,
+  claimTypeForLink,
+  COMMERCIAL_LADDER,
+  PROBLEM_CLAIM_TYPES,
+  RUNG_CLAIM_TYPES,
+  RUNG_PRIMARY_CLAIM,
+} from "@/services/value/claim-taxonomy";
+import { computeCommercialLadder } from "@/services/value/commercial-ladder";
+import {
+  computeEvidenceFit,
+  FIT_VERSION,
+  originOf,
+  type EvidenceFit,
+  type EvidenceFitInput,
+} from "@/services/value/evidence-fit";
+import { isMeasurementSource } from "@/services/value/evidence-sources";
 import {
   computeCausalConfidence,
   type CausalConfidenceResult,
@@ -57,6 +81,7 @@ import {
   type ProofFrontierResult,
   type ProofRung,
 } from "@/services/value/proof-frontier";
+import { describeScope, parseScope, scopeFromContext, type Scope } from "@/services/value/scope";
 import { computeValueStrength, type ValueStrengthResult } from "@/services/value/value-strength";
 import { extendVerdict } from "@/services/value/verdict-extension";
 import { computeValueActions } from "@/services/value/next-value-action";
@@ -68,7 +93,19 @@ export function isKnown(value: string | null | undefined): boolean {
   return v.length > 0 && !/^unknown\b/i.test(v);
 }
 
-export function toEvidenceSignal(e: Evidence): EvidenceSignal {
+/** Evidence row plus the validity of the experiment result it came from, if any. */
+export type EvidenceRow = Evidence & {
+  experimentResult?: {
+    designLevel: ExperimentDesignLevel | null;
+    internalValidity: InternalValidity | null;
+  } | null;
+};
+
+const evidenceValidityInclude = {
+  experimentResult: { select: { designLevel: true, internalValidity: true } },
+} as const;
+
+export function toEvidenceSignal(e: EvidenceRow): EvidenceSignal {
   return {
     type: e.type,
     strengthScore: e.strengthScore,
@@ -80,38 +117,97 @@ export function toEvidenceSignal(e: Evidence): EvidenceSignal {
     hasEconomicImpact: e.hasEconomicImpact,
     hasWorkaround: e.hasWorkaround,
     hasPurchaseIntent: e.hasPurchaseIntent,
+    sourceType: e.sourceType,
+    originId: originOf(e),
+  };
+}
+
+export function toFitInput(e: EvidenceRow): EvidenceFitInput {
+  return {
+    id: e.id,
+    sourceType: e.sourceType,
+    strengthScore: e.strengthScore,
+    relevanceScore: e.relevanceScore,
+    isDirectCustomer: e.isDirectCustomer,
+    sourceDate: e.sourceDate,
+    scope: parseScope(e.scope),
+    sampleSize: e.sampleSize,
+    organizationCount: e.organizationCount,
+    userCount: e.userCount,
+    sourceOriginId: e.sourceOriginId,
+    limitations: e.limitations,
+    designLevel: e.experimentResult?.designLevel ?? null,
+    internalValidity: e.experimentResult?.internalValidity ?? null,
   };
 }
 
 /** Evidence linked directly to the opportunity plus evidence on its pain. */
-export async function loadOpportunityEvidence(opportunityId: string, painId: string | null) {
+export async function loadOpportunityEvidence(
+  opportunityId: string,
+  painId: string | null,
+): Promise<EvidenceRow[]> {
   const rows = await prisma.evidence.findMany({
     where: {
       OR: [{ opportunityId }, ...(painId ? [{ painId }] : [])],
     },
     orderBy: { capturedAt: "desc" },
+    include: evidenceValidityInclude,
   });
   const seen = new Set<string>();
   return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 }
 
-/** Claim types that speak to the problem (feed Evidence Confidence). */
-const PROBLEM_CLAIM_TYPES: ReadonlySet<ClaimType> = new Set<ClaimType>([
-  "ICP",
-  "VARIABLE",
-  "CURRENT_STATE",
-  "PAIN",
-  "MAGNITUDE",
-  "FREQUENCY",
-  "ECONOMIC_IMPACT",
-  "ALTERNATIVE",
-  "TRIGGER",
-]);
-
 const PROBLEM_RUNGS: ProofRung[] = ["VARIABLE_IMPORTANCE", "PAIN", "ECONOMIC_PAIN"];
 
-function toClaimInput(e: Evidence, direction: EvidenceLinkDirection): ClaimEvidenceInput {
-  return { signal: toEvidenceSignal(e), direction };
+/** One evidence item as used for one claim (with its claim link id when it came from a link). */
+interface ClaimUse {
+  e: EvidenceRow;
+  direction: EvidenceLinkDirection;
+  claimType: ClaimType;
+  linkId?: string;
+}
+
+/**
+ * Fitness for a set of uses of one claim. Independence is judged within the
+ * set: the strongest item of each origin counts fully, later derivatives of
+ * the same origin do not. Fit computed for claim links is collected for
+ * persistence.
+ */
+function fitUses(
+  uses: ClaimUse[],
+  claimScope: Scope | null,
+  now: Date,
+  sink: Map<string, EvidenceFit>,
+): ClaimEvidenceInput[] {
+  const order = [...uses].sort(
+    (a, b) =>
+      b.e.strengthScore * b.e.relevanceScore - a.e.strengthScore * a.e.relevanceScore ||
+      a.e.id.localeCompare(b.e.id),
+  );
+  const seen = new Set<string>();
+  const fits = new Map<ClaimUse, EvidenceFit>();
+  for (const use of order) {
+    const fit = computeEvidenceFit(toFitInput(use.e), {
+      claimType: use.claimType,
+      claimScope,
+      now,
+      priorOrigins: seen,
+    });
+    seen.add(fit.originId);
+    fits.set(use, fit);
+    if (use.linkId) sink.set(use.linkId, fit);
+  }
+  return uses.map((use) => {
+    const fit = fits.get(use)!;
+    return {
+      signal: { ...toEvidenceSignal(use.e), fit: fit.fitScore },
+      direction: use.direction,
+      fit,
+      scope: parseScope(use.e.scope),
+      originId: fit.originId,
+      measurement: isMeasurementSource(use.e.sourceType),
+    };
+  });
 }
 
 function toAssumptionInput(a: {
@@ -125,6 +221,10 @@ function toAssumptionInput(a: {
 
 function serialize(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function serializeNullable(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  return value === null || value === undefined ? Prisma.JsonNull : serialize(value);
 }
 
 function linkKey(from: ValueChainLevel, to: ValueChainLevel): string {
@@ -142,16 +242,17 @@ export interface RecomputeContext {
 }
 
 export async function recomputeOpportunity(opportunityId: string, ctx: RecomputeContext = {}) {
+  const now = new Date();
   const opportunity = await prisma.opportunity.findUnique({
     where: { id: opportunityId },
     include: {
-      icp: true,
+      icp: { include: { market: { select: { name: true } } } },
       variable: true,
       pain: { include: { triggers: true, alternatives: true } },
       assumptions: { include: { links: true } },
       valueChainNodes: {
         include: {
-          evidenceLinks: { include: { evidence: true } },
+          evidenceLinks: { include: { evidence: { include: evidenceValidityInclude } } },
           assumptions: { include: { links: true } },
         },
       },
@@ -159,11 +260,11 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
         include: {
           fromNode: true,
           toNode: true,
-          evidenceLinks: { include: { evidence: true } },
+          evidenceLinks: { include: { evidence: { include: evidenceValidityInclude } } },
           assumptions: { include: { links: true } },
         },
       },
-      claimLinks: { include: { evidence: true } },
+      claimLinks: { include: { evidence: { include: evidenceValidityInclude } } },
       experiments: {
         select: {
           id: true,
@@ -182,6 +283,16 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     },
   });
   if (!opportunity) return null;
+
+  // ---- Claim scope: what the opportunity's claims are made for -----------------
+  const oppScope: Scope | null =
+    parseScope(opportunity.claimScope) ??
+    scopeFromContext({
+      icpName: opportunity.icp?.name ?? null,
+      companyType: opportunity.icp?.companyType ?? null,
+      companySize: opportunity.icp?.companySize ?? null,
+      marketName: opportunity.icp?.market?.name ?? null,
+    });
 
   // ---- Snapshot of what was believed before this recompute --------------------
   const storedFrontier = opportunity.proofFrontier as unknown as ProofFrontierResult | null;
@@ -206,33 +317,117 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           label: PROOF_RUNG_LABELS[r.rung],
           status: r.status,
           confidence: r.confidence,
+          scope: r.summary?.scopeText ?? null,
+          generalization: r.summary?.generalization ?? null,
         })),
       ...opportunity.valueChainNodes.map<KnowledgeClaim>((n) => ({
         key: `node:${n.level}`,
         label: VALUE_CHAIN_LEVEL_LABELS[n.level],
         status: n.status,
         confidence: n.confidence,
+        scope: n.observedScope ? describeScope(parseScope(n.observedScope)) : null,
+        generalization: n.generalization,
       })),
       ...opportunity.causalLinks.map<KnowledgeClaim>((l) => ({
         key: linkKey(l.fromNode.level, l.toNode.level),
         label: linkLabel(l.fromNode.level, l.toNode.level),
         status: l.status,
         confidence: l.confidence,
+        scope: l.observedScope ? describeScope(parseScope(l.observedScope)) : null,
+        generalization: l.generalization,
       })),
     ],
   };
 
-  // ---- Evidence Confidence (problem evidence) --------------------------------
+  // ---- Problem-side claims for the Proof Frontier ----------------------------
+  const fitSink = new Map<string, EvidenceFit>();
   const problemEvidence = await loadOpportunityEvidence(opportunity.id, opportunity.painId);
   const problemIds = new Set(problemEvidence.map((e) => e.id));
+  const linksOf = (types: ClaimType[]): ClaimUse[] =>
+    opportunity.claimLinks
+      .filter((l) => types.includes(l.claimType) && !l.valueChainNodeId && !l.causalLinkId)
+      .map((l) => ({
+        e: l.evidence,
+        direction: l.direction,
+        claimType: l.claimType,
+        linkId: l.id,
+      }));
+  const painUses = (filter: (e: EvidenceRow) => boolean, claimType: ClaimType): ClaimUse[] =>
+    problemEvidence
+      .filter(filter)
+      .map((e) => ({ e, direction: sentimentToDirection(e.sentiment), claimType }));
+
+  const variableUses = [
+    ...painUses(
+      (e) => e.hasExplicitPain || e.isDirectCustomer,
+      RUNG_PRIMARY_CLAIM.VARIABLE_IMPORTANCE,
+    ),
+    ...linksOf(RUNG_CLAIM_TYPES.VARIABLE_IMPORTANCE!),
+  ];
+  const painClaimUses = [
+    ...painUses(() => true, RUNG_PRIMARY_CLAIM.PAIN),
+    ...linksOf(RUNG_CLAIM_TYPES.PAIN!),
+  ];
+  const economicUses = [
+    ...painUses((e) => e.hasEconomicImpact, RUNG_PRIMARY_CLAIM.ECONOMIC_PAIN),
+    ...linksOf(RUNG_CLAIM_TYPES.ECONOMIC_PAIN!),
+  ];
+
+  const variableInputs = fitUses(variableUses, oppScope, now, fitSink);
+  const painInputs = fitUses(painClaimUses, oppScope, now, fitSink);
+  const economicInputs = fitUses(economicUses, oppScope, now, fitSink);
+
+  const variableImportance = assessClaim({
+    hasStatement: Boolean(opportunity.variable),
+    generatedBy: opportunity.variable?.provenance ?? "AI_HYPOTHESIS",
+    evidence: variableInputs,
+    claimType: RUNG_PRIMARY_CLAIM.VARIABLE_IMPORTANCE,
+    claimScope: oppScope,
+    now,
+  });
+  const pain = assessClaim({
+    hasStatement: Boolean(opportunity.pain || opportunity.problemStatement),
+    generatedBy: opportunity.pain?.provenance ?? opportunity.provenance,
+    evidence: painInputs,
+    claimType: RUNG_PRIMARY_CLAIM.PAIN,
+    claimScope: oppScope,
+    now,
+  });
+  const economicPain = assessClaim({
+    hasStatement: Boolean(opportunity.pain || opportunity.problemStatement),
+    generatedBy: opportunity.pain?.provenance ?? opportunity.provenance,
+    evidence: economicInputs,
+    claimType: RUNG_PRIMARY_CLAIM.ECONOMIC_PAIN,
+    claimScope: oppScope,
+    now,
+  });
+
+  // ---- Evidence Confidence (problem evidence, weighted by problem-claim fit) ---
+  const bestProblemFit = new Map<string, number>();
+  const noteFit = (uses: ClaimUse[], inputs: ClaimEvidenceInput[]) =>
+    uses.forEach((u, idx) => {
+      const f = inputs[idx]?.fit?.fitScore ?? 0;
+      bestProblemFit.set(u.e.id, Math.max(bestProblemFit.get(u.e.id) ?? 0, f));
+    });
+  noteFit(variableUses, variableInputs);
+  noteFit(painClaimUses, painInputs);
+  noteFit(economicUses, economicInputs);
   const claimProblemLinks = opportunity.claimLinks.filter(
-    (l) => PROBLEM_CLAIM_TYPES.has(l.claimType) && !problemIds.has(l.evidenceId),
+    (l) =>
+      PROBLEM_CLAIM_TYPES.has(l.claimType) &&
+      !l.valueChainNodeId &&
+      !l.causalLinkId &&
+      !problemIds.has(l.evidenceId),
   );
   const problemSignals: EvidenceSignal[] = [
-    ...problemEvidence.map(toEvidenceSignal),
+    ...problemEvidence.map((e) => ({
+      ...toEvidenceSignal(e),
+      fit: bestProblemFit.get(e.id) ?? null,
+    })),
     ...claimProblemLinks.map((l) => ({
       ...toEvidenceSignal(l.evidence),
       sentiment: directionToSentiment(l.direction),
+      fit: fitSink.get(l.id)?.fitScore ?? bestProblemFit.get(l.evidenceId) ?? null,
     })),
   ];
 
@@ -245,77 +440,161 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     alternativeWeakness: opportunity.alternativeWeakness,
   };
   const opp = computeOpportunityScore(inputs);
-  const ev = computeEvidenceScore(problemSignals);
-
-  // ---- Problem-side claims for the Proof Frontier ----------------------------
-  const claimLinksOf = (types: ClaimType[]) =>
-    opportunity.claimLinks
-      .filter((l) => types.includes(l.claimType))
-      .map((l) => toClaimInput(l.evidence, l.direction));
-  const painInputs = (filter: (e: Evidence) => boolean) =>
-    problemEvidence.filter(filter).map((e) => toClaimInput(e, sentimentToDirection(e.sentiment)));
-
-  const variableImportance = assessClaim({
-    hasStatement: Boolean(opportunity.variable),
-    generatedBy: opportunity.variable?.provenance ?? "AI_HYPOTHESIS",
-    evidence: [
-      ...painInputs((e) => e.hasExplicitPain || e.isDirectCustomer),
-      ...claimLinksOf(["VARIABLE", "CURRENT_STATE", "ICP"]),
-    ],
-  });
-  const pain = assessClaim({
-    hasStatement: Boolean(opportunity.pain || opportunity.problemStatement),
-    generatedBy: opportunity.pain?.provenance ?? opportunity.provenance,
-    evidence: [
-      ...painInputs(() => true),
-      ...claimLinksOf(["PAIN", "FREQUENCY", "TRIGGER", "ALTERNATIVE"]),
-    ],
-  });
-  const economicPain = assessClaim({
-    hasStatement: Boolean(opportunity.pain || opportunity.problemStatement),
-    generatedBy: opportunity.pain?.provenance ?? opportunity.provenance,
-    evidence: [
-      ...painInputs((e) => e.hasEconomicImpact),
-      ...claimLinksOf(["ECONOMIC_IMPACT", "MAGNITUDE"]),
-    ],
-  });
+  const ev = computeEvidenceScore(problemSignals, now);
 
   // ---- Value chain nodes and causal links ------------------------------------
   const nodeAssessments = new Map<string, ClaimAssessment>();
   for (const node of opportunity.valueChainNodes) {
+    const claimType = claimTypeForLevel(node.level);
+    const nodeScope = parseScope(node.claimScope) ?? oppScope;
+    const uses: ClaimUse[] = [
+      ...node.evidenceLinks.map((l) => ({
+        e: l.evidence,
+        direction: l.direction,
+        claimType,
+        linkId: l.id,
+      })),
+      // Problem-side links typed with this level's claim (e.g. mechanism feasibility) attach here.
+      ...opportunity.claimLinks
+        .filter((l) => l.claimType === claimType && !l.valueChainNodeId && !l.causalLinkId)
+        .map((l) => ({ e: l.evidence, direction: l.direction, claimType, linkId: l.id })),
+    ];
     const assessment = assessClaim({
       hasStatement: node.statement.trim().length > 0,
       generatedBy: node.generatedBy,
-      evidence: node.evidenceLinks.map((l) => toClaimInput(l.evidence, l.direction)),
+      evidence: fitUses(uses, nodeScope, now, fitSink),
       assumptions: node.assumptions.map(toAssumptionInput),
+      claimType,
+      claimScope: nodeScope,
+      now,
     });
     nodeAssessments.set(node.id, assessment);
     const causalDistance = CAUSAL_DISTANCE_BY_LEVEL[node.level];
+    const generalization = assessment.generalization?.status ?? "UNTESTED";
+    const observedScopeJson = assessment.observedScope
+      ? JSON.stringify(assessment.observedScope)
+      : null;
     if (
       node.status !== assessment.status ||
       node.confidence !== assessment.confidence ||
-      node.causalDistance !== causalDistance
+      node.causalDistance !== causalDistance ||
+      node.generalization !== generalization ||
+      node.inference !== assessment.inference ||
+      (node.observedScope ? JSON.stringify(node.observedScope) : null) !== observedScopeJson
     ) {
       await prisma.valueChainNode.update({
         where: { id: node.id },
-        data: { status: assessment.status, confidence: assessment.confidence, causalDistance },
+        data: {
+          status: assessment.status,
+          confidence: assessment.confidence,
+          causalDistance,
+          generalization,
+          observedScope: serializeNullable(assessment.observedScope),
+          inference: assessment.inference,
+        },
       });
     }
   }
 
   const linkAssessments = new Map<string, ClaimAssessment>();
   for (const link of opportunity.causalLinks) {
+    const claimType = claimTypeForLink(link.fromNode.level, link.toNode.level);
+    const linkScope = parseScope(link.claimScope) ?? oppScope;
     const assessment = assessClaim({
       hasStatement: link.statement.trim().length > 0,
       generatedBy: link.generatedBy,
-      evidence: link.evidenceLinks.map((l) => toClaimInput(l.evidence, l.direction)),
+      evidence: fitUses(
+        link.evidenceLinks.map((l) => ({
+          e: l.evidence,
+          direction: l.direction,
+          claimType,
+          linkId: l.id,
+        })),
+        linkScope,
+        now,
+        fitSink,
+      ),
       assumptions: link.assumptions.map(toAssumptionInput),
+      claimType,
+      claimScope: linkScope,
+      now,
     });
     linkAssessments.set(link.id, assessment);
-    if (link.status !== assessment.status || link.confidence !== assessment.confidence) {
+    const generalization = assessment.generalization?.status ?? "UNTESTED";
+    const observedScopeJson = assessment.observedScope
+      ? JSON.stringify(assessment.observedScope)
+      : null;
+    if (
+      link.status !== assessment.status ||
+      link.confidence !== assessment.confidence ||
+      link.generalization !== generalization ||
+      link.inference !== assessment.inference ||
+      (link.observedScope ? JSON.stringify(link.observedScope) : null) !== observedScopeJson
+    ) {
       await prisma.causalLink.update({
         where: { id: link.id },
-        data: { status: assessment.status, confidence: assessment.confidence },
+        data: {
+          status: assessment.status,
+          confidence: assessment.confidence,
+          generalization,
+          observedScope: serializeNullable(assessment.observedScope),
+          inference: assessment.inference,
+        },
+      });
+    }
+  }
+
+  // ---- Commercial ladder (each rung is its own claim) ------------------------
+  const commercialAssessments: Partial<Record<ClaimType, ClaimAssessment>> = {};
+  for (const claimType of COMMERCIAL_LADDER) {
+    const uses = linksOf([claimType]);
+    commercialAssessments[claimType] = assessClaim({
+      hasStatement: true,
+      generatedBy: "AI_HYPOTHESIS",
+      evidence: fitUses(uses, oppScope, now, fitSink),
+      claimType,
+      claimScope: oppScope,
+      now,
+    });
+  }
+  const commercial = computeCommercialLadder(commercialAssessments);
+
+  // ---- Persist evidence fitness on every claim link ---------------------------
+  const linkRows = new Map(opportunity.claimLinks.map((l) => [l.id, l]));
+  for (const node of opportunity.valueChainNodes)
+    for (const l of node.evidenceLinks) linkRows.set(l.id, l);
+  for (const link of opportunity.causalLinks)
+    for (const l of link.evidenceLinks) linkRows.set(l.id, l);
+  for (const [linkId, fit] of fitSink) {
+    const row = linkRows.get(linkId);
+    if (!row) continue;
+    if (
+      row.fitScore !== fit.fitScore ||
+      row.admissibility !== fit.admissibility ||
+      row.fitVersion !== FIT_VERSION
+    ) {
+      await prisma.evidenceClaimLink.update({
+        where: { id: linkId },
+        data: {
+          admissibility: fit.admissibility,
+          fitScore: fit.fitScore,
+          fitBreakdown: serialize({
+            claimType: fit.claimType,
+            band: fit.band,
+            cap: fit.cap,
+            dimensions: fit.dimensions,
+            limitationsPenalty: fit.limitationsPenalty,
+            duplicateOfOrigin: fit.duplicateOfOrigin,
+            originId: fit.originId,
+            designLevel: fit.designLevel,
+            scope: fit.scope,
+            admissibilityExplanation: fit.admissibilityExplanation,
+            explanation: fit.explanation,
+            summary: fit.summary,
+          }),
+          fitVersion: FIT_VERSION,
+          fitComputedAt: now,
+        },
       });
     }
   }
@@ -337,7 +616,10 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     criticality: l.criticality,
     assessment: linkAssessments.get(l.id)!,
   }));
-  const frontier = computeProofFrontier(frontierRungs, frontierLinks);
+  const frontier: ProofFrontierResult = {
+    ...computeProofFrontier(frontierRungs, frontierLinks),
+    commercial,
+  };
 
   // ---- Causal Confidence ---------------------------------------------------------
   const causal = computeCausalConfidence(
@@ -402,7 +684,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     icpReachability: opportunity.icp?.reachability ?? null,
     evidenceScore: ev.score,
     hasEconomicImpactEvidence: problemSignals.some(
-      (s) => s.hasEconomicImpact && s.sentiment !== "NEGATIVE",
+      (s) => s.hasEconomicImpact && s.sentiment !== "NEGATIVE" && (s.fit ?? 100) > 0,
     ),
     alternativeCount: opportunity.pain?.alternatives.length ?? 0,
   });
@@ -447,6 +729,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     painDescription: opportunity.pain?.description ?? opportunity.problemStatement ?? null,
     mechanism: mechanismStatement,
     experiments: opportunity.experiments,
+    commercial,
   });
 
   // ---- Snapshot after, diff and audit trail ----------------------------------------------
@@ -455,6 +738,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
     label: PROOF_RUNG_LABELS[rung],
     status: a.status,
     confidence: a.confidence,
+    scope: a.observedScopeText,
+    generalization: a.generalization?.status ?? null,
   });
   const after: KnowledgeSnapshot = {
     frontier: frontier.frontier,
@@ -476,6 +761,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           label: VALUE_CHAIN_LEVEL_LABELS[n.level],
           status: a.status,
           confidence: a.confidence,
+          scope: a.observedScopeText,
+          generalization: a.generalization?.status ?? "UNTESTED",
         };
       }),
       ...opportunity.causalLinks.map<KnowledgeClaim>((l) => {
@@ -485,6 +772,8 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
           label: linkLabel(l.fromNode.level, l.toNode.level),
           status: a.status,
           confidence: a.confidence,
+          scope: a.observedScopeText,
+          generalization: a.generalization?.status ?? "UNTESTED",
         };
       }),
     ],
@@ -581,6 +870,7 @@ export async function recomputeOpportunity(opportunityId: string, ctx: Recompute
       proofFrontier: serialize(frontier),
       proofFrontierRung: frontier.frontier,
       valueActions: serialize(valueActions),
+      claimScope: serializeNullable(oppScope),
     },
   });
   return Object.assign(updated, {

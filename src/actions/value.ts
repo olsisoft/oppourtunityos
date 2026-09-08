@@ -8,12 +8,25 @@ import {
   completeExperimentSchema,
   createExperimentSchema,
   linkEvidenceClaimSchema,
+  scopeFromFields,
   updateExperimentSchema,
   updateValueDimensionsSchema,
   updateVariableValueFieldsSchema,
   upsertCausalLinkSchema,
   upsertValueChainNodeSchema,
+  validityInputsFromFields,
 } from "@/domain/schemas";
+import type { Prisma } from "@/generated/prisma/client";
+import { claimTypeForLevel, claimTypeForLink } from "@/services/value/claim-taxonomy";
+import { sourceTypeForExperiment } from "@/services/value/evidence-sources";
+import {
+  assessInternalValidity,
+  defaultDesignLevel,
+  parseValidityInputs,
+  type InternalValidityAssessment,
+} from "@/services/value/experimental-validity";
+import { experimentInterpretation } from "@/services/value/language-gate";
+import { describeScope, parseScope } from "@/services/value/scope";
 import { logger } from "@/lib/logger";
 import { requireUserId } from "@/lib/session";
 import {
@@ -411,7 +424,23 @@ function experimentData(d: ExperimentFields) {
     timeEstimate: text(d.timeEstimate),
     owner: text(d.owner),
     notes: text(d.notes),
+    designLevel: d.designLevel === undefined ? undefined : (d.designLevel ?? null),
+    validityPlan: hasAny(validityInputsFromFields(d))
+      ? (JSON.parse(JSON.stringify(validityInputsFromFields(d))) as Prisma.InputJsonValue)
+      : undefined,
+    scope: (() => {
+      const scope = scopeFromFields(d, {
+        sampleSize: d.sampleSize ?? null,
+        organizationCount: d.organizationCount ?? null,
+        userCount: d.userCount ?? null,
+      });
+      return scope ? (JSON.parse(JSON.stringify(scope)) as Prisma.InputJsonValue) : undefined;
+    })(),
   };
+}
+
+function hasAny(o: object): boolean {
+  return Object.keys(o).length > 0;
 }
 
 export async function createExperimentAction(
@@ -482,6 +511,17 @@ export async function updateExperimentAction(input: unknown): Promise<ActionResu
   });
 }
 
+export interface ExperimentValiditySummary {
+  assessment: InternalValidityAssessment;
+  /** System-generated, language-gated interpretation. */
+  interpretation: string;
+  gatedLevel: InternalValidityAssessment["designEffective"];
+  caveats: string[];
+  forbidden: string[];
+  scopeText: string;
+  observed: string | null;
+}
+
 export interface ExperimentCompletion {
   experimentId: string;
   resultId: string;
@@ -489,6 +529,7 @@ export interface ExperimentCompletion {
   outcome: "SUPPORTED" | "CONTRADICTED" | "INCONCLUSIVE" | "INVALID";
   outcomeSource: "THRESHOLD" | "USER";
   outcomeExplanation: string;
+  validity: ExperimentValiditySummary;
   knowledgeChangeId: string | null;
   diff: KnowledgeDiff | null;
   before: KnowledgeSnapshot | null;
@@ -516,8 +557,26 @@ export async function completeExperimentAction(
     const exp = await prisma.experiment.findUnique({
       where: { id: d.experimentId },
       include: {
-        opportunity: { select: { id: true, workspaceId: true, painId: true } },
+        opportunity: {
+          select: {
+            id: true,
+            workspaceId: true,
+            painId: true,
+            mechanism: true,
+            claimScope: true,
+            icp: { select: { name: true } },
+          },
+        },
         resultRecord: true,
+        causalLink: {
+          select: {
+            id: true,
+            statement: true,
+            fromNode: { select: { level: true } },
+            toNode: { select: { level: true } },
+          },
+        },
+        valueChainNode: { select: { id: true, level: true, statement: true } },
       },
     });
     if (!exp) throw new Error("Experiment not found");
@@ -556,6 +615,56 @@ export async function completeExperimentAction(
         })
       : [];
 
+    // 2b. Experimental validity: the recorded facts of the run decide the
+    //     effective design level and the internal validity; the user cannot
+    //     rewrite the inference strength. Planned facts are the defaults.
+    const declaredDesign =
+      d.designLevel ?? exp.designLevel ?? defaultDesignLevel(exp.experimentType);
+    const validityInputs = {
+      ...parseValidityInputs(exp.validityPlan),
+      ...validityInputsFromFields(d),
+    };
+    if (validityInputs.sampleSize == null && (d.sampleSize ?? exp.sampleSize) != null)
+      validityInputs.sampleSize = d.sampleSize ?? exp.sampleSize ?? undefined;
+    const validity = assessInternalValidity(declaredDesign, validityInputs);
+    const scope =
+      scopeFromFields(d, {
+        sampleSize: d.sampleSize ?? exp.sampleSize ?? null,
+        organizationCount: d.organizationCount ?? validityInputs.organizationCount ?? null,
+        userCount: d.userCount ?? validityInputs.userCount ?? null,
+      }) ??
+      parseScope(exp.scope) ??
+      parseScope({
+        population: exp.population,
+        sampleSize: d.sampleSize ?? exp.sampleSize ?? undefined,
+        organizationCount: validityInputs.organizationCount ?? undefined,
+      });
+    const scopeText = describeScope(scope);
+    const observedText =
+      d.observedValue !== null && d.observedValue !== undefined
+        ? `${d.observedMetric ?? exp.successMetric ?? "Observed"}: ${d.observedValue}${(d.unit ?? exp.unit) ? ` ${d.unit ?? exp.unit}` : ""}`
+        : (d.observedMetric ?? null);
+    const targetIsCausal = Boolean(exp.causalLinkId);
+    const interpretation = experimentInterpretation({
+      targetIsCausal,
+      designLevel: validity.designEffective,
+      internalValidity: validity.internalValidity,
+      mechanism: exp.opportunity.mechanism ?? exp.valueChainNode?.statement ?? "the intervention",
+      outcome: observedText ?? exp.hypothesis,
+      scope: scopeText,
+      direction: outcomeToDirection(outcome) ?? "NEUTRAL",
+      outcomeLabel: outcome,
+    });
+    const validitySummary: ExperimentValiditySummary = {
+      assessment: validity,
+      interpretation: interpretation.sentence,
+      gatedLevel: interpretation.gatedLevel,
+      caveats: interpretation.caveats,
+      forbidden: interpretation.forbidden,
+      scopeText,
+      observed: observedText,
+    };
+
     const result = await prisma.experimentResult.create({
       data: {
         experimentId: exp.id,
@@ -572,6 +681,27 @@ export async function completeExperimentAction(
         anomalies: d.anomalies ?? null,
         rawEvidenceIds: rawEvidence.map((e) => e.id),
         enteredBy: d.enteredBy ?? null,
+        designLevel: validity.designEffective,
+        internalValidity: validity.internalValidity,
+        validityInputs: JSON.parse(JSON.stringify(validityInputs)),
+        validityAssessment: JSON.parse(
+          JSON.stringify({
+            designDeclared: validity.designDeclared,
+            designEffective: validity.designEffective,
+            internalValidity: validity.internalValidity,
+            checks: validity.checks,
+            threats: validity.threats,
+            unknowns: validity.unknowns,
+            downgrades: validity.downgrades,
+            explanation: validity.explanation,
+            gatedLevel: interpretation.gatedLevel,
+            caveats: interpretation.caveats,
+          }),
+        ),
+        interpretation: interpretation.sentence,
+        scope: scope ? JSON.parse(JSON.stringify(scope)) : undefined,
+        organizationCount: d.organizationCount ?? validityInputs.organizationCount ?? null,
+        userCount: d.userCount ?? validityInputs.userCount ?? null,
       },
     });
 
@@ -580,6 +710,7 @@ export async function completeExperimentAction(
     const direction = outcomeToDirection(outcome);
     if (direction) {
       const methodology = [
+        `Design level: ${validity.designEffective}${validity.designEffective !== validity.designDeclared ? ` (declared ${validity.designDeclared})` : ""} · internal validity: ${validity.internalValidity}`,
         exp.design ? `Design: ${exp.design}` : null,
         exp.population ? `Population: ${exp.population}` : null,
         d.measurementPeriod ? `Period: ${d.measurementPeriod}` : null,
@@ -589,13 +720,11 @@ export async function completeExperimentAction(
       ]
         .filter(Boolean)
         .join(" · ");
-      const observed =
-        d.observedValue !== null && d.observedValue !== undefined
-          ? `${d.observedMetric ?? exp.successMetric ?? "Observed"}: ${d.observedValue}${(d.unit ?? exp.unit) ? ` ${d.unit ?? exp.unit}` : ""}`
-          : (d.observedMetric ?? null);
+      const observed = observedText;
       const excerpt = [
         `EXPERIMENT RESULT (${outcome}, ${outcomeSource === "THRESHOLD" ? "decided by thresholds" : "classified by the user"}).`,
         observed,
+        interpretation.sentence,
         d.resultSummary,
         d.limitations ? `Limitations: ${d.limitations}` : null,
         d.confounders ? `Confounders: ${d.confounders}` : null,
@@ -628,22 +757,34 @@ export async function completeExperimentAction(
           sampleSize: d.sampleSize ?? exp.sampleSize ?? null,
           observedMetric: observed,
           limitations: d.limitations ?? null,
+          // Evidence Fitness inputs: the source type follows the experiment
+          // type and the EFFECTIVE design level; the run is one origin.
+          sourceType: sourceTypeForExperiment(exp.experimentType, validity.designEffective),
+          sourceOriginId: `experiment:${exp.id}`,
+          organizationCount: d.organizationCount ?? validityInputs.organizationCount ?? null,
+          userCount: d.userCount ?? validityInputs.userCount ?? null,
+          scope: scope ? JSON.parse(JSON.stringify(scope)) : undefined,
         },
       });
       evidenceId = evidence.id;
 
       // 4. Link the evidence to the claims the experiment tested (+ extra claims).
+      //    Ladder targets take the claim type of their level / link.
       const claimRows: Array<{
-        claimType: "CAUSAL_LINK" | "VALUE_CHAIN_NODE" | (typeof d.claims)[number]["claimType"];
+        claimType: (typeof d.claims)[number]["claimType"];
         valueChainNodeId?: string | null;
         causalLinkId?: string | null;
         direction: typeof direction;
       }> = [];
-      if (exp.causalLinkId)
-        claimRows.push({ claimType: "CAUSAL_LINK", causalLinkId: exp.causalLinkId, direction });
-      if (exp.valueChainNodeId)
+      if (exp.causalLinkId && exp.causalLink)
         claimRows.push({
-          claimType: "VALUE_CHAIN_NODE",
+          claimType: claimTypeForLink(exp.causalLink.fromNode.level, exp.causalLink.toNode.level),
+          causalLinkId: exp.causalLinkId,
+          direction,
+        });
+      if (exp.valueChainNodeId && exp.valueChainNode)
+        claimRows.push({
+          claimType: claimTypeForLevel(exp.valueChainNode.level),
           valueChainNodeId: exp.valueChainNodeId,
           direction,
         });
@@ -727,6 +868,7 @@ export async function completeExperimentAction(
       outcome,
       outcomeSource,
       outcomeExplanation,
+      validity: validitySummary,
       knowledgeChangeId: recomputed?.knowledgeChangeId ?? null,
       diff: recomputed?.knowledgeDiff ?? null,
       before: recomputed?.knowledgeBefore ?? null,

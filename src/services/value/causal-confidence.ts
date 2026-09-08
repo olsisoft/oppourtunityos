@@ -8,8 +8,14 @@
  * chain coverage (validated / total), the blocking link and the next causal
  * question. UNKNOWN never becomes zero.
  */
-import type { Criticality, EpistemicStatus, ValueChainLevel } from "@/generated/prisma/enums";
+import type {
+  Criticality,
+  EpistemicStatus,
+  ExperimentDesignLevel,
+  ValueChainLevel,
+} from "@/generated/prisma/enums";
 import { isEvidenceBacked, type ClaimAssessment } from "./epistemic";
+import { DESIGN_CAUSAL_CEILING, DESIGN_LEVEL_LABELS } from "./experimental-validity";
 
 /** Links that enter the score (up to the economic consequence). */
 export const CAUSAL_CHAIN_LINKS: Array<[ValueChainLevel, ValueChainLevel]> = [
@@ -26,6 +32,7 @@ export const DISPLAY_CHAIN_LINKS: Array<[ValueChainLevel, ValueChainLevel]> = [
 ];
 
 const CONTRADICTED_CAP = 25;
+const MIXED_CAP = 45;
 
 const LEVEL_LABEL: Record<ValueChainLevel, string> = {
   MECHANISM: "Mechanism",
@@ -53,8 +60,14 @@ export interface CausalLinkResult {
   criticality: Criticality;
   status: EpistemicStatus;
   confidence: number;
-  /** Confidence after contradiction capping — the value that enters the min. */
+  /** Confidence after contradiction and design capping — the value that enters the min. */
   effective: number;
+  /** Why the effective value is below the confidence, if it is. */
+  cappedBy: string | null;
+  /** Strongest design level among the link's admissible supporting evidence. */
+  designLevel: ExperimentDesignLevel | null;
+  /** Best evidence fit for this causal claim. */
+  bestFit: number;
   evidenceCount: number;
   untestedCriticalAssumptions: string[];
   /** Evidence-backed (PROVEN or SUPPORTED). */
@@ -115,6 +128,9 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
         status: "UNKNOWN",
         confidence: 0,
         effective: 0,
+        cappedBy: null,
+        designLevel: null,
+        bestFit: 0,
         evidenceCount: 0,
         untestedCriticalAssumptions: [],
         validated: false,
@@ -125,8 +141,25 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
       continue;
     }
     const a = link.assessment;
-    const effective =
-      a.status === "CONTRADICTED" ? Math.min(a.confidence, CONTRADICTED_CAP) : a.confidence;
+    // Status caps: a contradicted link is capped at 25, a mixed one at 45.
+    // Design cap: interview-only (anecdotal) evidence cannot push a causal
+    // link above 30, observational above 45, before/after above 60…
+    let effective = a.confidence;
+    let cappedBy: string | null = null;
+    if (a.status === "CONTRADICTED" && effective > CONTRADICTED_CAP) {
+      effective = CONTRADICTED_CAP;
+      cappedBy = "contradicted";
+    } else if (a.status === "MIXED" && effective > MIXED_CAP) {
+      effective = MIXED_CAP;
+      cappedBy = "mixed evidence";
+    }
+    if (a.designLevel && a.evidence.counts.total > 0) {
+      const ceiling = DESIGN_CAUSAL_CEILING[a.designLevel];
+      if (effective > ceiling) {
+        effective = ceiling;
+        cappedBy = `${DESIGN_LEVEL_LABELS[a.designLevel].toLowerCase()} design (ceiling ${ceiling})`;
+      }
+    }
     results.push({
       from,
       to,
@@ -136,14 +169,21 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
       status: a.status,
       confidence: a.confidence,
       effective,
-      evidenceCount: a.evidence.counts.total,
+      cappedBy,
+      designLevel: a.designLevel,
+      bestFit: a.fitness.best,
+      evidenceCount: a.fitness.admissible,
       untestedCriticalAssumptions: a.untestedCriticalAssumptions,
       validated: isEvidenceBacked(a.status),
       inScoringChain,
       missingLink: false,
     });
-    if (inScoringChain && link.criticality === "CRITICAL" && a.evidence.counts.total === 0) {
-      missing.push(`${name}: no evidence on a critical link ("${link.statement}")`);
+    if (inScoringChain && link.criticality === "CRITICAL" && a.fitness.admissible === 0) {
+      missing.push(
+        a.fitness.total === 0
+          ? `${name}: no evidence on a critical link ("${link.statement}")`
+          : `${name}: no admissible evidence on a critical link ("${link.statement}")`,
+      );
     }
   }
 
@@ -186,7 +226,8 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
   const scoring = results.filter((r) => r.inScoringChain && !r.missingLink);
   const critical = scoring.filter((r) => r.criticality === "CRITICAL");
   const pool = critical.length ? critical : scoring;
-  const weakest = [...pool].sort((a, b) => a.effective - b.effective)[0] ?? null;
+  const weakest =
+    [...pool].sort((a, b) => a.effective - b.effective || a.confidence - b.confidence)[0] ?? null;
   const score = weakest ? Math.round(weakest.effective) : null;
 
   return {
@@ -204,7 +245,7 @@ export function computeCausalConfidence(links: CausalLinkInput[]): CausalConfide
       `${completeness} chain links validated.`,
       ...results.map(
         (r) =>
-          `${r.label}: ${r.status}, confidence ${r.confidence}/100 (${r.evidenceCount} evidence${r.criticality !== "CRITICAL" ? `, ${r.criticality.toLowerCase()}` : ""}${r.inScoringChain ? "" : ", informative"})`,
+          `${r.label}: ${r.status}, confidence ${r.confidence}/100${r.cappedBy ? ` → ${r.effective} capped by ${r.cappedBy}` : ""} (${r.evidenceCount} admissible evidence, best fit ${r.bestFit}${r.designLevel ? `, ${DESIGN_LEVEL_LABELS[r.designLevel].toLowerCase()}` : ""}${r.criticality !== "CRITICAL" ? `, ${r.criticality.toLowerCase()}` : ""}${r.inScoringChain ? "" : ", informative"})`,
       ),
       weakest ? `Score = weakest critical link (${weakest.label}) = ${score}/100.` : "No links.",
       nextQuestion ? `Next causal question: ${nextQuestion}` : "",

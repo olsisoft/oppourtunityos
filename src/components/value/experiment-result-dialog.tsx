@@ -37,6 +37,19 @@ import {
 } from "@/domain/enums";
 import { cn } from "@/lib/utils";
 import { classifyOutcome } from "@/services/value/experiment-outcome";
+import {
+  ValidityChecklist,
+  ValiditySummary,
+  validityFieldsFrom,
+  validityInputsFrom,
+  type ValidityFormFields,
+} from "@/components/value/validity-fields";
+import {
+  assessInternalValidity,
+  defaultDesignLevel,
+  parseValidityInputs,
+} from "@/services/value/experimental-validity";
+import { describeScope, parseScope } from "@/services/value/scope";
 
 type Direction = "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
 
@@ -86,6 +99,46 @@ export function ExperimentResultDialog({
   const [claims, setClaims] = useState<Record<string, Direction>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+  const [validity, setValidity] = useState<ValidityFormFields>(() =>
+    validityFieldsFrom(
+      exp.designLevel ?? defaultDesignLevel(exp.experimentType),
+      parseValidityInputs(exp.validityPlan),
+    ),
+  );
+  const setV = <K extends keyof ValidityFormFields>(k: K, v: ValidityFormFields[K]) =>
+    setValidity((f) => ({ ...f, [k]: v }));
+  const [scope, setScope] = useState(() => {
+    const sc = parseScope(exp.scope);
+    return {
+      scopePopulation: sc?.population ?? exp.population ?? "",
+      scopeSystems: sc?.systems?.join(", ") ?? "",
+      scopeEnvironment: sc?.environment ?? "",
+      scopeTimePeriod: sc?.timePeriod ?? "",
+      scopeConditions: sc?.conditions ?? "",
+    };
+  });
+  const validityInputs = validityInputsFrom(validity);
+  const preview = useMemo(
+    () =>
+      assessInternalValidity(validity.designLevel, {
+        ...validityInputs,
+        sampleSize: form.sampleSize === "" ? undefined : Number(form.sampleSize),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [validity, form.sampleSize],
+  );
+  const scopePreview = describeScope(
+    parseScope({
+      ...scope,
+      population: scope.scopePopulation,
+      systems: scope.scopeSystems,
+      environment: scope.scopeEnvironment,
+      timePeriod: scope.scopeTimePeriod,
+      conditions: scope.scopeConditions,
+      organizationCount: validity.organizationCount || undefined,
+      sampleSize: form.sampleSize || undefined,
+    }),
+  );
 
   const hasThresholds = exp.successThreshold !== null && exp.failureThreshold !== null;
   const decided = useMemo(
@@ -139,6 +192,9 @@ export function ExperimentResultDialog({
       isDirectCustomer: form.isDirectCustomer,
       hasEconomicImpact: form.hasEconomicImpact,
       hasPurchaseIntent: form.hasPurchaseIntent,
+      designLevel: validity.designLevel,
+      ...validityInputs,
+      ...scope,
       claims: extraTargets
         .filter((t) => claims[t.key])
         .map((t) => ({
@@ -181,6 +237,14 @@ export function ExperimentResultDialog({
                 Claims, the Proof Frontier, the scores and the verdict were recomputed.
               </DialogDescription>
             </DialogHeader>
+            <ValiditySummary
+              assessment={done.validity.assessment}
+              observed={done.validity.observed}
+              interpretation={done.validity.interpretation}
+              caveats={done.validity.caveats}
+              scopeText={done.validity.scopeText}
+              compact
+            />
             <FrontierMovementCard
               title={exp.title}
               outcome={done.outcome}
@@ -332,6 +396,45 @@ export function ExperimentResultDialog({
                   onChange={(e) => set("anomalies", e.target.value)}
                 />
               </L>
+            </div>
+
+            <div className="space-y-2 rounded-md border p-3">
+              <p className="text-[10px] font-semibold tracking-wider uppercase">
+                Experimental validity — what actually happened
+              </p>
+              <p className="text-muted-foreground text-xs">
+                Record the facts of the run. The application derives the effective design level, the
+                internal validity and the wording of the conclusion; you cannot rewrite the
+                inference strength.
+              </p>
+              <ValidityChecklist fields={validity} onChange={setV} mode="result" idPrefix="res" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <L label="Population observed">
+                  <Input
+                    value={scope.scopePopulation}
+                    onChange={(e) => setScope((f) => ({ ...f, scopePopulation: e.target.value }))}
+                  />
+                </L>
+                <L label="Systems / configurations (comma-separated)">
+                  <Input
+                    value={scope.scopeSystems}
+                    onChange={(e) => setScope((f) => ({ ...f, scopeSystems: e.target.value }))}
+                  />
+                </L>
+                <L label="Environment / conditions">
+                  <Input
+                    value={scope.scopeEnvironment}
+                    onChange={(e) => setScope((f) => ({ ...f, scopeEnvironment: e.target.value }))}
+                  />
+                </L>
+                <L label="Time period">
+                  <Input
+                    value={scope.scopeTimePeriod}
+                    onChange={(e) => setScope((f) => ({ ...f, scopeTimePeriod: e.target.value }))}
+                  />
+                </L>
+              </div>
+              <ValiditySummary assessment={preview} scopeText={scopePreview} compact />
             </div>
 
             {effectiveOutcome !== "INVALID" && (
