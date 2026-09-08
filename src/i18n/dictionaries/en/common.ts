@@ -20,4 +20,5 @@ export const common = {
   demoData: "DEMO DATA",
   justNow: "just now",
   outOf100: "/100",
+  invalidInput: "Invalid input",
 } as const;

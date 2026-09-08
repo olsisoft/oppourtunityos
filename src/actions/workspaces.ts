@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
 import { createWorkspaceSchema, updateWorkspaceSchema } from "@/domain/schemas";
+import { getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import { requireUserId } from "@/lib/session";
 import { safeAction, type ActionResult } from "./shared";
@@ -19,7 +20,8 @@ export async function createWorkspaceAction(
     description: formData.get("description") ?? undefined,
   });
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    const t = await getT();
+    return { ok: false, error: t(parsed.error.issues[0]?.message ?? "common.invalidInput") };
   }
   const result = await safeAction("workspace.create", async () => {
     const userId = await requireUserId();
@@ -39,7 +41,10 @@ export async function createWorkspaceAction(
 
 export async function updateWorkspaceAction(input: unknown): Promise<ActionResult> {
   const parsed = updateWorkspaceSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  if (!parsed.success) {
+    const t = await getT();
+    return { ok: false, error: t("common.invalidInput") };
+  }
   return safeAction("workspace.update", async () => {
     const userId = await requireUserId();
     await assertWorkspaceAccess(userId, parsed.data.workspaceId);

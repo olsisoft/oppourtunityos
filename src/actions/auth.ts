@@ -9,7 +9,7 @@ import { signIn, signOut } from "@/auth";
 import { prisma } from "@/db/prisma";
 import { loginSchema, registerSchema } from "@/domain/schemas";
 import { isLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/i18n/locales";
-import { getLocale } from "@/i18n/server";
+import { getLocale, getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import type { ActionResult } from "./shared";
 
@@ -22,17 +22,18 @@ export async function registerAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const t = await getT();
   const parsed = registerSchema.safeParse({
     name: formData.get("name"),
     email: formData.get("email"),
     password: formData.get("password"),
   });
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return { ok: false, error: t(parsed.error.issues[0]?.message ?? "common.invalidInput") };
   }
   const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } });
   if (existing) {
-    return { ok: false, error: "An account with this email already exists." };
+    return { ok: false, error: t("auth.errors.emailTaken") };
   }
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
   const user = await prisma.user.create({
@@ -57,12 +58,13 @@ export async function loginAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const t = await getT();
   const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
   });
   if (!parsed.success) {
-    return { ok: false, error: "Enter your email and password." };
+    return { ok: false, error: t("auth.errors.missingCredentials") };
   }
   try {
     await signIn("credentials", {
@@ -72,7 +74,7 @@ export async function loginAction(
     });
   } catch (error) {
     if (error instanceof AuthError) {
-      return { ok: false, error: "Invalid email or password." };
+      return { ok: false, error: t("auth.errors.invalidCredentials") };
     }
     throw error;
   }

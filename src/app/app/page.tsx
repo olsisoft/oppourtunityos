@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
 
@@ -17,26 +18,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
-import {
-  EVIDENCE_GAP_LABELS,
-  FITNESS_GAP_LABELS,
-  STALLED_AFTER_DAYS,
-  getDashboardData,
-} from "@/db/dashboard";
-import { GENERALIZATION_LABELS } from "@/services/value/language-gate";
-import { formatDate } from "@/lib/utils";
-import {
-  ASSUMPTION_KIND_LABELS,
-  STAGE_LABELS,
-  VALUE_CHAIN_LEVEL_LABELS,
-  VERDICT_ORDER,
-  VERDICT_TONE,
-} from "@/domain/enums";
+import { STALLED_AFTER_DAYS, getDashboardData } from "@/db/dashboard";
+import { VERDICT_ORDER, VERDICT_TONE } from "@/domain/enums";
+import { formatDate } from "@/i18n/format";
+import { getLocale, getT } from "@/i18n/server";
+import type { T } from "@/i18n/t";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
-export const metadata = { title: "Dashboard" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t("dashboard.metaTitle") };
+}
+
+/** Proof-frontier rung label; an unknown code (legacy row) is shown as-is. */
+function frontierLabel(t: T, rung: string | null | undefined): string {
+  if (!rung) return t("dashboard.frontier.notComputed");
+  const key = `labels.proofRung.${rung}`;
+  return t.has(key) ? t(key) : rung;
+}
 
 export default async function DashboardPage({
   searchParams,
@@ -44,31 +44,35 @@ export default async function DashboardPage({
   searchParams: Promise<{ intent?: string }>;
 }) {
   const user = await requireUser();
+  const t = await getT();
+  const locale = await getLocale();
   const { intent } = await searchParams;
   const data = await getDashboardData(user.id);
   const maxVerdict = Math.max(1, ...Object.values(data.byVerdict));
+  const incomplete = t("dashboard.incomplete");
 
   return (
     <div className="h-full scrollbar-thin overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-6 p-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">What should I investigate next?</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
           <p className="text-muted-foreground text-sm">
-            {data.totals.workspaces} active workspace{data.totals.workspaces === 1 ? "" : "s"} ·{" "}
-            {data.totals.opportunities} opportunit{data.totals.opportunities === 1 ? "y" : "ies"} ·{" "}
-            {data.totals.evidence} evidence item{data.totals.evidence === 1 ? "" : "s"} ·{" "}
-            {data.totals.untestedAssumptions} untested assumption
-            {data.totals.untestedAssumptions === 1 ? "" : "s"}
+            {t("dashboard.summary", {
+              workspaces: data.totals.workspaces,
+              opportunities: data.totals.opportunities,
+              evidence: data.totals.evidence,
+              assumptions: data.totals.untestedAssumptions,
+            })}
           </p>
         </div>
 
         {data.workspaces.length === 0 ? (
           <Card>
             <CardHeader>
-              <CardTitle>Start your first discovery</CardTitle>
+              <CardTitle>{t("dashboard.firstDiscovery.title")}</CardTitle>
               <CardDescription>
-                Create a workspace, then choose how to begin inside the conversation. Run{" "}
-                <code>npm run db:seed</code> to add the Beauty Salons demo workspace.
+                {t("dashboard.firstDiscovery.descriptionBefore")} <code>npm run db:seed</code>{" "}
+                {t("dashboard.firstDiscovery.descriptionAfter")}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -80,18 +84,20 @@ export default async function DashboardPage({
             {data.nextAction ? (
               <div className="bg-foreground text-background rounded-lg p-5">
                 <p className="text-background/70 text-[10px] font-medium tracking-wider uppercase">
-                  Next best action
+                  {t("dashboard.nextAction.label")}
                 </p>
                 <p className="mt-1 flex items-start gap-2 text-base font-medium">
                   <ArrowRight className="mt-1 size-4 shrink-0" />{" "}
-                  {data.nextValueAction?.what ?? data.nextAction.title}
+                  {t(data.nextValueAction?.what ?? data.nextAction.title)}
                 </p>
                 <p className="text-background/80 mt-1 text-sm">
-                  {data.nextValueAction?.why ?? data.nextAction.rationale}
+                  {t(data.nextValueAction?.why ?? data.nextAction.rationale)}
                 </p>
                 {data.nextValueAction && (
                   <p className="text-background/70 mt-1 text-xs">
-                    If false: {data.nextValueAction.ifFalse}
+                    {t("dashboard.nextAction.ifFalse", {
+                      consequence: t(data.nextValueAction.ifFalse),
+                    })}
                   </p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -100,22 +106,24 @@ export default async function DashboardPage({
                   </Badge>
                   {data.nextValueAction && (
                     <Badge variant="outline" className="border-background/30 text-background">
-                      Proof frontier: {frontierText(data.nextValueAction.frontier)}
+                      {t("dashboard.frontier.label", {
+                        frontier: frontierLabel(t, data.nextValueAction.frontier),
+                      })}
                     </Badge>
                   )}
                   <Button size="sm" variant="secondary" asChild>
                     <Link
                       href={`/app/w/${data.nextAction.workspaceId}/opportunities/${data.nextAction.opportunityId}`}
                     >
-                      Open opportunity <ArrowUpRight />
+                      {t("dashboard.nextAction.open")} <ArrowUpRight />
                     </Link>
                   </Button>
                 </div>
               </div>
             ) : (
               <EmptyState
-                title="No opportunity formed yet"
-                description="Continue a conversation until an ICP, a variable and a pain are known. The dashboard then tells you what to research first."
+                title={t("dashboard.nextAction.emptyTitle")}
+                description={t("dashboard.nextAction.emptyDescription")}
                 action={<QuickStart intent={intent} />}
               />
             )}
@@ -123,28 +131,38 @@ export default async function DashboardPage({
             <div className="grid gap-6 lg:grid-cols-3">
               <Card className="lg:col-span-2">
                 <CardHeader>
-                  <CardTitle>Strongest opportunities</CardTitle>
-                  <CardDescription>
-                    Ranked by Opportunity Potential. Evidence says whether the problem is real,
-                    Value how much moving the variable is worth, Causal whether the mechanism can
-                    move it. Hover the title for the Proof Frontier.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.strongest.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.strongest.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.strongest.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">Nothing scored yet.</p>
+                    <p className="text-muted-foreground text-sm">
+                      {t("dashboard.strongest.empty")}
+                    </p>
                   ) : (
                     <div className="overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Opportunity</TableHead>
-                            <TableHead>Workspace</TableHead>
-                            <Head label="Potential" question={SCORE_QUESTIONS.potential} />
-                            <Head label="Evidence" question={SCORE_QUESTIONS.evidence} />
-                            <Head label="Value" question={SCORE_QUESTIONS.value} />
-                            <Head label="Causal" question={SCORE_QUESTIONS.causal} />
-                            <TableHead>Verdict</TableHead>
+                            <TableHead>{t("dashboard.columns.opportunity")}</TableHead>
+                            <TableHead>{t("dashboard.columns.workspace")}</TableHead>
+                            <Head
+                              label={t("dashboard.columns.potential")}
+                              question={t("dashboard.scoreQuestions.potential")}
+                            />
+                            <Head
+                              label={t("dashboard.columns.evidence")}
+                              question={t("dashboard.scoreQuestions.evidence")}
+                            />
+                            <Head
+                              label={t("dashboard.columns.value")}
+                              question={t("dashboard.scoreQuestions.value")}
+                            />
+                            <Head
+                              label={t("dashboard.columns.causal")}
+                              question={t("dashboard.scoreQuestions.causal")}
+                            />
+                            <TableHead>{t("dashboard.columns.verdict")}</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -161,20 +179,23 @@ export default async function DashboardPage({
                                     </Link>
                                   </TooltipTrigger>
                                   <TooltipContent>
-                                    Proof frontier: {frontierText(o.proofFrontierRung)}
+                                    {t("dashboard.frontier.label", {
+                                      frontier: frontierLabel(t, o.proofFrontierRung),
+                                    })}
                                   </TooltipContent>
                                 </Tooltip>
                               </TableCell>
                               <TableCell className="text-muted-foreground">
-                                {o.workspace.name}
                                 {o.workspace.isDemo && !/demo/i.test(o.workspace.name)
-                                  ? " (demo)"
-                                  : ""}
+                                  ? t("dashboard.strongest.demoWorkspace", {
+                                      name: o.workspace.name,
+                                    })
+                                  : o.workspace.name}
                               </TableCell>
-                              <Score value={o.opportunityScore} />
-                              <Score value={o.evidenceScore} />
-                              <Score value={o.valueStrength} />
-                              <Score value={o.causalConfidence} />
+                              <Score value={o.opportunityScore} incomplete={incomplete} />
+                              <Score value={o.evidenceScore} incomplete={incomplete} />
+                              <Score value={o.valueStrength} incomplete={incomplete} />
+                              <Score value={o.causalConfidence} incomplete={incomplete} />
                               <TableCell>
                                 <VerdictBadge verdict={o.verdict} />
                               </TableCell>
@@ -189,7 +210,7 @@ export default async function DashboardPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Opportunities by verdict</CardTitle>
+                  <CardTitle>{t("dashboard.byVerdict.title")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {VERDICT_ORDER.map((v) => (
@@ -216,46 +237,58 @@ export default async function DashboardPage({
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Recent learning</CardTitle>
-                  <CardDescription>
-                    What the last evidence and experiment results changed: claims, scores, the Proof
-                    Frontier, the verdict.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.learning.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.learning.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.recentLearning.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">
-                      Nothing has changed yet. Record an experiment result or link evidence to a
-                      claim.
-                    </p>
+                    <p className="text-muted-foreground text-sm">{t("dashboard.learning.empty")}</p>
                   ) : (
                     <ul className="space-y-2">
-                      {data.recentLearning.map((c) => (
-                        <li key={c.id} className="text-sm">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <Link
-                              href={`/app/w/${c.opportunity.workspaceId}/opportunities/${c.opportunity.id}`}
-                              className="font-medium hover:underline"
-                            >
-                              {c.opportunity.title}
-                            </Link>
-                            {c.movement !== "NONE" && (
-                              <Badge variant={c.movement === "FORWARD" ? "positive" : "negative"}>
-                                Proof Frontier moved: {frontierText(c.previousFrontier)} →{" "}
-                                {frontierText(c.newFrontier)}
-                              </Badge>
-                            )}
-                            {c.previousVerdict !== c.newVerdict && (
-                              <Badge variant="outline">
-                                Verdict {c.previousVerdict} → {c.newVerdict}
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-muted-foreground text-xs">
-                            {c.summary} · Reason: {c.reason} · {formatDate(c.createdAt)}
-                          </p>
-                        </li>
-                      ))}
+                      {data.recentLearning.map((c) => {
+                        const reason = c.experiment
+                          ? t("dashboard.learning.reasonExperiment", { title: c.experiment.title })
+                          : c.evidence
+                            ? t("dashboard.learning.reasonEvidence", {
+                                title: c.evidence.sourceTitle,
+                              })
+                            : t(`labels.knowledgeTrigger.${c.trigger}`).toLowerCase();
+                        return (
+                          <li key={c.id} className="text-sm">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Link
+                                href={`/app/w/${c.opportunity.workspaceId}/opportunities/${c.opportunity.id}`}
+                                className="font-medium hover:underline"
+                              >
+                                {c.opportunity.title}
+                              </Link>
+                              {c.movement !== "NONE" && (
+                                <Badge variant={c.movement === "FORWARD" ? "positive" : "negative"}>
+                                  {t("dashboard.learning.frontierMoved", {
+                                    from: frontierLabel(t, c.previousFrontier),
+                                    to: frontierLabel(t, c.newFrontier),
+                                  })}
+                                </Badge>
+                              )}
+                              {c.previousVerdict !== c.newVerdict && (
+                                <Badge variant="outline">
+                                  {t("dashboard.learning.verdictChanged", {
+                                    from: c.previousVerdict,
+                                    to: c.newVerdict,
+                                  })}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-muted-foreground text-xs">
+                              {t("dashboard.learning.meta", {
+                                summary: t(c.summary),
+                                reason,
+                                date: formatDate(c.createdAt, locale),
+                              })}
+                            </p>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </CardContent>
@@ -263,15 +296,14 @@ export default async function DashboardPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Opportunities with stalled learning</CardTitle>
+                  <CardTitle>{t("dashboard.stalled.title")}</CardTitle>
                   <CardDescription>
-                    No experiment completed in {STALLED_AFTER_DAYS} days while critical assumptions
-                    remain UNKNOWN.
+                    {t("dashboard.stalled.description", { days: STALLED_AFTER_DAYS })}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.stalled.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">No live opportunity is stalled.</p>
+                    <p className="text-muted-foreground text-sm">{t("dashboard.stalled.empty")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {data.stalled.map(
@@ -284,13 +316,12 @@ export default async function DashboardPage({
                               {o.title}
                             </Link>
                             <p className="text-muted-foreground text-xs">
-                              {daysSince === null
-                                ? "No experiment completed yet"
-                                : `No experiment completed in ${daysSince} days`}{" "}
-                              · {untestedCritical} critical assumption
-                              {untestedCritical === 1 ? "" : "s"} remain
-                              {untestedCritical === 1 ? "s" : ""} UNKNOWN
-                              {planned ? ` · ${planned} planned` : ""}
+                              {t("dashboard.stalled.detail", {
+                                status: daysSince === null ? "NEVER" : "SINCE",
+                                days: daysSince ?? 0,
+                                critical: untestedCritical,
+                                planned,
+                              })}
                             </p>
                           </li>
                         ),
@@ -304,18 +335,12 @@ export default async function DashboardPage({
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Weakest assumptions</CardTitle>
-                  <CardDescription>
-                    Untested, high importance. Causal and value assumptions rank first: if one is
-                    false, the opportunity collapses.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.weakest.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.weakest.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.weakestAssumptions.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">
-                      No untested assumptions. Either everything is verified or nothing was written
-                      down.
-                    </p>
+                    <p className="text-muted-foreground text-sm">{t("dashboard.weakest.empty")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {data.weakestAssumptions.map((a) => (
@@ -326,28 +351,30 @@ export default async function DashboardPage({
                                 variant={a.kind === "GENERIC" ? "muted" : "outline"}
                                 className="text-[10px]"
                               >
-                                {ASSUMPTION_KIND_LABELS[a.kind]}
+                                {t(`labels.assumptionKind.${a.kind}`)}
                               </Badge>
                               {a.valueChainNode && (
                                 <span className="text-muted-foreground text-[11px]">
-                                  on {VALUE_CHAIN_LEVEL_LABELS[a.valueChainNode.level]}
+                                  {t("dashboard.weakest.onLevel", {
+                                    level: t(`labels.valueChainLevel.${a.valueChainNode.level}`),
+                                  })}
                                 </span>
                               )}
                               {a.causalLink && (
                                 <span className="text-muted-foreground text-[11px]">
-                                  on a causal link
+                                  {t("dashboard.weakest.onCausalLink")}
                                 </span>
                               )}
                             </div>
                             <p className="mt-0.5">{a.statement}</p>
                             <p className="text-muted-foreground text-xs">
                               {a.workspace.name}
-                              {a.opportunity ? ` · ${a.opportunity.title}` : ""} · {a.links.length}{" "}
-                              evidence
+                              {a.opportunity ? ` · ${a.opportunity.title}` : ""} ·{" "}
+                              {t("dashboard.weakest.evidenceCount", { count: a.links.length })}
                             </p>
                           </div>
                           <Badge variant="outline" className="shrink-0">
-                            importance {a.importance}
+                            {t("dashboard.weakest.importance", { value: a.importance })}
                           </Badge>
                         </li>
                       ))}
@@ -358,24 +385,19 @@ export default async function DashboardPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Evidence gaps</CardTitle>
-                  <CardDescription>
-                    What kind of evidence is missing: the problem itself, its economic magnitude,
-                    the causal chain, willingness to pay or mechanism feasibility.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.gaps.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.gaps.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.evidenceGaps.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">
-                      No open evidence gap on a live opportunity.
-                    </p>
+                    <p className="text-muted-foreground text-sm">{t("dashboard.gaps.empty")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {data.evidenceGaps.map(({ opportunity: o, kind, detail }) => (
                         <li key={`${o.id}-${kind}`} className="text-sm">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <Badge variant="outline" className="text-[10px]">
-                              {EVIDENCE_GAP_LABELS[kind]}
+                              {t(`dashboard.gaps.kinds.${kind}`)}
                             </Badge>
                             <Link
                               href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
@@ -384,7 +406,7 @@ export default async function DashboardPage({
                               {o.title}
                             </Link>
                           </div>
-                          <p className="text-muted-foreground text-xs">{detail}</p>
+                          <p className="text-muted-foreground text-xs">{t(detail)}</p>
                         </li>
                       ))}
                     </ul>
@@ -396,25 +418,19 @@ export default async function DashboardPage({
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Evidence fitness gaps</CardTitle>
-                  <CardDescription>
-                    Where the Proof Frontier is blocked by evidence that exists but cannot establish
-                    the claim: not admissible, low fit, or a design too weak for causality. More of
-                    the same evidence will not help.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.fitness.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.fitness.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.fitnessGaps.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">
-                      No live opportunity is blocked by ill-fitting evidence.
-                    </p>
+                    <p className="text-muted-foreground text-sm">{t("dashboard.fitness.empty")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {data.fitnessGaps.map(({ opportunity: o, kind, claim, detail }) => (
                         <li key={`${o.id}-${kind}`} className="text-sm">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <Badge variant="outline" className="text-[10px]">
-                              {FITNESS_GAP_LABELS[kind]}
+                              {t(`dashboard.fitness.kinds.${kind}`)}
                             </Badge>
                             <Link
                               href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
@@ -422,11 +438,11 @@ export default async function DashboardPage({
                             >
                               {o.title}
                             </Link>
-                            <span className="text-muted-foreground text-xs">· {claim}</span>
+                            <span className="text-muted-foreground text-xs">· {t(claim)}</span>
                           </div>
                           <details className="text-muted-foreground text-xs">
-                            <summary className="cursor-pointer">Why</summary>
-                            <p className="mt-0.5">{detail}</p>
+                            <summary className="cursor-pointer">{t("dashboard.why")}</summary>
+                            <p className="mt-0.5">{t(detail)}</p>
                           </details>
                         </li>
                       ))}
@@ -437,16 +453,13 @@ export default async function DashboardPage({
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Generalization gaps</CardTitle>
-                  <CardDescription>
-                    Levels observed in one case or a small sample. Observed in a sample does not
-                    mean proven for the market; the next question widens the scope.
-                  </CardDescription>
+                  <CardTitle>{t("dashboard.generalization.title")}</CardTitle>
+                  <CardDescription>{t("dashboard.generalization.description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {data.generalizationGaps.length === 0 ? (
                     <p className="text-muted-foreground text-sm">
-                      No observed level is waiting for generalization.
+                      {t("dashboard.generalization.empty")}
                     </p>
                   ) : (
                     <ul className="space-y-2">
@@ -455,7 +468,7 @@ export default async function DashboardPage({
                           <li key={o.id} className="text-sm">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <Badge variant="outline" className="text-[10px]">
-                                {GENERALIZATION_LABELS[generalization]}
+                                {t(`labels.generalization.${generalization}`)}
                               </Badge>
                               <Link
                                 href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
@@ -464,12 +477,14 @@ export default async function DashboardPage({
                                 {o.title}
                               </Link>
                               <span className="text-muted-foreground text-xs">
-                                · {level} · {scope}
+                                · {t(level)} · {t(scope)}
                               </span>
                             </div>
                             <details className="text-muted-foreground text-xs">
-                              <summary className="cursor-pointer">{question ?? "Why"}</summary>
-                              <p className="mt-0.5">{detail}</p>
+                              <summary className="cursor-pointer">
+                                {question ? t(question) : t("dashboard.why")}
+                              </summary>
+                              <p className="mt-0.5">{t(detail)}</p>
                             </details>
                           </li>
                         ),
@@ -482,7 +497,7 @@ export default async function DashboardPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Workspaces</CardTitle>
+                <CardTitle>{t("dashboard.workspaces.title")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -494,13 +509,14 @@ export default async function DashboardPage({
                       >
                         <div className="flex items-center justify-between gap-2">
                           <p className="truncate text-sm font-medium">{w.name}</p>
-                          {w.isDemo && <Badge variant="muted">Demo</Badge>}
+                          {w.isDemo && <Badge variant="muted">{t("layout.demoBadge")}</Badge>}
                         </div>
                         <p className="text-muted-foreground mt-1 text-xs">
-                          {STAGE_LABELS[w.conversations[0]?.stage ?? "START"]} ·{" "}
-                          {w._count.opportunities} opportunit
-                          {w._count.opportunities === 1 ? "y" : "ies"} · {w._count.evidence}{" "}
-                          evidence
+                          {t(`labels.stage.${w.conversations[0]?.stage ?? "START"}`)} ·{" "}
+                          {t("dashboard.workspaces.counts", {
+                            opportunities: w._count.opportunities,
+                            evidence: w._count.evidence,
+                          })}
                         </p>
                       </Link>
                     </li>
@@ -533,12 +549,12 @@ function Head({ label, question }: { label: string; question: string }) {
   );
 }
 
-function Score({ value }: { value: number | null }) {
+function Score({ value, incomplete }: { value: number | null; incomplete: string }) {
   return (
     <TableCell className="text-right font-mono tabular-nums">
       {value === null ? (
         <span className="text-tone-warning text-[10px] font-semibold tracking-wide">
-          INCOMPLETE
+          {incomplete}
         </span>
       ) : (
         <span className={cn(scoreTone(value))}>{value}</span>

@@ -1,7 +1,7 @@
 import { prisma } from "@/db/prisma";
-import { KNOWLEDGE_TRIGGER_LABELS } from "@/domain/enums";
 import { workspaceGraphInclude } from "@/db/workspaces";
 import type { AssumptionKind, Verdict } from "@/generated/prisma/enums";
+import { msg, type LocalizedText } from "@/i18n/messages";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { NextAction } from "@/services/scoring/next-action";
 import type { ValueAction } from "@/services/value/next-value-action";
@@ -10,24 +10,11 @@ import { frontierMovement, type FrontierPosition } from "@/services/value/proof-
 /** Days without a completed experiment after which learning counts as stalled. */
 export const STALLED_AFTER_DAYS = 21;
 
+/** Rendered with t(`dashboard.gaps.kinds.${kind}`). */
 export type EvidenceGapKind = "PROBLEM" | "MAGNITUDE" | "CAUSAL" | "WTP" | "FEASIBILITY";
 
-export const EVIDENCE_GAP_LABELS: Record<EvidenceGapKind, string> = {
-  PROBLEM: "Problem evidence gap",
-  MAGNITUDE: "Economic magnitude gap",
-  CAUSAL: "Causal evidence gap",
-  WTP: "Willingness-to-pay gap",
-  FEASIBILITY: "Mechanism feasibility gap",
-};
-
-/** Evidence exists but does not fit the claim it is linked to. */
+/** Evidence exists but does not fit the claim it is linked to. Rendered with t(`dashboard.fitness.kinds.${kind}`). */
 export type FitnessGapKind = "NOT_ADMISSIBLE" | "LOW_FIT" | "WEAK_DESIGN";
-
-export const FITNESS_GAP_LABELS: Record<FitnessGapKind, string> = {
-  NOT_ADMISSIBLE: "Evidence not admissible",
-  LOW_FIT: "Evidence does not fit the claim",
-  WEAK_DESIGN: "Design too weak for causality",
-};
 
 /** Causal and value assumptions are the ones that collapse an opportunity. */
 const KIND_BONUS: Record<AssumptionKind, number> = {
@@ -104,21 +91,22 @@ export async function getDashboardData(userId: string) {
   const evidenceGaps = enriched
     .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
     .flatMap(({ opportunity: o, insights }) => {
-      const gaps: Array<{ kind: EvidenceGapKind; detail: string }> = [];
+      const gaps: Array<{ kind: EvidenceGapKind; detail: LocalizedText }> = [];
       if (o.opportunityScore >= 60 && o.evidenceScore < 40) {
         gaps.push({
           kind: "PROBLEM",
-          detail: `potential ${o.opportunityScore} · evidence ${o.evidenceScore} · ${insights.evidenceBreakdown?.gaps[0] ?? "no evidence captured"}`,
+          detail: msg("dashboard.gaps.problemDetail", {
+            potential: o.opportunityScore,
+            evidence: o.evidenceScore,
+            gap: insights.evidenceBreakdown?.gaps[0] ?? msg("dashboard.gaps.noEvidenceCaptured"),
+          }),
         });
       }
       if (
         insights.valueStrength?.status === "INCOMPLETE" &&
         insights.valueStrength.missing.includes("magnitude")
       ) {
-        gaps.push({
-          kind: "MAGNITUDE",
-          detail: "The economic magnitude is unknown: nothing measured, nothing stated.",
-        });
+        gaps.push({ kind: "MAGNITUDE", detail: msg("dashboard.gaps.magnitudeDetail") });
       }
       if (
         o.valueChainNodes.length > 0 &&
@@ -128,8 +116,8 @@ export async function getDashboardData(userId: string) {
           kind: "CAUSAL",
           detail:
             o.causalConfidence === null
-              ? "A critical causal link has no evidence at all."
-              : `Causal confidence ${o.causalConfidence}: the weakest critical link is barely supported.`,
+              ? msg("dashboard.gaps.causalNoEvidence")
+              : msg("dashboard.gaps.causalWeak", { confidence: o.causalConfidence }),
         });
       }
       const wtpEvidence =
@@ -138,24 +126,34 @@ export async function getDashboardData(userId: string) {
           (l) => l.claimType === "WILLINGNESS_TO_PAY" && l.direction === "SUPPORTS",
         );
       if (!wtpEvidence && o.opportunityScore >= 60) {
-        gaps.push({
-          kind: "WTP",
-          detail: "No evidence of purchase intent or spend on an alternative.",
-        });
+        gaps.push({ kind: "WTP", detail: msg("dashboard.gaps.wtpDetail") });
       }
       if (o.assumptions.some((a) => a.kind === "FEASIBILITY" && a.status === "UNKNOWN")) {
-        gaps.push({
-          kind: "FEASIBILITY",
-          detail: "A feasibility assumption about the mechanism is untested.",
-        });
+        gaps.push({ kind: "FEASIBILITY", detail: msg("dashboard.gaps.feasibilityDetail") });
       }
       return gaps.map((g) => ({ opportunity: o, insights, ...g }));
     })
     .slice(0, 10);
 
+  type Enriched = (typeof enriched)[number];
+  interface FitnessGap {
+    opportunity: Enriched["opportunity"];
+    kind: FitnessGapKind;
+    claim: LocalizedText;
+    detail: LocalizedText;
+  }
+  interface GeneralizationGap {
+    opportunity: Enriched["opportunity"];
+    level: LocalizedText;
+    generalization: "CASE_ONLY" | "SAMPLE_SUPPORTED" | "BROADER_HYPOTHESIS";
+    scope: LocalizedText;
+    detail: LocalizedText;
+    question: LocalizedText | null;
+  }
+
   // EVIDENCE FITNESS GAPS — the frontier is blocked by evidence that exists
   // but is not admissible, does not fit, or comes from too weak a design.
-  const fitnessGaps = enriched
+  const fitnessGaps: FitnessGap[] = enriched
     .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
     .flatMap(({ opportunity: o, insights }) => {
       const blocked = insights.frontier?.blockedAt;
@@ -175,7 +173,7 @@ export async function getDashboardData(userId: string) {
     .slice(0, 8);
 
   // GENERALIZATION GAPS — a level is observed, but only in a case or a sample.
-  const generalizationGaps = enriched
+  const generalizationGaps: GeneralizationGap[] = enriched
     .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
     .flatMap(({ opportunity: o, insights }) => {
       const f = insights.frontier;
@@ -235,11 +233,6 @@ export async function getDashboardData(userId: string) {
       (c.previousFrontier ?? "NONE") as FrontierPosition,
       (c.newFrontier ?? "NONE") as FrontierPosition,
     ),
-    reason: c.experiment
-      ? `${c.experiment.title} (experiment result)`
-      : c.evidence
-        ? `${c.evidence.sourceTitle} (evidence)`
-        : KNOWLEDGE_TRIGGER_LABELS[c.trigger].toLowerCase(),
   }));
 
   // OPPORTUNITIES WITH STALLED LEARNING — live opportunities with untested critical

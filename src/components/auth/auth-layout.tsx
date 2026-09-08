@@ -1,4 +1,5 @@
 import { Brand } from "@/components/layout/brand";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
 
 export function AuthLayout({
   title,
@@ -11,8 +12,9 @@ export function AuthLayout({
 }) {
   return (
     <div className="bg-muted/40 flex min-h-screen flex-col">
-      <header className="flex h-14 items-center px-6">
+      <header className="flex h-14 items-center justify-between px-6">
         <Brand />
+        <LanguageSwitcher />
       </header>
       <main className="flex flex-1 items-center justify-center px-6 pb-16">
         <div className="bg-background w-full max-w-sm rounded-lg border p-6 shadow-xs">

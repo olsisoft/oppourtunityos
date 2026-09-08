@@ -23,4 +23,5 @@ export const common: Section<typeof en> = {
   demoData: "DONNÉES DE DÉMO",
   justNow: "à l’instant",
   outOf100: "/100",
+  invalidInput: "Saisie invalide",
 };
