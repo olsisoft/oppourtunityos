@@ -23,7 +23,7 @@ export interface CausalLanguageInput {
   /** "the leakage rate decreased" / "97% of appointments were matched" */
   outcome: string;
   /** "5 salons using two POS systems, founder-assisted, over one month" */
-  scope: string;
+  scope: LocalizedText;
   /** Direction of the evidence: supports / contradicts / neutral. */
   direction?: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
 }
@@ -128,7 +128,10 @@ export function causalLanguage(input: CausalLanguageInput): CausalLanguage {
     mechanismCap: mech !== null ? cap(mech) : msg("validity.gate.default.mechanismCap"),
     outcome: out ?? msg("validity.gate.default.outcome"),
     outcomeCap: out !== null ? cap(out) : msg("validity.gate.default.outcomeCap"),
-    scope: input.scope?.trim() || msg("validity.gate.default.scope"),
+    scope:
+      typeof input.scope === "string"
+        ? input.scope.trim() || msg("validity.gate.default.scope")
+        : (input.scope ?? msg("validity.gate.default.scope")),
   };
   const direction = input.direction === "CONTRADICTS" ? "contradicts" : "supports";
   return {
@@ -258,7 +261,7 @@ export function experimentInterpretation(params: {
   internalValidity: InternalValidity | null;
   mechanism: string;
   outcome: string;
-  scope: string;
+  scope: LocalizedText;
   direction: "SUPPORTS" | "CONTRADICTS" | "NEUTRAL";
   outcomeLabel: "SUPPORTED" | "CONTRADICTED" | "INCONCLUSIVE" | "INVALID";
 }): ExperimentInterpretation {

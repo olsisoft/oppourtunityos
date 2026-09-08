@@ -28,7 +28,7 @@ import {
   type InternalValidityAssessment,
 } from "@/services/value/experimental-validity";
 import { experimentInterpretation } from "@/services/value/language-gate";
-import { describeScope, parseScope } from "@/services/value/scope";
+import { describeScope, parseScope, scopeMessage, type Scope } from "@/services/value/scope";
 import { logger } from "@/lib/logger";
 import { requireUserId } from "@/lib/session";
 import {
@@ -532,6 +532,8 @@ export interface ExperimentValiditySummary {
   forbidden: string[];
   /** English rendering of the scope (`describeScope(scope)`); the UI re-renders from `scope`. */
   scopeText: string;
+  /** The scope object, so the UI can describe it in the reader's language. */
+  scope: Scope | null;
   observed: string | null;
 }
 
@@ -666,7 +668,7 @@ export async function completeExperimentAction(
       internalValidity: validity.internalValidity,
       mechanism: exp.opportunity.mechanism ?? exp.valueChainNode?.statement ?? "the intervention",
       outcome: observedText ?? exp.hypothesis,
-      scope: scopeText,
+      scope: scopeMessage(scope),
       direction: outcomeToDirection(outcome) ?? "NEUTRAL",
       outcomeLabel: outcome,
     });
@@ -677,6 +679,7 @@ export async function completeExperimentAction(
       caveats: interpretation.caveats,
       forbidden: interpretation.forbidden,
       scopeText,
+      scope,
       observed: observedText,
     };
 

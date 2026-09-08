@@ -202,7 +202,7 @@ test("the interface switches to French and back, and the choice sticks", async (
   await expect(page.getByRole("heading", { name: "Se connecter" })).toBeVisible();
 
   // Signed in, the demo workspace renders French labels and French engine sentences.
-  await page.getByLabel("Email").fill(DEMO_EMAIL);
+  await page.getByLabel("E-mail").fill(DEMO_EMAIL);
   await page.getByLabel(/Mot de passe/).fill(DEMO_PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
   await page.waitForURL(/\/app/);

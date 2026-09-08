@@ -245,7 +245,11 @@ export function ExperimentResultDialog({
               observed={done.validity.observed}
               interpretation={done.validity.interpretation}
               caveats={done.validity.caveats}
-              scopeText={done.validity.scopeText}
+              scopeText={
+                done.validity.scope
+                  ? describeScope(done.validity.scope, locale)
+                  : done.validity.scopeText
+              }
               compact
             />
             <FrontierMovementCard
