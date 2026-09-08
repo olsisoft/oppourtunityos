@@ -321,12 +321,12 @@ export function ValiditySummary({
         <Badge variant={tone} className="font-mono text-[10px]">
           internal validity · {INTERNAL_VALIDITY_LABELS[assessment.internalValidity]}
         </Badge>
-        {scopeText && (
-          <Badge variant="muted" className="font-mono text-[10px]">
-            scope · {scopeText}
-          </Badge>
-        )}
       </div>
+      {scopeText && (
+        <p className="text-muted-foreground break-words">
+          <span className="font-mono text-[10px] uppercase">Scope</span> {scopeText}
+        </p>
+      )}
       {assessment.downgrades.map((d) => (
         <p key={d} className="text-tone-warning flex items-start gap-1.5">
           <AlertTriangle className="mt-0.5 size-3 shrink-0" /> {d}

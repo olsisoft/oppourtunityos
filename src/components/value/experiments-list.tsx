@@ -176,11 +176,12 @@ export function ExperimentsList({
                                 validity · {INTERNAL_VALIDITY_LABELS[result.internalValidity]}
                               </Badge>
                             )}
-                            {parseScope(result.scope) && (
-                              <Badge variant="muted" className="font-mono text-[10px]">
-                                scope · {describeScope(parseScope(result.scope))}
-                              </Badge>
-                            )}
+                          </p>
+                        )}
+                        {parseScope(result.scope) && (
+                          <p className="text-muted-foreground mt-0.5 break-words">
+                            <span className="font-mono text-[10px] uppercase">Scope</span>{" "}
+                            {describeScope(parseScope(result.scope))}
                           </p>
                         )}
                         {result.interpretation && (
