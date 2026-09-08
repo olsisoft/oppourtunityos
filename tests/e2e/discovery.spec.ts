@@ -184,3 +184,34 @@ test("a new workspace runs the 'I already have an idea' flow and updates the map
   await page.getByRole("button", { name: "Save evidence" }).click();
   await expect(page.getByText("Interview — clinic owner (e2e)")).toBeVisible({ timeout: 15_000 });
 });
+
+test("the interface switches to French and back, and the choice sticks", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Français" }).first().click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(
+    page.getByRole("heading", {
+      name: "Sachez ce qui vaut la peine d’être construit avant d’y passer des mois.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Se connecter" }).first()).toBeVisible();
+
+  // The cookie keeps the choice on the next page.
+  await page.goto("/login");
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.getByRole("heading", { name: "Se connecter" })).toBeVisible();
+
+  // Signed in, the demo workspace renders French labels and French engine sentences.
+  await page.getByLabel("Email").fill(DEMO_EMAIL);
+  await page.getByLabel(/Mot de passe/).fill(DEMO_PASSWORD);
+  await page.getByRole("button", { name: "Se connecter" }).click();
+  await page.waitForURL(/\/app/);
+  await expect(page.getByRole("heading", { name: /investiguer|explorer|examiner/i })).toBeVisible();
+  await expect(page.getByText(/Prochaine meilleure action/i).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "English" }).first().click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(
+    page.getByRole("heading", { name: "What should I investigate next?" }),
+  ).toBeVisible();
+});

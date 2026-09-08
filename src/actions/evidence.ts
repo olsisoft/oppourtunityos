@@ -6,7 +6,7 @@ import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
 import { createEvidenceSchema, scopeFromFields } from "@/domain/schemas";
 import { sourceTypeForLegacy } from "@/services/value/evidence-sources";
-import { getT } from "@/i18n/server";
+import { getLocale, getT } from "@/i18n/server";
 import { logger } from "@/lib/logger";
 import { cleanText, cleanUrl } from "@/lib/sanitize";
 import { requireUserId } from "@/lib/session";
@@ -191,6 +191,7 @@ export async function suggestEvidenceSignalsAction(input: {
       cleanText(input.sourceTitle, 200),
       cleanText(input.excerpt, 4000),
       cleanText(input.hypothesis, 500),
+      await getLocale(),
     );
     return { ...summary, isMock: provider.isMock };
   });
@@ -209,6 +210,7 @@ export async function runResearchAction(input: {
       query: cleanText(input.query, 200),
       hypothesis: input.hypothesis ? cleanText(input.hypothesis, 500) : undefined,
       limit: 5,
+      locale: await getLocale(),
     });
     logger.info("research.search", {
       userId,

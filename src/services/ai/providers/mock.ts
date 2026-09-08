@@ -7,8 +7,15 @@
  * discovery stage machine and turns the user's words into structured
  * hypotheses. It never emits evidence, never fills a value dimension it has no
  * basis for (null = UNKNOWN), and never states a score, frontier or verdict.
+ *
+ * It speaks the conversation locale (`hints.locale`): every sentence, option
+ * and extracted text lives in the "mock" dictionary section, so the French
+ * templates sit next to the English ones. The English templates are the
+ * exact sentences the mock always produced — tests assert on them.
  */
 import type { DiscoveryStage, ValueChainLevel } from "@/generated/prisma/enums";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locales";
+import { renderKey, type MessageParams } from "@/i18n/messages";
 import { BaseAIProvider } from "../base-provider";
 import {
   DiscoveryExtractionSchema,
@@ -20,398 +27,171 @@ import type { ChatOptions, StructuredOptions, TurnHints, UserContext } from "../
 
 export const MOCK_LABEL = "[MOCK PROVIDER — templated response, not analysis]";
 
+/** The mock banner in the conversation locale (English: MOCK_LABEL). */
+export function mockLabel(locale: Locale): string {
+  return tx(locale, "label");
+}
+
+/** Render a "mock.*" dictionary key in the locale. */
+function tx(locale: Locale, key: string, params?: MessageParams): string {
+  return renderKey(locale, `mock.${key}`, params);
+}
+
 type VariableDraft = DiscoveryExtraction["variables"][number];
 type AssumptionDraft = DiscoveryExtraction["assumptions"][number];
 
 interface VariableTemplate {
-  name: string;
+  /** Key under "mock.variables": name, type, target, unit and parent live in the dictionary. */
+  key: string;
   category: VariableDraft["category"];
-  /** What is directly moved (open taxonomy); distinct from the economic category. */
-  type?: string;
   direction: VariableDraft["desiredDirection"];
   importance: number;
+}
+
+interface LocalizedVariable extends VariableTemplate {
+  name: string;
+  /** What is directly moved (open taxonomy); distinct from the economic category. */
+  type: string;
   target: string;
   unit: string;
   parent: string;
 }
 
+function v(
+  key: string,
+  category: VariableDraft["category"],
+  direction: VariableDraft["desiredDirection"],
+  importance: number,
+): VariableTemplate {
+  return { key, category, direction, importance };
+}
+
+/**
+ * Industry → candidate variables. The patterns accept the French words a
+ * French user or the French context options would use (accented forms only
+ * where the unaccented word is also English, so English routing is unchanged).
+ */
 const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> = [
   {
-    match: /reception|call|phone|front desk|booking/i,
+    match:
+      /r[ée]ception|call|phone|front desk|booking|accueil|appels?\b|t[ée]l[ée]phon|réservation|rendez-vous/i,
     variables: [
-      {
-        name: "Missed calls",
-        type: "Loss",
-        category: "REVENUE",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Inbound calls that go unanswered",
-        unit: "calls per day",
-        parent: "New-patient revenue",
-      },
-      {
-        name: "Booking conversion",
-        type: "Conversion",
-        category: "CONVERSION",
-        direction: "INCREASE",
-        importance: 8,
-        target: "Inquiries that become booked appointments",
-        unit: "% of inquiries",
-        parent: "New-patient revenue",
-      },
-      {
-        name: "Front desk labor cost",
-        type: "Cost",
-        category: "COST",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Staff hours spent on phone handling",
-        unit: "hours per week",
-        parent: "Operating cost",
-      },
-      {
-        name: "Response time",
-        type: "Processing time",
-        category: "TIME",
-        direction: "ACCELERATE",
-        importance: 6,
-        target: "Time between inquiry and answer",
-        unit: "minutes",
-        parent: "Booking conversion",
-      },
-      {
-        name: "No-show rate",
-        type: "No-show rate",
-        category: "CAPACITY",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Booked appointments that become unused capacity",
-        unit: "% of appointments",
-        parent: "Revenue per available chair-hour",
-      },
+      v("missedCalls", "REVENUE", "DECREASE", 8),
+      v("bookingConversion", "CONVERSION", "INCREASE", 8),
+      v("frontDeskLaborCost", "COST", "DECREASE", 7),
+      v("responseTime", "TIME", "ACCELERATE", 6),
+      v("noShowRate", "CAPACITY", "DECREASE", 7),
     ],
   },
   {
-    match: /salon|spa|barber|clinic|dental|dentist|physio|vet/i,
+    match:
+      /salon|spa|barber|clinic|dental|dentist|physio|vet|coiff|clinique|dentaire|kin[ée]|vétérinaire|esth[ée]tique|institut de beaut/i,
     variables: [
-      {
-        name: "No-show rate",
-        type: "No-show rate",
-        category: "CAPACITY",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Booked appointments that become unused capacity",
-        unit: "% of appointments",
-        parent: "Revenue per available chair-hour",
-      },
-      {
-        name: "Idle chair capacity",
-        type: "Idle capacity",
-        category: "UTILIZATION",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Chair-hours paid for but not sold",
-        unit: "chair-hours per week",
-        parent: "Revenue per available chair-hour",
-      },
-      {
-        name: "Employee revenue leakage",
-        type: "Leakage",
-        category: "REVENUE",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Services performed but not recorded or paid",
-        unit: "% of revenue",
-        parent: "Net revenue",
-      },
-      {
-        name: "Customer retention",
-        type: "Retention",
-        category: "RETENTION",
-        direction: "INCREASE",
-        importance: 7,
-        target: "Clients returning within 90 days",
-        unit: "% of clients",
-        parent: "Lifetime value",
-      },
-      {
-        name: "Inventory shrinkage",
-        type: "Shrinkage",
-        category: "INVENTORY",
-        direction: "DECREASE",
-        importance: 5,
-        target: "Product that disappears without a sale",
-        unit: "€ per month",
-        parent: "Gross margin",
-      },
+      v("noShowRate", "CAPACITY", "DECREASE", 8),
+      v("idleChairCapacity", "UTILIZATION", "DECREASE", 7),
+      v("employeeRevenueLeakage", "REVENUE", "DECREASE", 8),
+      v("clientRetention", "RETENTION", "INCREASE", 7),
+      v("inventoryShrinkage", "INVENTORY", "DECREASE", 5),
     ],
   },
   {
-    match: /restaurant|cafe|bar|kitchen|food/i,
+    match: /restaurant|cafe|bar|kitchen|food|café|restauration|alimentaire|traiteur/i,
     variables: [
-      {
-        name: "Labor cost",
-        type: "Cost",
-        category: "COST",
-        direction: "DECREASE",
-        importance: 9,
-        target: "Staff hours per cover",
-        unit: "% of revenue",
-        parent: "Operating margin",
-      },
-      {
-        name: "Food waste",
-        type: "Waste",
-        category: "COST",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Ingredients bought but not sold",
-        unit: "% of purchases",
-        parent: "Gross margin",
-      },
-      {
-        name: "Table utilization",
-        type: "Utilization",
-        category: "UTILIZATION",
-        direction: "INCREASE",
-        importance: 7,
-        target: "Seat-hours sold",
-        unit: "% of seat-hours",
-        parent: "Revenue per seat-hour",
-      },
-      {
-        name: "No-shows",
-        type: "No-show rate",
-        category: "CAPACITY",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Reservations that do not arrive",
-        unit: "% of reservations",
-        parent: "Revenue per seat-hour",
-      },
-      {
-        name: "Repeat visits",
-        type: "Retention",
-        category: "RETENTION",
-        direction: "INCREASE",
-        importance: 6,
-        target: "Guests returning within 60 days",
-        unit: "% of guests",
-        parent: "Lifetime value",
-      },
+      v("kitchenLaborCost", "COST", "DECREASE", 9),
+      v("foodWaste", "COST", "DECREASE", 8),
+      v("tableUtilization", "UTILIZATION", "INCREASE", 7),
+      v("noShows", "CAPACITY", "DECREASE", 7),
+      v("repeatVisits", "RETENTION", "INCREASE", 6),
     ],
   },
   {
-    match: /logistic|fleet|delivery|truck|warehouse|shipping/i,
+    match:
+      /logistic|fleet|delivery|truck|warehouse|shipping|logistique|flotte|livraison|camion|entrepôt|expédition|transporteur/i,
     variables: [
-      {
-        name: "Fuel cost per delivery",
-        type: "Cost",
-        category: "COST",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Fuel spent per completed delivery",
-        unit: "€ per delivery",
-        parent: "Cost per delivery",
-      },
-      {
-        name: "Idle vehicle time",
-        type: "Idle capacity",
-        category: "UTILIZATION",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Vehicle-hours not moving freight",
-        unit: "hours per vehicle per week",
-        parent: "Asset utilization",
-      },
-      {
-        name: "Late deliveries",
-        type: "Delay",
-        category: "RELIABILITY",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Deliveries outside the promised window",
-        unit: "% of deliveries",
-        parent: "Customer retention",
-      },
-      {
-        name: "Driver churn",
-        type: "Churn",
-        category: "RETENTION",
-        direction: "DECREASE",
-        importance: 6,
-        target: "Drivers leaving per year",
-        unit: "% per year",
-        parent: "Operating cost",
-      },
-      {
-        name: "Damage claims",
-        type: "Loss",
-        category: "RISK",
-        direction: "DECREASE",
-        importance: 5,
-        target: "Shipments damaged in transit",
-        unit: "claims per 1,000 shipments",
-        parent: "Cost per delivery",
-      },
+      v("fuelCostPerDelivery", "COST", "DECREASE", 8),
+      v("idleVehicleTime", "UTILIZATION", "DECREASE", 7),
+      v("lateDeliveries", "RELIABILITY", "DECREASE", 8),
+      v("driverChurn", "RETENTION", "DECREASE", 6),
+      v("damageClaims", "RISK", "DECREASE", 5),
     ],
   },
   {
-    match: /security|cyber|soc|incident|breach|compliance/i,
+    match:
+      /security|cyber|soc|incident|breach|compliance|sécurité|conformité|piratage|fuite de donn/i,
     variables: [
-      {
-        name: "Incident resolution time",
-        type: "Processing time",
-        category: "TIME",
-        direction: "ACCELERATE",
-        importance: 9,
-        target: "Time from alert to closed incident",
-        unit: "hours",
-        parent: "Breach risk exposure",
-      },
-      {
-        name: "Alert fatigue",
-        type: "Volume",
-        category: "PRODUCTIVITY",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Alerts triaged per analyst per day",
-        unit: "alerts per analyst",
-        parent: "Analyst productivity",
-      },
-      {
-        name: "Audit preparation time",
-        type: "Manual effort",
-        category: "COMPLIANCE",
-        direction: "DECREASE",
-        importance: 7,
-        target: "Hours spent preparing audit evidence",
-        unit: "hours per audit",
-        parent: "Compliance cost",
-      },
-      {
-        name: "Breach risk exposure",
-        type: "Exposure",
-        category: "RISK",
-        direction: "DECREASE",
-        importance: 8,
-        target: "Unpatched critical exposures",
-        unit: "open critical findings",
-        parent: "Expected loss",
-      },
-      {
-        name: "Analyst turnover",
-        type: "Churn",
-        category: "RETENTION",
-        direction: "DECREASE",
-        importance: 5,
-        target: "Analysts leaving per year",
-        unit: "% per year",
-        parent: "Operating cost",
-      },
+      v("incidentResolutionTime", "TIME", "ACCELERATE", 9),
+      v("alertFatigue", "PRODUCTIVITY", "DECREASE", 7),
+      v("auditPreparationTime", "COMPLIANCE", "DECREASE", 7),
+      v("breachRiskExposure", "RISK", "DECREASE", 8),
+      v("analystTurnover", "RETENTION", "DECREASE", 5),
     ],
   },
 ];
 
 const DEFAULT_VARIABLES: VariableTemplate[] = [
-  {
-    name: "Revenue leakage",
-    type: "Leakage",
-    category: "REVENUE",
-    direction: "DECREASE",
-    importance: 8,
-    target: "Revenue earned but not captured",
-    unit: "% of revenue",
-    parent: "Net revenue",
-  },
-  {
-    name: "Labor cost",
-    type: "Cost",
-    category: "COST",
-    direction: "DECREASE",
-    importance: 7,
-    target: "Staff hours on manual work",
-    unit: "hours per week",
-    parent: "Operating margin",
-  },
-  {
-    name: "Customer retention",
-    type: "Retention",
-    category: "RETENTION",
-    direction: "INCREASE",
-    importance: 7,
-    target: "Customers renewing or returning",
-    unit: "% of customers",
-    parent: "Lifetime value",
-  },
-  {
-    name: "Time to resolution",
-    type: "Cycle time",
-    category: "TIME",
-    direction: "ACCELERATE",
-    importance: 6,
-    target: "Time from request to resolution",
-    unit: "hours",
-    parent: "Customer retention",
-  },
-  {
-    name: "Error rate",
-    type: "Error",
-    category: "QUALITY",
-    direction: "DECREASE",
-    importance: 5,
-    target: "Outputs that need rework",
-    unit: "% of outputs",
-    parent: "Operating cost",
-  },
+  v("revenueLeakage", "REVENUE", "DECREASE", 8),
+  v("manualLaborCost", "COST", "DECREASE", 7),
+  v("customerRetention", "RETENTION", "INCREASE", 7),
+  v("timeToResolution", "TIME", "ACCELERATE", 6),
+  v("errorRate", "QUALITY", "DECREASE", 5),
 ];
 
-const CONTEXT_QUESTIONS: Array<{ key: keyof UserContext; question: string; options: string[] }> = [
+interface ContextQuestion {
+  key: keyof UserContext;
+  /** Dictionary node under "mock.context" holding `question` and `options.*`. */
+  node: string;
+  options: string[];
+}
+
+const CONTEXT_QUESTIONS: ContextQuestion[] = [
   {
     key: "industries",
-    question: "What industries do you understand or have access to?",
-    options: [
-      "Local services (salons, clinics, restaurants)",
-      "B2B software teams",
-      "Logistics",
-      "Healthcare",
-    ],
+    node: "industries",
+    options: ["localServices", "b2bSoftware", "logistics", "healthcare"],
   },
   {
     key: "audiences",
-    question: "What kind of people can you realistically talk to in the next two weeks?",
-    options: ["Small business owners", "Engineering managers", "Operations staff", "Nobody yet"],
+    node: "audiences",
+    options: ["smallBusinessOwners", "engineeringManagers", "operationsStaff", "nobody"],
   },
-  {
-    key: "businessModel",
-    question: "Are you looking for B2B, B2C, or either?",
-    options: ["B2B", "B2C", "Either"],
-  },
+  { key: "businessModel", node: "businessModel", options: ["b2b", "b2c", "either"] },
   {
     key: "productPreferences",
-    question: "Do you prefer software, AI, hardware, marketplace, or are you open?",
-    options: ["Software", "AI", "Marketplace", "Open"],
+    node: "productPreferences",
+    options: ["software", "ai", "marketplace", "open"],
   },
   {
     key: "technicalStrengths",
-    question: "What are your technical strengths?",
-    options: ["Backend and data", "Full-stack web", "Machine learning", "Mobile"],
+    node: "technicalStrengths",
+    options: ["backend", "fullStack", "machineLearning", "mobile"],
   },
 ];
 
+function contextQuestion(
+  locale: Locale,
+  q: ContextQuestion,
+): { question: string; options: string[] } {
+  return {
+    question: tx(locale, `context.${q.node}.question`),
+    options: q.options.map((o) => tx(locale, `context.${q.node}.options.${o}`)),
+  };
+}
+
 /**
- * Split a free-text list on commas, semicolons, slashes, "and" / "or" and
- * newlines. Separators inside parentheses never split: "Local services
- * (salons, clinics, restaurants)" stays one item.
+ * Split a free-text list on commas, semicolons, slashes, "and" / "or" (and
+ * "et" / "ou" in French) and newlines. Separators inside parentheses never
+ * split: "Local services (salons, clinics, restaurants)" stays one item.
  */
-export function splitList(text: string): string[] {
+export function splitList(text: string, locale: Locale = DEFAULT_LOCALE): string[] {
   const groups: string[] = [];
   const masked = text.replace(/\([^()]*\)/g, (group) => {
     groups.push(group);
     return `\uE000${groups.length - 1}\uE001`;
   });
+  const separator =
+    locale === "fr" ? /,|;|\band\b|\bor\b|\bet\b|\bou\b|\/|\n/i : /,|;|\band\b|\bor\b|\/|\n/i;
   return masked
-    .split(/,|;|\band\b|\bor\b|\/|\n/i)
+    .split(separator)
     .map((s) => s.replace(/\uE000(\d+)\uE001/g, (_, i: string) => groups[Number(i)]).trim())
     .filter((s) => s.length > 1 && s.length < 80)
     .slice(0, 6);
@@ -437,20 +217,123 @@ function plural(word: string): string {
   return w + "s";
 }
 
+/**
+ * French number: nouns and adjectives agree, so every word of the head noun
+ * phrase changes ("clinique dentaire" ↔ "cliniques dentaires") until the first
+ * preposition or article ("salon de coiffure" ↔ "salons de coiffure").
+ * Acronyms (PME, ICP, UNKNOWN) and words with digits or brackets stay as they are.
+ */
+const FR_FUNCTION_WORDS = new Set([
+  "de",
+  "du",
+  "des",
+  "la",
+  "le",
+  "les",
+  "en",
+  "à",
+  "au",
+  "aux",
+  "et",
+  "ou",
+  "pour",
+  "sur",
+  "dans",
+  "par",
+  "avec",
+  "sans",
+  "chez",
+  "un",
+  "une",
+  "—",
+  "-",
+]);
+
+function isFrFunctionWord(word: string): boolean {
+  const bare = word.replace(/^[(«"']+|[)»"',.;:!?]+$/g, "").toLowerCase();
+  return FR_FUNCTION_WORDS.has(bare) || /^[dlsjmntc]['’]/.test(bare);
+}
+
+function mapFrHead(phrase: string, fn: (word: string) => string): string {
+  let head = true;
+  return phrase
+    .trim()
+    .split(/\s+/)
+    .map((word) => {
+      if (head && isFrFunctionWord(word)) head = false;
+      if (!head || !/^[\p{L}’'-]+$/u.test(word) || /^\p{Lu}{2,}$/u.test(word)) return word;
+      return fn(word);
+    })
+    .join(" ");
+}
+
+function singularFr(phrase: string): string {
+  return mapFrHead(phrase, (w) => {
+    if (/eaux$/i.test(w)) return w.slice(0, -1);
+    if (/aux$/i.test(w)) return w.slice(0, -3) + "al";
+    if (/s$/i.test(w) && !/ss$/i.test(w) && w.length > 3) return w.slice(0, -1);
+    return w;
+  });
+}
+
+function pluralFr(phrase: string): string {
+  return mapFrHead(phrase, (w) => {
+    if (/[sxz]$/i.test(w)) return w;
+    if (/eau$/i.test(w)) return w + "x";
+    if (/al$/i.test(w) && w.length > 3) return w.slice(0, -2) + "aux";
+    return w + "s";
+  });
+}
+
+function singularFor(locale: Locale, word: string): string {
+  return locale === "fr" ? singularFr(word) : singular(word);
+}
+
+function pluralFor(locale: Locale, word: string): string {
+  return locale === "fr" ? pluralFr(word) : plural(word);
+}
+
+/** French "de" elides before a vowel: "de clinique", "d’agence". */
+function deFr(word: string): string {
+  return /^[aeiouyhàâäéèêëîïôöùûüœ]/i.test(word) ? "d’" : "de ";
+}
+
 function cap(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
-function variablesFor(context: string): VariableTemplate[] {
+/** Lower-case the first letter unless the phrase opens with an acronym (PME, ICP). */
+function uncap(s: string): string {
+  return /^\p{Lu}{2,}/u.test(s) || !s ? s : s[0].toLowerCase() + s.slice(1);
+}
+
+function variablesFor(locale: Locale, context: string): LocalizedVariable[] {
   const hit = VARIABLE_LIBRARY.find((entry) => entry.match.test(context));
-  return hit ? hit.variables : DEFAULT_VARIABLES;
+  return (hit ? hit.variables : DEFAULT_VARIABLES).map((t) => ({
+    ...t,
+    name: tx(locale, `variables.${t.key}.name`),
+    type: tx(locale, `variables.${t.key}.type`),
+    target: tx(locale, `variables.${t.key}.target`),
+    unit: tx(locale, `variables.${t.key}.unit`),
+    parent: tx(locale, `variables.${t.key}.parent`),
+  }));
 }
 
 /** Parse "X for Y" / "X pour Y" / "helps Y ..." idea statements. */
-export function decomposeIdea(statement: string): { mechanism: string; icp: string } {
-  const s = statement.replace(/^i (want|would like) to build\s+/i, "").trim();
-  const m = s.match(/^(.+?)\s+(?:for|pour|to help|that helps|helping)\s+(.+?)[.!]?$/i);
-  if (m) return { mechanism: cap(m[1].trim()), icp: m[2].trim() };
+export function decomposeIdea(
+  statement: string,
+  locale: Locale = DEFAULT_LOCALE,
+): { mechanism: string; icp: string } {
+  const s = statement
+    .replace(/^i (want|would like) to build\s+/i, "")
+    .replace(/^je (veux|voudrais|souhaite|aimerais) (construire|créer|développer|lancer)\s+/i, "")
+    .trim();
+  const m = s.match(/^(.+?)\s+(?:for|pour aider|pour|to help|that helps|helping)\s+(.+?)[.!]?$/i);
+  if (m) {
+    const icp =
+      locale === "fr" ? m[2].trim().replace(/^(les|des|la|le|l['’]|un|une)\s*/i, "") : m[2].trim();
+    return { mechanism: cap(m[1].trim()), icp };
+  }
   return { mechanism: cap(s), icp: "UNKNOWN" };
 }
 
@@ -463,13 +346,37 @@ function pickByMessage(candidates: string[], message: string): string | null {
   return fuzzy ?? null;
 }
 
-function variableDraft(icpName: string, v: VariableTemplate, description: string): VariableDraft {
+/** Template parameters describing the ICP in every form the sentences need. */
+function icpParams(locale: Locale, icpName: string): MessageParams {
+  return {
+    icp: icpName,
+    icpLower: icpName.toLowerCase(),
+    icpCap: cap(icpName),
+    icpPlural: pluralFor(locale, icpName).toLowerCase(),
+  };
+}
+
+/** Template parameters describing the variable in every form the sentences need. */
+function variableParams(variableName: string): MessageParams {
+  return {
+    variable: cap(variableName),
+    variableRaw: variableName,
+    variableLower: variableName.toLowerCase(),
+    variableLowerCap: cap(variableName.toLowerCase()),
+  };
+}
+
+function mechanismParams(mechanism: string): MessageParams {
+  return { mechanism, mechanismLower: mechanism.toLowerCase() };
+}
+
+function variableDraft(icpName: string, v: LocalizedVariable, description: string): VariableDraft {
   return {
     icpName,
     name: v.name,
     description,
     category: v.category,
-    variableType: v.type ?? null,
+    variableType: v.type,
     desiredDirection: v.direction,
     importanceScore: v.importance,
     target: v.target,
@@ -532,28 +439,37 @@ const LADDER: ValueChainLevel[] = [
 ];
 
 function valueChainFor(
+  locale: Locale,
   title: string,
   mechanism: string,
   variableName: string,
   icpName: string,
 ): DiscoveryExtraction["valueChains"][number] {
-  const v = variableName.toLowerCase();
+  const p = { ...icpParams(locale, icpName), ...variableParams(variableName), mechanism };
   const statements: Record<ValueChainLevel, string> = {
     MECHANISM: mechanism,
-    CAPABILITY: `${cap(icpName)}s can identify the cases driving ${v} and act on them before the outcome is lost.`,
-    TRANSFORMATION: `Fewer cases of ${v} end in an unrecoverable outcome.`,
-    OPERATIONAL_VALUE: `${cap(v)} moves in the desired direction in day-to-day operations.`,
-    ECONOMIC_VALUE: `The economic consequence of ${v} shrinks (capacity, revenue or cost).`,
-    STRATEGIC_OUTCOME: `The parent economic variable of ${v} improves for the ${icpName.toLowerCase()}.`,
+    CAPABILITY: tx(locale, "opportunity.ladder.capability", p),
+    TRANSFORMATION: tx(locale, "opportunity.ladder.transformation", p),
+    OPERATIONAL_VALUE: tx(locale, "opportunity.ladder.operationalValue", p),
+    ECONOMIC_VALUE: tx(locale, "opportunity.ladder.economicValue", p),
+    STRATEGIC_OUTCOME: tx(locale, "opportunity.ladder.strategicOutcome", p),
     BUSINESS_OUTCOME: "",
   };
   const links: DiscoveryExtraction["valueChains"][number]["links"] = [];
   const linkStatements: Record<string, string> = {
-    "MECHANISM->CAPABILITY": `${mechanism} actually surfaces the right cases early enough to act.`,
-    "CAPABILITY->TRANSFORMATION": `Acting on the identified cases materially changes the outcome (${v}).`,
-    "TRANSFORMATION->OPERATIONAL_VALUE": `Changed outcomes on individual cases add up to a measurable movement of ${v}.`,
-    "OPERATIONAL_VALUE->ECONOMIC_VALUE": `The movement of ${v} translates into money, capacity or cost for the ${icpName.toLowerCase()}.`,
-    "ECONOMIC_VALUE->STRATEGIC_OUTCOME": `The economic effect is large and durable enough to move the parent variable.`,
+    "MECHANISM->CAPABILITY": tx(locale, "opportunity.ladder.linkMechanismCapability", p),
+    "CAPABILITY->TRANSFORMATION": tx(locale, "opportunity.ladder.linkCapabilityTransformation", p),
+    "TRANSFORMATION->OPERATIONAL_VALUE": tx(
+      locale,
+      "opportunity.ladder.linkTransformationOperational",
+      p,
+    ),
+    "OPERATIONAL_VALUE->ECONOMIC_VALUE": tx(
+      locale,
+      "opportunity.ladder.linkOperationalEconomic",
+      p,
+    ),
+    "ECONOMIC_VALUE->STRATEGIC_OUTCOME": tx(locale, "opportunity.ladder.linkEconomicStrategic", p),
   };
   for (let i = 0; i < LADDER.length - 1; i++) {
     const key = `${LADDER[i]}->${LADDER[i + 1]}`;
@@ -571,20 +487,42 @@ function valueChainFor(
   };
 }
 
+/**
+ * "Independent local services" ↔ "Services de proximité — indépendants".
+ * English normalises the number; French sector names are often mass nouns
+ * ("logistique", "santé"), so the industry is kept as the user wrote it.
+ */
+function candidateMarketName(locale: Locale, industry: string): string {
+  const base = stripParenthetical(industry);
+  const name = locale === "fr" ? cap(base) : plural(singular(base)).toLowerCase();
+  return tx(locale, "market.candidateName", { industry: name });
+}
+
+/** Inverse of candidateMarketName, singular: the noun the ICP names are built on. */
+function marketBaseName(locale: Locale, marketName: string): string {
+  const stripped =
+    locale === "fr"
+      ? marketName.replace(/\s+—\s+indépendants$/i, "")
+      : marketName.replace(/^independent\s+/i, "");
+  return singularFor(locale, stripped);
+}
+
 export function buildMockTurn(hints: TurnHints): MockTurn {
   const { stage, entryMode, existing } = hints;
+  const locale: Locale = hints.locale ?? DEFAULT_LOCALE;
+  const label = mockLabel(locale);
   const message = hints.userMessage.trim();
 
   if (!entryMode) {
-    const x = emptyExtraction("START", "Entry mode not chosen.");
+    const x = emptyExtraction("START", tx(locale, "start.reasoning"));
     x.questionCard = {
-      question: "How do you want to start?",
-      options: ["I don't know what to build", "I already have an idea"],
+      question: tx(locale, "start.question"),
+      options: [tx(locale, "start.options.noIdea"), tx(locale, "start.options.hasIdea")],
       allowFreeText: false,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
-      reply: `${MOCK_LABEL}\n\nBefore anything else: do you already have an idea to reverse-engineer, or should we discover a market from your context? I will not start from a product either way.`,
+      reply: `${label}\n\n${tx(locale, "start.reply")}`,
       extraction: x,
     };
   }
@@ -592,20 +530,26 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- HAS_IDEA first turn
   if (entryMode === "HAS_IDEA" && existing.markets.length === 0) {
     const idea = hints.ideaStatement || message;
-    const { mechanism, icp } = decomposeIdea(idea);
-    const icpName = icp === "UNKNOWN" ? "UNKNOWN ICP (please specify)" : cap(singular(icp));
-    const marketName = icp === "UNKNOWN" ? "UNKNOWN market" : cap(plural(icp));
-    const vars = variablesFor(idea);
-    const x = emptyExtraction(
-      "VARIABLE_DISCOVERY",
-      "Idea decomposed into market, ICP and candidate variables.",
-    );
+    const { mechanism, icp } = decomposeIdea(idea, locale);
+    const icpName =
+      icp === "UNKNOWN" ? tx(locale, "idea.unknownIcp") : cap(singularFor(locale, icp));
+    const marketName =
+      icp === "UNKNOWN" ? tx(locale, "idea.unknownMarket") : cap(pluralFor(locale, icp));
+    const vars = variablesFor(locale, idea);
+    const p = {
+      ...icpParams(locale, icpName),
+      ...variableParams(vars[0].name),
+      ...mechanismParams(mechanism),
+      idea,
+      market: marketName,
+    };
+    const x = emptyExtraction("VARIABLE_DISCOVERY", tx(locale, "idea.reasoning"));
     x.stage.readyToAdvance = true;
     x.markets = [
       {
         name: marketName,
-        description: `Market implied by the idea "${idea}".`,
-        attractivenessNotes: "UNKNOWN — attractiveness has not been assessed with evidence.",
+        description: tx(locale, "idea.marketDescription", p),
+        attractivenessNotes: tx(locale, "idea.marketNotes"),
         source: icp === "UNKNOWN" ? "AI_HYPOTHESIS" : "USER",
       },
     ];
@@ -613,67 +557,60 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
       {
         marketName,
         name: icpName,
-        role: "Owner / operator (HYPOTHESIS)",
+        role: tx(locale, "idea.icpRole"),
         companyType: marketName,
         companySize: "UNKNOWN",
         responsibilities: "UNKNOWN",
-        economicBuyer: "UNKNOWN — validate who controls purchasing",
+        economicBuyer: tx(locale, "idea.icpEconomicBuyer"),
         userRole: "UNKNOWN",
         reachability: "UNKNOWN",
-        notes: `Derived from the idea statement. Solution mentioned: ${mechanism}.`,
+        notes: tx(locale, "idea.icpNotes", p),
         source: icp === "UNKNOWN" ? "AI_HYPOTHESIS" : "USER",
       },
     ];
     x.variables = vars.map((v) =>
-      variableDraft(
-        icpName,
-        v,
-        `Variable the solution "${mechanism}" might move. Importance is a HYPOTHESIS; current and desired state are UNKNOWN.`,
-      ),
+      variableDraft(icpName, v, tx(locale, "idea.variableDescription", p)),
     );
     x.mechanisms = [
       {
         painDescription: null,
         name: mechanism,
-        description: "The mechanism proposed by the user. Parked until the problem is understood.",
+        description: tx(locale, "idea.mechanismDescription"),
         category: /ai|agent|assistant|bot/i.test(mechanism) ? "AI_AGENT" : "OTHER",
       },
     ];
     x.assumptions = [
-      assumption(
-        `${icpName}s lose meaningful revenue or capacity because of ${vars[0].name.toLowerCase()}.`,
-        9,
-        "VALUE",
-      ),
-      assumption(
-        `The ${icpName.toLowerCase()} controls software purchasing decisions.`,
-        8,
-        "ACCESS",
-      ),
-      assumption(
-        `Current workflows for ${vars[0].name.toLowerCase()} are insufficient.`,
-        7,
-        "GENERIC",
-      ),
+      assumption(tx(locale, "idea.assumptionValue", p), 9, "VALUE"),
+      assumption(tx(locale, "idea.assumptionAccess", p), 8, "ACCESS"),
+      assumption(tx(locale, "idea.assumptionGeneric", p), 7, "GENERIC"),
     ];
     x.questionCard = {
-      question: "Which variable is the idea really supposed to move?",
+      question: tx(locale, "idea.question"),
       options: vars.slice(0, 4).map((v) => v.name),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
       reply: [
-        MOCK_LABEL,
+        label,
         "",
-        `I will not evaluate "${mechanism}" yet. First the decomposition:`,
+        tx(locale, "idea.reply.intro", p),
         "",
-        `- ICP (${icp === "UNKNOWN" ? "HYPOTHESIS" : "FACT from your statement"}): ${icpName}`,
-        `- Market: ${marketName}`,
-        `- Variables the solution could move (HYPOTHESIS, importance 0–10): ${vars.map((v) => `${v.name} ${v.importance}`).join(", ")}`,
-        "- Current state and desired state of every variable: UNKNOWN. Economic buyer: UNKNOWN. Reachability: UNKNOWN.",
+        tx(locale, "idea.reply.icp", {
+          ...p,
+          basis: icp === "UNKNOWN" ? "HYPOTHESIS" : tx(locale, "idea.factFromStatement"),
+        }),
+        tx(locale, "idea.reply.market", p),
+        tx(locale, "idea.reply.variables", {
+          variables: vars
+            .map((v) =>
+              tx(locale, "idea.reply.variableItem", { name: v.name, importance: v.importance }),
+            )
+            .join(", "),
+        }),
+        tx(locale, "idea.reply.unknowns"),
         "",
-        "Three assumptions were added to the ledger (value, access, generic). Which variable is the idea really about?",
+        tx(locale, "idea.reply.outro"),
       ].join("\n"),
       extraction: x,
     };
@@ -699,7 +636,10 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
           avoidIndustries: [],
           technicalStrengths: [],
         };
-    const isKickoff = /don't know what to build|dont know what to build|^start$/i.test(message);
+    const isKickoff =
+      /don't know what to build|dont know what to build|^start$|ne sais pas quoi construire|^(démarrer|commencer)$/i.test(
+        message,
+      );
     const pendingOf = () =>
       CONTEXT_QUESTIONS.find((q) =>
         q.key === "businessModel"
@@ -712,7 +652,7 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
         ctx.businessModel =
           /b2c/i.test(message) && /b2b/i.test(message)
             ? "EITHER"
-            : /either|both|open/i.test(message)
+            : /either|both|open|les deux|peu importe|indiff[ée]rent|ouvert/i.test(message)
               ? "EITHER"
               : /b2c/i.test(message)
                 ? "B2C"
@@ -720,8 +660,8 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
                   ? "B2B"
                   : "EITHER";
       } else {
-        (ctx[pending.key] as string[]) = splitList(message).length
-          ? splitList(message)
+        (ctx[pending.key] as string[]) = splitList(message, locale).length
+          ? splitList(message, locale)
           : [message.slice(0, 80)];
       }
     }
@@ -730,53 +670,61 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
       ctx.industries.length > 0 && ctx.audiences.length > 0 && ctx.businessModel !== "UNKNOWN";
 
     if (!enough && next) {
-      const x = emptyExtraction("USER_CONTEXT", "Collecting user context.");
+      const { question, options } = contextQuestion(locale, next);
+      const x = emptyExtraction("USER_CONTEXT", tx(locale, "context.reasoning"));
       x.userContext = ctx;
-      x.questionCard = { question: next.question, options: next.options, allowFreeText: true };
-      x.suggestedReplies = next.options;
+      x.questionCard = { question, options, allowFreeText: true };
+      x.suggestedReplies = options;
       return {
-        reply: `${MOCK_LABEL}\n\n${isKickoff ? "Good. We start from your context, not from a product.\n\n" : "Noted.\n\n"}${next.question}`,
+        reply: `${label}\n\n${isKickoff ? `${tx(locale, "context.kickoff")}\n\n` : `${tx(locale, "context.noted")}\n\n`}${question}`,
         extraction: x,
       };
     }
 
     const base = ctx.industries.slice(0, 3);
     const markets = base.map((ind) => ({
-      name: `Independent ${plural(singular(stripParenthetical(ind))).toLowerCase()}`,
-      description: `Small, owner-operated businesses in ${ind.toLowerCase()} that you can reach through ${ctx.audiences[0] ?? "your network"}.`,
-      attractivenessNotes:
-        "HYPOTHESIS: fragmented buyers, owner is both user and buyer, under-served by generic tools. Nothing verified yet.",
+      name: candidateMarketName(locale, ind),
+      description: tx(locale, "market.candidateDescription", {
+        industry: ind.toLowerCase(),
+        audience: ctx.audiences[0] ?? tx(locale, "context.yourNetwork"),
+      }),
+      attractivenessNotes: tx(locale, "market.candidateNotes"),
       source: "AI_HYPOTHESIS" as const,
     }));
     if (markets.length < 2) {
       markets.push({
-        name: "Local service businesses",
-        description: "Salons, clinics and repair shops with 5–20 staff.",
-        attractivenessNotes:
-          "HYPOTHESIS: high pain density around scheduling and capacity. Unverified.",
+        name: tx(locale, "market.fallbackName"),
+        description: tx(locale, "market.fallbackDescription"),
+        attractivenessNotes: tx(locale, "market.fallbackNotes"),
         source: "AI_HYPOTHESIS",
       });
     }
-    const x = emptyExtraction("MARKET_SELECTION", "Context complete; candidate markets proposed.");
+    const x = emptyExtraction("MARKET_SELECTION", tx(locale, "market.reasoning"));
     x.stage.readyToAdvance = true;
     x.userContext = ctx;
     x.markets = markets;
     x.questionCard = {
-      question: "Which market should we investigate first?",
+      question: tx(locale, "market.question"),
       options: markets.map((m) => m.name),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
       reply: [
-        MOCK_LABEL,
+        label,
         "",
-        `Context captured: industries ${ctx.industries.join(", ")}; reachable people ${ctx.audiences.join(", ")}; model ${ctx.businessModel}.`,
+        tx(locale, "market.reply.context", {
+          industries: ctx.industries.join(", "),
+          audiences: ctx.audiences.join(", "),
+          model: ctx.businessModel,
+        }),
         "",
-        "Candidate markets (all HYPOTHESES until evidence exists):",
-        ...markets.map((m) => `- ${m.name}: ${m.attractivenessNotes}`),
+        tx(locale, "market.reply.heading"),
+        ...markets.map((m) =>
+          tx(locale, "market.reply.item", { name: m.name, notes: m.attractivenessNotes }),
+        ),
         "",
-        "Which one should we investigate first?",
+        tx(locale, "market.reply.outro"),
       ].join("\n"),
       extraction: x,
     };
@@ -788,55 +736,61 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
       pickByMessage(existing.markets, message) ??
       (existing.markets.length === 1 ? existing.markets[0] : null);
     const marketName = chosen ?? cap(message.slice(0, 80));
-    const x = emptyExtraction("ICP_DISCOVERY", "Market selected; ICP map proposed.");
+    const x = emptyExtraction("ICP_DISCOVERY", tx(locale, "icp.reasoning"));
     x.stage.readyToAdvance = true;
     if (!chosen) {
       x.markets = [
         {
           name: marketName,
-          description: "Market named by the user.",
+          description: tx(locale, "icp.userMarketDescription"),
           attractivenessNotes: "UNKNOWN",
           source: "USER",
         },
       ];
     }
-    const baseName = singular(marketName.replace(/^independent\s+/i, ""));
+    const baseName = marketBaseName(locale, marketName);
+    const p = {
+      base: cap(baseName),
+      baseLower: uncap(baseName),
+      de: deFr(baseName),
+      market: marketName,
+    };
     x.icps = [
       {
         marketName,
-        name: cap(`${baseName} owner`),
-        role: "Owner-operator",
+        name: tx(locale, "icp.ownerName", p),
+        role: tx(locale, "icp.ownerRole"),
         companyType: marketName,
-        companySize: "1–20 employees (HYPOTHESIS)",
-        responsibilities: "Revenue, staffing, scheduling, customer experience",
-        economicBuyer: "Owner (HYPOTHESIS — validate)",
-        userRole: "Owner and front-desk staff",
+        companySize: tx(locale, "icp.ownerCompanySize"),
+        responsibilities: tx(locale, "icp.ownerResponsibilities"),
+        economicBuyer: tx(locale, "icp.ownerEconomicBuyer"),
+        userRole: tx(locale, "icp.ownerUserRole"),
         reachability: "UNKNOWN",
-        notes: "Owner is likely both user and buyer.",
+        notes: tx(locale, "icp.ownerNotes"),
         source: "AI_HYPOTHESIS",
       },
       {
         marketName,
-        name: `${cap(baseName)} manager (multi-site)`,
-        role: "Operations manager",
-        companyType: `${marketName} with several locations`,
-        companySize: "20–200 employees (HYPOTHESIS)",
-        responsibilities: "Utilization, staff productivity, reporting",
-        economicBuyer: "UNKNOWN — likely the owner or regional director",
-        userRole: "Manager",
+        name: tx(locale, "icp.managerName", p),
+        role: tx(locale, "icp.managerRole"),
+        companyType: tx(locale, "icp.managerCompanyType", p),
+        companySize: tx(locale, "icp.managerCompanySize"),
+        responsibilities: tx(locale, "icp.managerResponsibilities"),
+        economicBuyer: tx(locale, "icp.managerEconomicBuyer"),
+        userRole: tx(locale, "icp.managerUserRole"),
         reachability: "UNKNOWN",
         notes: null,
         source: "AI_HYPOTHESIS",
       },
     ];
     x.questionCard = {
-      question: "Which ICP matters most to you?",
+      question: tx(locale, "icp.question"),
       options: x.icps.map((i) => i.name),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
-      reply: `${MOCK_LABEL}\n\nMarket: ${marketName}.\n\nICP map (HYPOTHESIS):\n- ${x.icps[0].name}: owner is user and buyer; reachability UNKNOWN.\n- ${x.icps[1].name}: manager uses, buyer UNKNOWN.\n\nWhich ICP matters most?`,
+      reply: `${label}\n\n${tx(locale, "icp.reply", { market: marketName, owner: x.icps[0].name, manager: x.icps[1].name })}`,
       extraction: x,
     };
   }
@@ -844,24 +798,33 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- ICP chosen → variable map
   if (stage === "ICP_DISCOVERY" || (existing.variables.length === 0 && existing.icps.length > 0)) {
     const icpName = pickByMessage(existing.icps, message) ?? existing.icps[0];
-    const vars = variablesFor(`${icpName} ${existing.markets.join(" ")} ${message}`);
-    const x = emptyExtraction("VARIABLE_DISCOVERY", "ICP selected; variable map proposed.");
+    const vars = variablesFor(locale, `${icpName} ${existing.markets.join(" ")} ${message}`);
+    const x = emptyExtraction("VARIABLE_DISCOVERY", tx(locale, "variable.reasoning"));
     x.stage.readyToAdvance = true;
     x.variables = vars.map((v) =>
-      variableDraft(
-        icpName,
-        v,
-        `Valuable variable for ${icpName}. Importance is a HYPOTHESIS; current and desired state are UNKNOWN.`,
-      ),
+      variableDraft(icpName, v, tx(locale, "variable.description", { icp: icpName })),
     );
     x.questionCard = {
-      question: "Which variable should we investigate first?",
+      question: tx(locale, "variable.question"),
       options: vars.slice(0, 4).map((v) => v.name),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
+    const lines = vars
+      .map((v) =>
+        tx(locale, "variable.line", {
+          action:
+            locale === DEFAULT_LOCALE
+              ? cap(v.direction.toLowerCase())
+              : renderKey(locale, `labels.direction.${v.direction}`),
+          name: v.name,
+          target: v.target.toLowerCase(),
+          importance: v.importance,
+        }),
+      )
+      .join("\n");
     return {
-      reply: `${MOCK_LABEL}\n\nICP: ${icpName}.\n\nVariable map (action × variable × target; importance 0–10, HYPOTHESIS):\n${vars.map((v) => `- ${cap(v.direction.toLowerCase())} × ${v.name} × ${v.target.toLowerCase()} — ${v.importance}`).join("\n")}\n\nCurrent and desired states are UNKNOWN for all of them. Which variable should we investigate first?`,
+      reply: `${label}\n\n${tx(locale, "variable.reply", { icp: icpName, lines })}`,
       extraction: x,
     };
   }
@@ -872,41 +835,35 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
     (existing.pains.length === 0 && existing.variables.length > 0)
   ) {
     const variableName = pickByMessage(existing.variables, message) ?? existing.variables[0];
-    const icpName = existing.icps[0] ?? "the ICP";
-    const x = emptyExtraction("PAIN_DISCOVERY", "Variable selected; pains described.");
+    const icpName = existing.icps[0] ?? tx(locale, "fallback.icp");
+    const p = { ...icpParams(locale, icpName), ...variableParams(variableName) };
+    const x = emptyExtraction("PAIN_DISCOVERY", tx(locale, "pain.reasoning"));
     x.stage.readyToAdvance = true;
     x.pains = [
       {
         variableName,
-        description: `${cap(variableName)} is worse than it should be for ${icpName}s, and nobody measures it precisely.`,
+        description: tx(locale, "pain.description", p),
         severityScore: 7,
         frequencyScore: 7,
-        currentState: "UNKNOWN (HYPOTHESIS: noticeably above what the owner would accept)",
-        desiredState: "UNKNOWN (HYPOTHESIS: measurable, controlled, under a target)",
-        gapDescription:
-          "The gap is a hypothesis until the current state is measured with real data.",
+        currentState: tx(locale, "pain.currentState"),
+        desiredState: tx(locale, "pain.desiredState"),
+        gapDescription: tx(locale, "pain.gap"),
         source: "AI_HYPOTHESIS",
       },
     ];
-    x.assumptions = [
-      assumption(
-        `${cap(variableName)} costs ${icpName}s meaningful money every month.`,
-        9,
-        "VALUE",
-      ),
-    ];
+    x.assumptions = [assumption(tx(locale, "pain.assumption", p), 9, "VALUE")];
     x.questionCard = {
-      question: `Tell me about the last time ${variableName.toLowerCase()} hurt. What happened?`,
+      question: tx(locale, "pain.question", p),
       options: [
-        "It happens weekly and costs real money",
-        "It happens but they tolerate it",
-        "I don't know yet",
+        tx(locale, "pain.options.weekly"),
+        tx(locale, "pain.options.tolerated"),
+        tx(locale, "pain.options.unknown"),
       ],
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
-      reply: `${MOCK_LABEL}\n\nVariable: ${variableName}.\n\nCurrent state: UNKNOWN. Desired state: UNKNOWN. Everything about this gap is a HYPOTHESIS until measured.\n\n${x.questionCard.question}`,
+      reply: `${label}\n\n${tx(locale, "pain.reply", { ...p, question: x.questionCard.question })}`,
       extraction: x,
     };
   }
@@ -914,24 +871,25 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- Pain → triggers + alternatives
   if (stage === "PAIN_DISCOVERY" || stage === "TRIGGER_DISCOVERY") {
     const pain = existing.pains[0];
-    const variableName = existing.variables[0] ?? "the variable";
-    const tolerated = /tolerate|not a big deal|rare|don't know|dont know/i.test(message);
-    const x = emptyExtraction(
-      "EVIDENCE_DISCOVERY",
-      "Triggers and alternatives proposed; evidence needed next.",
-    );
+    const variableName = existing.variables[0] ?? tx(locale, "fallback.variable");
+    const p = variableParams(variableName);
+    const tolerated =
+      /tolerate|not a big deal|rare|don't know|dont know|tol[èe]r|pas grave|sais pas/i.test(
+        message,
+      );
+    const x = emptyExtraction("EVIDENCE_DISCOVERY", tx(locale, "trigger.reasoning"));
     x.stage.readyToAdvance = true;
     x.triggers = [
       {
         painDescription: pain,
-        description: `A visible spike in ${variableName.toLowerCase()} during a high-demand period.`,
+        description: tx(locale, "trigger.spike", p),
         urgencyScore: tolerated ? 4 : 7,
-        frequency: tolerated ? "UNKNOWN" : "Weekly (stated by user)",
+        frequency: tolerated ? "UNKNOWN" : tx(locale, "trigger.weekly"),
         source: tolerated ? "AI_HYPOTHESIS" : "USER",
       },
       {
         painDescription: pain,
-        description: "A staff member or key customer complains loudly enough to reach the owner.",
+        description: tx(locale, "trigger.complaint"),
         urgencyScore: 6,
         frequency: "UNKNOWN",
         source: "AI_HYPOTHESIS",
@@ -940,52 +898,51 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
     x.alternatives = [
       {
         painDescription: pain,
-        name: "Manual follow-up by staff",
+        name: tx(locale, "trigger.manual.name"),
         category: "MANUAL_PROCESS",
-        description: "Someone chases the problem by hand when they remember.",
-        costEstimate: "Staff time, UNKNOWN hours/week",
-        weaknessDescription: "Inconsistent, no prediction, depends on one person.",
+        description: tx(locale, "trigger.manual.description"),
+        costEstimate: tx(locale, "trigger.manual.cost"),
+        weaknessDescription: tx(locale, "trigger.manual.weakness"),
         weaknessScore: 7,
         source: "AI_HYPOTHESIS",
       },
       {
         painDescription: pain,
-        name: "Spreadsheet tracking",
+        name: tx(locale, "trigger.spreadsheet.name"),
         category: "SPREADSHEET",
-        description: "A shared sheet updated irregularly.",
-        costEstimate: "Free",
-        weaknessDescription: "Stale data, no alerts, nobody trusts it.",
+        description: tx(locale, "trigger.spreadsheet.description"),
+        costEstimate: tx(locale, "trigger.spreadsheet.cost"),
+        weaknessDescription: tx(locale, "trigger.spreadsheet.weakness"),
         weaknessScore: 6,
         source: "AI_HYPOTHESIS",
       },
       {
         painDescription: pain,
-        name: "Generic booking / CRM software",
+        name: tx(locale, "trigger.software.name"),
         category: "COMPETITOR_SOFTWARE",
-        description: "Existing tools cover part of the workflow.",
+        description: tx(locale, "trigger.software.description"),
         costEstimate: "UNKNOWN",
-        weaknessDescription: "Not designed around this variable; adoption UNKNOWN.",
+        weaknessDescription: tx(locale, "trigger.software.weakness"),
         weaknessScore: 5,
         source: "AI_HYPOTHESIS",
       },
     ];
     x.questionCard = {
-      question:
-        "Nothing here is verified. Add evidence through the Evidence panel, or continue to mechanisms with hypotheses only?",
-      options: ["Continue with hypotheses for now", "I added evidence, continue"],
+      question: tx(locale, "trigger.question"),
+      options: [tx(locale, "trigger.options.hypotheses"), tx(locale, "trigger.options.evidence")],
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
     return {
       reply: [
-        MOCK_LABEL,
+        label,
         "",
-        `${tolerated ? "You said the pain is tolerated or unknown — that lowers urgency (trigger urgency 4/10)." : "Noted as a FACT from you: it happens weekly and costs money. The economic magnitude is still UNKNOWN until a number is captured as evidence."}`,
+        tolerated ? tx(locale, "trigger.reply.tolerated") : tx(locale, "trigger.reply.fact"),
         "",
-        "Triggers (HYPOTHESIS): demand-period spikes; loud complaints reaching the owner.",
-        "Current alternatives (HYPOTHESIS): manual follow-up (weakness 7), spreadsheet (6), generic software (5).",
+        tx(locale, "trigger.reply.triggers"),
+        tx(locale, "trigger.reply.alternatives"),
         "",
-        "Evidence Confidence is computed from captured evidence only. Useful research: forum threads where owners describe this problem, competitor reviews mentioning it, and job postings that pay someone to handle it.",
+        tx(locale, "trigger.reply.evidence"),
       ].join("\n"),
       extraction: x,
     };
@@ -994,49 +951,37 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- Alternatives/evidence → mechanisms
   if (stage === "ALTERNATIVE_DISCOVERY" || stage === "EVIDENCE_DISCOVERY") {
     const pain = existing.pains[0] ?? null;
-    const variableName = existing.variables[0] ?? "the variable";
-    const x = emptyExtraction("MECHANISM_DISCOVERY", "Mechanisms explored.");
+    const variableName = existing.variables[0] ?? tx(locale, "fallback.variable");
+    const p = variableParams(variableName);
+    const x = emptyExtraction("MECHANISM_DISCOVERY", tx(locale, "mechanism.reasoning"));
     x.stage.readyToAdvance = true;
+    const mechanism = (
+      node: string,
+      category: DiscoveryExtraction["mechanisms"][number]["category"],
+    ) => ({
+      painDescription: pain,
+      name: tx(locale, `mechanism.${node}.name`, p),
+      description: tx(locale, `mechanism.${node}.description`),
+      category,
+    });
     x.mechanisms = [
-      {
-        painDescription: pain,
-        name: `Automated reminders and follow-ups for ${variableName.toLowerCase()}`,
-        description: "Removes the manual chasing.",
-        category: "AUTOMATION",
-      },
-      {
-        painDescription: pain,
-        name: `Risk prediction for ${variableName.toLowerCase()}`,
-        description: "Predicts which cases will go wrong and prioritizes them.",
-        category: "PREDICTION",
-      },
-      {
-        painDescription: pain,
-        name: "Policy change (deposits, cancellation rules, incentives)",
-        description: "Non-software mechanism that changes behavior.",
-        category: "OTHER",
-      },
-      {
-        painDescription: pain,
-        name: `Monitoring dashboard for ${variableName.toLowerCase()}`,
-        description: "Makes the variable visible weekly.",
-        category: "MONITORING",
-      },
-      {
-        painDescription: pain,
-        name: "Done-for-you service",
-        description: "A person or agency handles it for a fee — a concierge test candidate.",
-        category: "OTHER",
-      },
+      mechanism("reminders", "AUTOMATION"),
+      mechanism("prediction", "PREDICTION"),
+      mechanism("policy", "OTHER"),
+      mechanism("dashboard", "MONITORING"),
+      mechanism("service", "OTHER"),
     ];
     x.questionCard = {
-      question: "Which mechanism should anchor the first opportunity hypothesis?",
+      question: tx(locale, "mechanism.question"),
       options: x.mechanisms.slice(0, 4).map((m) => m.name),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
+    const lines = x.mechanisms
+      .map((m) => tx(locale, "mechanism.line", { name: m.name, category: m.category }))
+      .join("\n");
     return {
-      reply: `${MOCK_LABEL}\n\nProblem ≠ product. Five mechanisms that could move ${variableName.toLowerCase()}:\n${x.mechanisms.map((m) => `- ${m.name} (${m.category})`).join("\n")}\n\nWhich one should anchor the first opportunity hypothesis?`,
+      reply: `${label}\n\n${tx(locale, "mechanism.reply", { ...p, lines })}`,
       extraction: x,
     };
   }
@@ -1044,15 +989,19 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- Mechanism → opportunity + value chain
   if (stage === "MECHANISM_DISCOVERY" || stage === "OPPORTUNITY_FORMATION") {
     const mechanism =
-      pickByMessage(existing.mechanisms, message) ?? existing.mechanisms[0] ?? "Automation";
-    const icpName = existing.icps[0] ?? "the ICP";
-    const variableName = existing.variables[0] ?? "the variable";
+      pickByMessage(existing.mechanisms, message) ??
+      existing.mechanisms[0] ??
+      tx(locale, "fallback.automation");
+    const icpName = existing.icps[0] ?? tx(locale, "fallback.icp");
+    const variableName = existing.variables[0] ?? tx(locale, "fallback.variable");
     const pain = existing.pains[0] ?? null;
-    const title = `${cap(variableName)} for ${icpName.toLowerCase()}s`;
-    const x = emptyExtraction(
-      "EXPERIMENT_DESIGN",
-      "Opportunity formed with its value causality ladder; scoring and frontier are computed by the application.",
-    );
+    const p = {
+      ...icpParams(locale, icpName),
+      ...variableParams(variableName),
+      ...mechanismParams(mechanism),
+    };
+    const title = tx(locale, "opportunity.title", p);
+    const x = emptyExtraction("EXPERIMENT_DESIGN", tx(locale, "opportunity.reasoning"));
     x.stage.readyToAdvance = true;
     x.opportunities = [
       {
@@ -1060,11 +1009,11 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
         icpName,
         variableName,
         painDescription: pain,
-        problemStatement: `${icpName}s cannot control ${variableName.toLowerCase()}; the current state is UNKNOWN and alternatives are manual.`,
+        problemStatement: tx(locale, "opportunity.problemStatement", p),
         mechanism,
-        productHypothesis: `A ${mechanism.toLowerCase()} layer for ${icpName.toLowerCase()}s.`,
-        valueProposition: `Move ${variableName.toLowerCase()} measurably for ${icpName.toLowerCase()}s without adding staff.`,
-        metric: `${cap(variableName)} per month`,
+        productHypothesis: tx(locale, "opportunity.productHypothesis", p),
+        valueProposition: tx(locale, "opportunity.valueProposition", p),
+        metric: tx(locale, "opportunity.metric", p),
         inputs: {
           importance: 7,
           painIntensity: 6,
@@ -1073,21 +1022,20 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
           willingnessToPay: 5,
           alternativeWeakness: 6,
         },
-        inputJustification:
-          "All inputs are HYPOTHESES proposed from the conversation; edit them and add evidence.",
+        inputJustification: tx(locale, "opportunity.inputJustification"),
         risks: [
-          "Economic buyer is UNKNOWN",
-          "Current state has never been measured",
-          "Alternatives may be good enough",
+          tx(locale, "opportunity.risks.buyer"),
+          tx(locale, "opportunity.risks.currentState"),
+          tx(locale, "opportunity.risks.alternatives"),
         ],
         nextSteps: [
-          "Add external evidence",
-          "Interview 5 ICPs about the last occurrence",
-          "Measure the current state",
+          tx(locale, "opportunity.nextSteps.evidence"),
+          tx(locale, "opportunity.nextSteps.interviews"),
+          tx(locale, "opportunity.nextSteps.measure"),
         ],
       },
     ];
-    x.valueChains = [valueChainFor(title, mechanism, variableName, icpName)];
+    x.valueChains = [valueChainFor(locale, title, mechanism, variableName, icpName)];
     x.valueDimensions = [
       {
         opportunityTitle: title,
@@ -1096,67 +1044,52 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
         frequency: null,
         population: null,
         attributability: null,
-        justification:
-          "Importance mirrors the variable's hypothesized importance. Magnitude, frequency, population and attributability are UNKNOWN: nothing has been measured.",
+        justification: tx(locale, "opportunity.dimensionsJustification"),
         userStatedDimensions: [],
       },
     ];
     x.assumptions = [
-      assumption(
-        `If ${mechanism.toLowerCase()} is applied to the cases driving ${variableName.toLowerCase()}, the outcome of those cases changes.`,
-        9,
-        "CAUSAL",
-        title,
-        { fromLevel: "CAPABILITY", toLevel: "TRANSFORMATION" },
-      ),
-      assumption(
-        `The movement of ${variableName.toLowerCase()} is worth enough money to justify a product.`,
-        8,
-        "VALUE",
-        title,
-        { fromLevel: "OPERATIONAL_VALUE", toLevel: "ECONOMIC_VALUE" },
-      ),
-      assumption(
-        `The data needed for ${mechanism.toLowerCase()} exists and can be obtained.`,
-        7,
-        "FEASIBILITY",
-        title,
-        { fromLevel: "MECHANISM", toLevel: "CAPABILITY" },
-      ),
-      assumption(
-        `${icpName}s would pay for a ${mechanism.toLowerCase()} solution.`,
-        8,
-        "WTP",
-        title,
-      ),
+      assumption(tx(locale, "opportunity.assumptions.causal", p), 9, "CAUSAL", title, {
+        fromLevel: "CAPABILITY",
+        toLevel: "TRANSFORMATION",
+      }),
+      assumption(tx(locale, "opportunity.assumptions.value", p), 8, "VALUE", title, {
+        fromLevel: "OPERATIONAL_VALUE",
+        toLevel: "ECONOMIC_VALUE",
+      }),
+      assumption(tx(locale, "opportunity.assumptions.feasibility", p), 7, "FEASIBILITY", title, {
+        fromLevel: "MECHANISM",
+        toLevel: "CAPABILITY",
+      }),
+      assumption(tx(locale, "opportunity.assumptions.wtp", p), 8, "WTP", title),
     ];
     x.questionCard = {
-      question:
-        "The first uncertainty beyond the problem is the causal link mechanism → outcome. Plan an experiment to test it?",
+      question: tx(locale, "opportunity.question"),
       options: [
-        "Plan the pilot experiment",
-        "Show me the opportunity report",
-        "Explore another variable",
+        tx(locale, "opportunity.options.plan"),
+        tx(locale, "opportunity.options.report"),
+        tx(locale, "opportunity.options.anotherVariable"),
       ],
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
+    const rp = { ...p, title };
     return {
       reply: [
-        MOCK_LABEL,
+        label,
         "",
-        `Opportunity hypothesis formed: "${title}" anchored on "${mechanism}".`,
+        tx(locale, "opportunity.reply.formed", rp),
         "",
-        "Value causality ladder (every level is a HYPOTHESIS until evidence is linked):",
-        `- Mechanism: ${mechanism}`,
-        `- Capability: identify the cases driving ${variableName.toLowerCase()} and act early`,
-        `- Transformation: fewer cases end in an unrecoverable outcome`,
-        `- Operational value: ${variableName.toLowerCase()} moves in the desired direction`,
-        `- Economic value: the economic consequence shrinks`,
-        `- Strategic outcome: the parent variable improves`,
+        tx(locale, "opportunity.reply.ladderHeading"),
+        tx(locale, "opportunity.reply.mechanism", rp),
+        tx(locale, "opportunity.reply.capability", rp),
+        tx(locale, "opportunity.reply.transformation"),
+        tx(locale, "opportunity.reply.operationalValue", rp),
+        tx(locale, "opportunity.reply.economicValue"),
+        tx(locale, "opportunity.reply.strategicOutcome"),
         "",
-        "Proposed inputs (0–10, HYPOTHESES): importance 7, pain 6, frequency 6, gap 6, willingness to pay 5, alternative weakness 6. Value Strength: importance 7; magnitude, frequency, population and attributability UNKNOWN — Value Strength is therefore INCOMPLETE.",
-        "Four typed assumptions were added (causal, value, feasibility, WTP). The application computes Opportunity Potential, Evidence Confidence, Value Strength, Causal Confidence, the Proof Frontier and the verdict deterministically — see the Radar and the Value tab.",
+        tx(locale, "opportunity.reply.inputs"),
+        tx(locale, "opportunity.reply.computed"),
       ].join("\n"),
       extraction: x,
     };
@@ -1165,70 +1098,84 @@ export function buildMockTurn(hints: TurnHints): MockTurn {
   // ---------------------------------------------------------------- Value chain → experiment
   if (stage === "VALUE_CAUSALITY" || stage === "SCORING" || stage === "EXPERIMENT_DESIGN") {
     const title = existing.opportunities[0] ?? null;
-    const variableName = existing.variables[0] ?? "the variable";
-    const icpName = existing.icps[0] ?? "the ICP";
-    const mechanism = existing.mechanisms[0] ?? "the intervention";
-    if (/plan|pilot|experiment|test/i.test(message) && title) {
-      const x = emptyExtraction(
-        "RECOMMENDATION",
-        "Experiment designed for the first unproven causal link.",
-      );
+    const variableName = existing.variables[0] ?? tx(locale, "fallback.variable");
+    const icpName = existing.icps[0] ?? tx(locale, "fallback.icp");
+    const mechanism = existing.mechanisms[0] ?? tx(locale, "fallback.intervention");
+    const p = {
+      ...icpParams(locale, icpName),
+      ...variableParams(variableName),
+      ...mechanismParams(mechanism),
+    };
+    if (/plan|pilot|exp[ée]riment|test|essai/i.test(message) && title) {
+      const x = emptyExtraction("RECOMMENDATION", tx(locale, "experiment.reasoning"));
       x.stage.readyToAdvance = true;
       x.experiments = [
         {
           opportunityTitle: title,
-          title: `Controlled pilot: ${mechanism} vs current practice`,
-          hypothesis: `If ${mechanism.toLowerCase()} is applied to the cases driving ${variableName.toLowerCase()}, ${variableName.toLowerCase()} moves in the desired direction compared with comparable cases handled as today.`,
-          design: `With ${icpName.toLowerCase()}s who agree to a four-week pilot, split comparable cases into two groups: one handled as today, one with ${mechanism.toLowerCase()}. Record ${variableName.toLowerCase()} for both groups every week.`,
-          successMetric: `${cap(variableName)} in the intervention group versus the control group, with the difference large enough to matter economically to the ${icpName.toLowerCase()}.`,
+          title: tx(locale, "experiment.title", p),
+          hypothesis: tx(locale, "experiment.hypothesis", p),
+          design: tx(locale, "experiment.design", p),
+          successMetric: tx(locale, "experiment.successMetric", p),
           causalLink: { fromLevel: "CAPABILITY", toLevel: "TRANSFORMATION" },
         },
       ];
       x.suggestedReplies = [
-        "Show me the opportunity report",
-        "Explore another variable",
-        "What evidence should I collect first?",
+        tx(locale, "experiment.options.report"),
+        tx(locale, "experiment.options.anotherVariable"),
+        tx(locale, "experiment.options.whichEvidence"),
       ];
       return {
         reply: [
-          MOCK_LABEL,
+          label,
           "",
-          `Experiment planned for the causal link Capability → Transformation of "${title}":`,
+          tx(locale, "experiment.reply.planned", { title }),
           "",
-          `- Hypothesis: ${x.experiments[0].hypothesis}`,
-          `- Design: ${x.experiments[0].design}`,
-          `- Success metric: ${x.experiments[0].successMetric}`,
+          tx(locale, "experiment.reply.hypothesis", { hypothesis: x.experiments[0].hypothesis }),
+          tx(locale, "experiment.reply.design", { design: x.experiments[0].design }),
+          tx(locale, "experiment.reply.successMetric", { metric: x.experiments[0].successMetric }),
           "",
-          "When the pilot produces results, capture them as evidence linked to this causal link. The Proof Frontier moves only when linked evidence reaches the supported threshold.",
+          tx(locale, "experiment.reply.outro"),
         ].join("\n"),
         extraction: x,
       };
     }
-    const x = emptyExtraction("RECOMMENDATION", "Moving to recommendation.");
+    const x = emptyExtraction("RECOMMENDATION", tx(locale, "experiment.recommendationReasoning"));
     x.stage.readyToAdvance = true;
-    x.suggestedReplies = ["Plan the pilot experiment", "Explore another variable", "Add evidence"];
+    x.suggestedReplies = [
+      tx(locale, "experiment.options.plan"),
+      tx(locale, "experiment.options.anotherVariable"),
+      tx(locale, "experiment.options.addEvidence"),
+    ];
     return {
-      reply: `${MOCK_LABEL}\n\nThe ladder for "${title ?? "the opportunity"}" is entirely hypothetical below the problem. The Radar shows the deterministic scores and the current Proof Frontier; the Value tab shows which causal link should be tested first.`,
+      reply: `${label}\n\n${tx(locale, "experiment.recommendationReply", { title: title ?? tx(locale, "fallback.opportunity") })}`,
       extraction: x,
     };
   }
 
   // ---------------------------------------------------------------- Recommendation / follow-ups
-  const x = emptyExtraction("RECOMMENDATION", "Follow-up discussion.");
-  x.suggestedReplies = ["Explore another variable", "Add evidence", "Generate the interview guide"];
-  if (/another variable|other variable|next variable/i.test(message)) {
+  const x = emptyExtraction("RECOMMENDATION", tx(locale, "followUp.reasoning"));
+  x.suggestedReplies = [
+    tx(locale, "followUp.options.anotherVariable"),
+    tx(locale, "followUp.options.addEvidence"),
+    tx(locale, "followUp.options.interviewGuide"),
+  ];
+  if (
+    /another variable|other variable|next variable|autre variable|variable suivante|prochaine variable/i.test(
+      message,
+    )
+  ) {
     x.stage.suggestedStage = "VARIABLE_DISCOVERY";
     x.stage.readyToAdvance = true;
     x.questionCard = {
-      question: "Which variable should we investigate next?",
+      question: tx(locale, "followUp.nextVariableQuestion"),
       options: existing.variables.slice(0, 4),
       allowFreeText: true,
     };
     x.suggestedReplies = x.questionCard.options;
-    return { reply: `${MOCK_LABEL}\n\nWhich variable should we investigate next?`, extraction: x };
+    return { reply: `${label}\n\n${tx(locale, "followUp.nextVariableQuestion")}`, extraction: x };
   }
   return {
-    reply: `${MOCK_LABEL}\n\nThe workspace now holds structured hypotheses and a value causality ladder. Scores, the Proof Frontier and verdicts are computed from your inputs and the evidence you capture — nothing here counts as validation yet. The next best action is listed on each opportunity. You can explore another variable, add evidence, or generate an interview guide.`,
+    reply: `${label}\n\n${tx(locale, "followUp.reply")}`,
     extraction: x,
   };
 }
@@ -1286,6 +1233,8 @@ export class MockProvider extends BaseAIProvider {
       });
     }
     if (options.schema === (InterviewGuideSchema as unknown)) {
+      // Never shown: the interview-guide action replaces mock output with the
+      // localized template guide (src/services/interview/guide.ts).
       const ctx = options.messages.at(-1)?.content ?? "";
       const icp = ctx.match(/ICP: (.+)/)?.[1] ?? "the ICP";
       const pain = ctx.match(/Pain: (.+)/)?.[1] ?? "the problem";

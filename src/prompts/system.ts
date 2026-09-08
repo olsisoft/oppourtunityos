@@ -110,3 +110,8 @@ export function languageInstruction(locale: Locale): string {
   const language = LOCALE_LANGUAGE_NAMES[locale];
   return `Language: write every reply, question, answer option and every extracted text field (names, descriptions, statements, hypotheses, designs) in ${language}. Keep JSON keys, enum values and the labels UNKNOWN, HYPOTHESIS, FACT and EVIDENCE exactly as they are.`;
 }
+
+/** Interview-guide system prompt with the language the guide must be written in. */
+export function interviewGuideSystemPrompt(locale: Locale): string {
+  return `${INTERVIEW_GUIDE_PROMPT}\n\n${languageInstruction(locale)}`;
+}
