@@ -1,4 +1,5 @@
 import { prisma } from "@/db/prisma";
+import { KNOWLEDGE_TRIGGER_LABELS } from "@/domain/enums";
 import { workspaceGraphInclude } from "@/db/workspaces";
 import type { AssumptionKind, Verdict } from "@/generated/prisma/enums";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
@@ -185,7 +186,7 @@ export async function getDashboardData(userId: string) {
       ? `${c.experiment.title} (experiment result)`
       : c.evidence
         ? `${c.evidence.sourceTitle} (evidence)`
-        : "recompute",
+        : KNOWLEDGE_TRIGGER_LABELS[c.trigger].toLowerCase(),
   }));
 
   // OPPORTUNITIES WITH STALLED LEARNING — live opportunities with untested critical
