@@ -19,9 +19,25 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
+import { frontierMovement, type FrontierPosition } from "@/services/value/proof-frontier";
 import type { OpportunityWithRelations, WorkspaceGraph } from "@/db/workspaces";
 import { cn } from "@/lib/utils";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
+
+const RECENT_DAYS = 14;
+
+/** True when the frontier moved forward in the last two weeks. */
+export function frontierMovedRecently(o: OpportunityWithRelations): boolean {
+  const cutoff = Date.now() - RECENT_DAYS * 86_400_000;
+  return o.knowledgeChanges.some(
+    (c) =>
+      c.createdAt.getTime() >= cutoff &&
+      frontierMovement(
+        (c.previousFrontier ?? "NONE") as FrontierPosition,
+        (c.newFrontier ?? "NONE") as FrontierPosition,
+      ) === "FORWARD",
+  );
+}
 
 export function OpportunityRadar({
   graph,
@@ -114,6 +130,11 @@ export function OpportunityRadar({
                           {o.icp.name}
                         </p>
                       )}
+                      {frontierMovedRecently(o) && (
+                        <span className="text-tone-positive text-[10px] font-medium">
+                          ↑ frontier moved recently
+                        </span>
+                      )}
                       {compact && (
                         <p className="text-muted-foreground truncate text-[10px] font-normal">
                           frontier · {frontierText(o.proofFrontierRung)}
@@ -132,13 +153,40 @@ export function OpportunityRadar({
                     />
                     <ScoreCell
                       value={o.valueStrength}
-                      lines={insights.valueStrength?.explanation ?? ["Not computed yet."]}
+                      lines={
+                        insights.valueStrength
+                          ? [
+                              ...insights.valueStrength.dimensions.map(
+                                (d) =>
+                                  `${d.label}: ${d.value === null ? "UNKNOWN" : `${d.value}/10`} · ${d.provenance}`,
+                              ),
+                              `Completeness: ${insights.valueStrength.completeness}`,
+                              ...(insights.valueStrength.nextQuestion
+                                ? [`Next: ${insights.valueStrength.nextQuestion}`]
+                                : []),
+                            ]
+                          : ["Not computed yet."]
+                      }
                       question={SCORE_QUESTIONS.value}
                       compact={compact}
                     />
                     <ScoreCell
                       value={o.causalConfidence}
-                      lines={insights.causal?.explanation ?? ["Not computed yet."]}
+                      lines={
+                        insights.causal
+                          ? [
+                              `Critical links: ${insights.causal.total} · validated: ${insights.causal.validated}`,
+                              ...(insights.causal.blocking
+                                ? [`Blocking: ${insights.causal.blocking.label}`]
+                                : []),
+                              `Proof frontier: ${frontierText(o.proofFrontierRung)}`,
+                              ...insights.causal.links.map(
+                                (l) =>
+                                  `${l.label}: ${l.missingLink ? "UNKNOWN" : `${l.status}${l.confidence ? ` ${l.confidence}` : ""}`}`,
+                              ),
+                            ]
+                          : ["Not computed yet."]
+                      }
                       question={SCORE_QUESTIONS.causal}
                       compact={compact}
                     />

@@ -207,6 +207,25 @@ OpportunityOS is also a rigorous value-engineering instrument. Everything below 
 
 **Backward compatibility** — the migration copies each pain's current/desired state into its variable with the pain's provenance and leaves every other new field UNKNOWN; nothing inferred is promoted to evidence. Opportunities without value dimensions or a ladder keep their original scores and verdicts; the extension rules never fire on `INCOMPLETE` inputs.
 
+### The validation loop
+
+OpportunityOS learns from what you test. Two loops share one model:
+
+```
+DISCOVERY   Market → ICP → Valuable Variable → Pain → Evidence → Opportunity → Mechanism → Value Chain → Proof Frontier
+VALIDATION  Assumption → Experiment → Result → Evidence → Knowledge update → Proof Frontier movement → Verdict → Next Best Action
+```
+
+**Variable semantics** (`variable-semantics.ts`) — the compatibility check runs on _action verb × variable type_ (what is directly moved: Leakage, Churn, Downtime, Revenue…), never on the parent economic category. "Reduce × Leakage" is coherent; "Reduce × Revenue" warns. The taxonomy is open: custom types get an explicit polarity or stay UNKNOWN (no warning). The **parent economic variable** (leakage ↓ → net revenue ↑) is a separate relation whose status stays a hypothesis until evidence supports it.
+
+**INCOMPLETE is explanatory** — Value Strength reports `INCOMPLETE · 4/5`, the missing dimension, the provenance of each known dimension and the next value question. Causal Confidence reports `INCOMPLETE · 2/5 critical links validated`, the blocking link and the next causal question. The Proof Frontier states why it stops (confidence vs. required threshold, untested critical assumption, contradiction, missing link). Thresholds rise with causal distance: 40 for problem and product claims, 50 for operational, 60 for economic and strategic consequences. UNKNOWN never becomes zero.
+
+**Experiments** (`Experiment`, `ExperimentResult`) — every experiment targets an assumption, a causal link or a level and must state the decision it makes easier (a missing decision question is flagged). With success and failure thresholds, the observed value decides SUPPORTED / CONTRADICTED / INCONCLUSIVE deterministically (`experiment-outcome.ts`); otherwise you classify explicitly or it stays INCONCLUSIVE. A result becomes an Evidence item of type `EXPERIMENT` that keeps methodology, sample size, observed metric and limitations; INVALID runs produce no evidence; INCONCLUSIVE results are neutral, never support.
+
+**Knowledge changes** (`knowledge-change.ts`, `KnowledgeChange`) — every recompute that moves a claim, a score, the frontier or the verdict records what changed and why (experiment, evidence, assumption). The report shows the **learning history**; the dashboard shows **recent learning** and **stalled learning** (no completed experiment in 21 days with critical assumptions still UNKNOWN); the radar flags a frontier that moved recently.
+
+**Next Best Action** ranks actions with a deterministic ordinal score — decision impact, uncertainty reduction, frontier movement and criticality against effort, time and cost taken from a planned experiment (assumed and flagged otherwise) — and says why this test now. **Value paths** (`ValuePath`) prepare the model for several ways one opportunity creates value; one primary path per opportunity is maintained today.
+
 ## Security
 
 - All `/app` routes are gated by `src/proxy.ts` (JWT, no DB call) and every page/action re-checks the session.

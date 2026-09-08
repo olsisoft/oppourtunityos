@@ -84,6 +84,15 @@ const PIPELINE = [
   "Experiment",
 ];
 
+const VALIDATION_LOOP = [
+  "Assumption",
+  "Experiment",
+  "Result",
+  "Evidence",
+  "Proof frontier",
+  "Decision",
+];
+
 const FOUR_QUESTIONS = [
   ["Opportunity Potential", "Is the problem structurally attractive?"],
   ["Evidence Confidence", "Do we have credible evidence that the problem is real?"],
@@ -199,6 +208,52 @@ export function LandingSections({ appHref }: { appHref: string }) {
             <span className="text-foreground font-medium">TEST</span> — an experiment on the first
             unproven causal link.
           </p>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-16">
+        <h2 className="text-2xl font-semibold tracking-tight">From assumption to decision</h2>
+        <p className="text-muted-foreground mt-3 max-w-2xl leading-relaxed">
+          OpportunityOS doesn&apos;t stop at telling you what to test. It records what happened,
+          updates the causal model, and shows exactly how your confidence changed — which claims
+          moved, where the Proof Frontier now stands, and what the verdict became. No automatic
+          certainty: a result supports, contradicts or stays inconclusive, and keeps its
+          limitations.
+        </p>
+        <ol className="mt-8 flex flex-wrap gap-2">
+          {VALIDATION_LOOP.map((step, i) => (
+            <li key={step} className="flex items-center gap-2">
+              <span className="bg-background rounded-md border px-3 py-1.5 text-sm">
+                <span className="text-muted-foreground mr-2 font-mono text-xs">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                {step}
+              </span>
+              {i < VALIDATION_LOOP.length - 1 && (
+                <span className="text-muted-foreground text-xs">→</span>
+              )}
+            </li>
+          ))}
+        </ol>
+        <div className="mt-6 grid gap-3 text-sm md:grid-cols-2">
+          <div className="bg-muted/40 rounded-lg border p-4">
+            <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+              Discovery loop
+            </p>
+            <p className="mt-1">
+              Market → ICP → Valuable variable → Pain → Evidence → Opportunity → Mechanism → Value
+              chain → Proof frontier
+            </p>
+          </div>
+          <div className="bg-muted/40 rounded-lg border p-4">
+            <p className="text-muted-foreground text-[10px] font-medium tracking-wider uppercase">
+              Validation loop
+            </p>
+            <p className="mt-1">
+              Assumption → Experiment → Result → Evidence → Knowledge update → Proof frontier
+              movement → Verdict → Next best action
+            </p>
+          </div>
         </div>
       </section>
 

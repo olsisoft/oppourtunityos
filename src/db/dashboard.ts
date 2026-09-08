@@ -4,6 +4,10 @@ import type { AssumptionKind, Verdict } from "@/generated/prisma/enums";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { NextAction } from "@/services/scoring/next-action";
 import type { ValueAction } from "@/services/value/next-value-action";
+import { frontierMovement, type FrontierPosition } from "@/services/value/proof-frontier";
+
+/** Days without a completed experiment after which learning counts as stalled. */
+export const STALLED_AFTER_DAYS = 21;
 
 export type EvidenceGapKind = "PROBLEM" | "MAGNITUDE" | "CAUSAL" | "WTP" | "FEASIBILITY";
 
@@ -159,6 +163,64 @@ export async function getDashboardData(userId: string) {
         }
       : null;
 
+  // RECENT LEARNING — the latest knowledge changes across the user's opportunities.
+  const recentLearning = (
+    await prisma.knowledgeChange.findMany({
+      where: { opportunity: { workspace: { userId } } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      include: {
+        opportunity: { select: { id: true, title: true, workspaceId: true } },
+        experiment: { select: { title: true } },
+        evidence: { select: { sourceTitle: true } },
+      },
+    })
+  ).map((c) => ({
+    ...c,
+    movement: frontierMovement(
+      (c.previousFrontier ?? "NONE") as FrontierPosition,
+      (c.newFrontier ?? "NONE") as FrontierPosition,
+    ),
+    reason: c.experiment
+      ? `${c.experiment.title} (experiment result)`
+      : c.evidence
+        ? `${c.evidence.sourceTitle} (evidence)`
+        : "recompute",
+  }));
+
+  // OPPORTUNITIES WITH STALLED LEARNING — live opportunities with untested critical
+  // assumptions and no completed experiment in the last STALLED_AFTER_DAYS days.
+  const cutoff = Date.now() - STALLED_AFTER_DAYS * 86_400_000;
+  const stalled = enriched
+    .filter(({ opportunity: o }) => o.verdict !== "KILL" && o.verdict !== "IGNORE")
+    .map(({ opportunity: o }) => {
+      const lastCompleted = o.experiments
+        .filter((e) => e.status === "COMPLETED" && e.completedAt)
+        .map((e) => e.completedAt!.getTime())
+        .sort((a, b) => b - a)[0];
+      const untestedCritical = o.assumptions.filter(
+        (a) => a.status === "UNKNOWN" && a.importance >= 8,
+      ).length;
+      const daysSince = lastCompleted
+        ? Math.floor((Date.now() - lastCompleted) / 86_400_000)
+        : null;
+      return {
+        opportunity: o,
+        untestedCritical,
+        daysSince,
+        planned: o.experiments.filter((e) => e.status === "PLANNED" || e.status === "RUNNING")
+          .length,
+      };
+    })
+    .filter(
+      (x) =>
+        x.untestedCritical > 0 &&
+        (x.daysSince === null
+          ? x.opportunity.createdAt.getTime() < cutoff
+          : x.daysSince > STALLED_AFTER_DAYS),
+    )
+    .slice(0, 6);
+
   const evidenceCount = workspaces.reduce((s, w) => s + w._count.evidence, 0);
 
   return {
@@ -170,6 +232,8 @@ export async function getDashboardData(userId: string) {
     weakestAssumptions,
     nextAction,
     nextValueAction,
+    recentLearning,
+    stalled,
     totals: {
       workspaces: workspaces.filter((w) => w.status === "ACTIVE").length,
       opportunities: opportunities.length,

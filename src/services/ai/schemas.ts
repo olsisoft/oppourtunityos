@@ -85,6 +85,9 @@ export const VariableDraftSchema = z.object({
   name: text,
   description: optText,
   category: variableCategory,
+  variableType: optText.describe(
+    "What is directly moved, e.g. 'Leakage', 'No-show rate', 'Churn', 'Downtime', 'Revenue' (open list; custom allowed). Distinct from the economic category. null if UNKNOWN.",
+  ),
   desiredDirection: direction.describe(
     "The action verb: what movement the ICP wants (Reduce, Increase, Protect, ...).",
   ),

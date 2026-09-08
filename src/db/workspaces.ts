@@ -35,9 +35,20 @@ const evidenceSummarySelect = {
   isMocked: true,
 } as const;
 
+const variableParentSelect = {
+  id: true,
+  name: true,
+  desiredDirection: true,
+  variableType: true,
+  variablePolarity: true,
+  parentVariableId: true,
+  provenance: true,
+  fieldProvenance: true,
+} as const;
+
 export const opportunityInclude = {
   icp: true,
-  variable: { include: { parent: { select: { id: true, name: true } } } },
+  variable: { include: { parent: { select: variableParentSelect } } },
   pain: { include: { triggers: true, alternatives: true } },
   assumptions: { include: { links: true } },
   evidence: true,
@@ -56,8 +67,35 @@ export const opportunityInclude = {
       assumptions: { include: { links: true } },
     },
   },
-  experiments: { orderBy: { createdAt: "desc" as const } },
+  experiments: {
+    orderBy: { createdAt: "desc" as const },
+    include: {
+      resultRecord: true,
+      evidence: { select: evidenceSummarySelect },
+      causalLink: {
+        select: {
+          id: true,
+          statement: true,
+          status: true,
+          confidence: true,
+          fromNode: { select: { level: true } },
+          toNode: { select: { level: true } },
+        },
+      },
+      assumption: { select: { id: true, statement: true, status: true, importance: true } },
+      valueChainNode: { select: { id: true, level: true, statement: true, status: true } },
+    },
+  },
   claimLinks: { include: { evidence: { select: evidenceSummarySelect } } },
+  knowledgeChanges: {
+    orderBy: { createdAt: "desc" as const },
+    take: 40,
+    include: {
+      experiment: { select: { id: true, title: true } },
+      evidence: { select: { id: true, sourceTitle: true } },
+    },
+  },
+  valuePaths: { orderBy: { createdAt: "asc" as const } },
 };
 
 export const workspaceGraphInclude = {
@@ -70,7 +108,7 @@ export const workspaceGraphInclude = {
           variables: {
             orderBy: [{ importanceScore: "desc" as const }, { createdAt: "asc" as const }],
             include: {
-              parent: { select: { id: true, name: true } },
+              parent: { select: variableParentSelect },
               pains: {
                 orderBy: { createdAt: "asc" as const },
                 include: {
@@ -90,6 +128,7 @@ export const workspaceGraphInclude = {
     orderBy: { capturedAt: "desc" as const },
     include: {
       pain: { select: { id: true, description: true } },
+      experiment: { select: { id: true, title: true } },
       claimLinks: {
         include: {
           valueChainNode: { select: { id: true, level: true, statement: true } },
@@ -130,6 +169,8 @@ export type OpportunityWithRelations = WorkspaceGraph["opportunities"][number];
 export type GraphValueChainNode = OpportunityWithRelations["valueChainNodes"][number];
 export type GraphCausalLink = OpportunityWithRelations["causalLinks"][number];
 export type GraphExperiment = OpportunityWithRelations["experiments"][number];
+export type GraphKnowledgeChange = OpportunityWithRelations["knowledgeChanges"][number];
+export type GraphValuePath = OpportunityWithRelations["valuePaths"][number];
 export type GraphMarket = WorkspaceGraph["markets"][number];
 export type GraphIcp = GraphMarket["icps"][number];
 export type GraphVariable = GraphIcp["variables"][number];

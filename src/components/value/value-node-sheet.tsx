@@ -7,7 +7,6 @@ import { toast } from "sonner";
 
 import { createAssumptionAction } from "@/actions/assumptions";
 import {
-  createExperimentAction,
   deleteCausalLinkAction,
   deleteValueChainNodeAction,
   linkEvidenceClaimAction,
@@ -16,6 +15,8 @@ import {
   upsertValueChainNodeAction,
 } from "@/actions/value";
 import { CausalDistanceBadge, EpistemicBadge } from "@/components/value/epistemic-badge";
+import { ExperimentPlanDialog } from "@/components/value/experiment-plan-dialog";
+import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { LadderSelection } from "@/components/value/value-ladder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -310,24 +311,11 @@ function Body({
         }
         saving={saving}
       />
-      <PlanExperiment
-        defaultTitle={`Test: ${link.statement.slice(0, 60)}`}
-        defaultHypothesis={link.statement}
-        saving={saving}
-        onPlan={(title, hypothesis, design, successMetric) =>
-          run(
-            () =>
-              createExperimentAction({
-                opportunityId: opportunity.id,
-                causalLinkId: link.id,
-                title,
-                hypothesis,
-                design,
-                successMetric,
-              }),
-            "Experiment planned",
-          )
-        }
+      <PlanExperimentButton
+        opportunity={opportunity}
+        graph={graph}
+        causalLinkId={link.id}
+        statement={link.statement}
       />
       <div className="flex justify-between border-t pt-4">
         <Button
@@ -692,71 +680,38 @@ function LinkedAssumptions({
   );
 }
 
-function PlanExperiment({
-  defaultTitle,
-  defaultHypothesis,
-  onPlan,
-  saving,
+function PlanExperimentButton({
+  opportunity,
+  graph,
+  causalLinkId,
+  statement,
 }: {
-  defaultTitle: string;
-  defaultHypothesis: string;
-  onPlan: (title: string, hypothesis: string, design: string, successMetric: string) => void;
-  saving: boolean;
+  opportunity: OpportunityWithRelations;
+  graph: WorkspaceGraph;
+  causalLinkId: string;
+  statement: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState(defaultTitle);
-  const [hypothesis, setHypothesis] = useState(defaultHypothesis);
-  const [design, setDesign] = useState("");
-  const [successMetric, setSuccessMetric] = useState("");
-  if (!open) {
-    return (
+  const insights = deriveOpportunityInsights(opportunity, graph.mechanisms.length);
+  return (
+    <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         <FlaskConical /> Plan an experiment on this link
       </Button>
-    );
-  }
-  return (
-    <form
-      className="space-y-2 rounded-md border p-3"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onPlan(title.trim(), hypothesis.trim(), design.trim(), successMetric.trim());
-        setOpen(false);
-      }}
-    >
-      <p className="text-xs font-semibold">Experiment</p>
-      <Input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="Title"
-        required
-      />
-      <Textarea
-        rows={2}
-        value={hypothesis}
-        onChange={(e) => setHypothesis(e.target.value)}
-        placeholder="Falsifiable hypothesis"
-        required
-      />
-      <Textarea
-        rows={2}
-        value={design}
-        onChange={(e) => setDesign(e.target.value)}
-        placeholder="Design: with/without or before/after comparison…"
-      />
-      <Input
-        value={successMetric}
-        onChange={(e) => setSuccessMetric(e.target.value)}
-        placeholder="Success metric"
-      />
-      <div className="flex justify-end gap-2">
-        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={saving}>
-          {saving && <Loader2 className="animate-spin" />} Plan
-        </Button>
-      </div>
-    </form>
+      {open && (
+        <ExperimentPlanDialog
+          open={open}
+          onOpenChange={setOpen}
+          opportunity={opportunity}
+          insights={insights}
+          prefill={{
+            causalLinkId,
+            hypothesis: statement,
+            title: `Test: ${statement.slice(0, 80)}`,
+            experimentType: "MANUAL_WORKFLOW_TEST",
+          }}
+        />
+      )}
+    </>
   );
 }

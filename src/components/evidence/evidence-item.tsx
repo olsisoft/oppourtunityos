@@ -64,6 +64,11 @@ export function EvidenceItem({
             {e.isDemo && <Badge variant="warning">DEMO DATA</Badge>}
             {e.isMocked && <Badge variant="warning">MOCKED</Badge>}
             {e.origin === "INTERVIEW" && <Badge variant="positive">Interview</Badge>}
+            {e.type === "EXPERIMENT" && (
+              <Badge variant="info">
+                Experiment{e.experiment ? `: ${truncate(e.experiment.title, 40)}` : ""}
+              </Badge>
+            )}
           </div>
           <p className="mt-1.5 text-sm font-medium">{e.sourceTitle}</p>
           <p className="text-muted-foreground text-xs">
@@ -105,6 +110,13 @@ export function EvidenceItem({
           </button>
         )}
       </blockquote>
+      {e.type === "EXPERIMENT" && (e.methodology || e.limitations || e.sampleSize !== null) && (
+        <p className="text-muted-foreground mt-2 text-[11px]">
+          {e.methodology ? `${e.methodology} · ` : ""}
+          {e.sampleSize !== null ? `n = ${e.sampleSize} · ` : ""}
+          {e.limitations ? `Limitations: ${e.limitations}` : ""}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         <span className="font-mono tabular-nums">strength {e.strengthScore}/10</span>
         <span className="font-mono tabular-nums">relevance {e.relevanceScore}/10</span>

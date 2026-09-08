@@ -10,8 +10,11 @@ import {
   ClaimType,
   Criticality,
   DesiredDirection,
+  ExperimentOutcome,
   ExperimentStatus,
+  ExperimentType,
   ValueChainLevel,
+  VariablePolarity,
   EntryMode,
   EvidenceSentiment,
   EvidenceType,
@@ -217,13 +220,21 @@ export const updateValueDimensionsSchema = z.object({
   attributability: nullableScore10,
 });
 
+const nullableEnum = <T extends Record<string, string>>(e: T) =>
+  z.union([z.nativeEnum(e), z.null(), z.literal("")]).optional();
+
 export const updateVariableValueFieldsSchema = z.object({
   variableId: z.string().min(1),
   name: shortText.optional(),
   category: z.nativeEnum(VariableCategory).optional(),
+  /** Open taxonomy: any text; "" or null resets to UNKNOWN. */
+  variableType: optionalLong,
+  variablePolarity: nullableEnum(VariablePolarity),
   desiredDirection: z.nativeEnum(DesiredDirection).optional(),
+  parentDirection: nullableEnum(DesiredDirection),
   importanceScore: score10.optional(),
   target: optionalLong,
+  scope: optionalLong,
   currentState: optionalLong,
   desiredState: optionalLong,
   unit: optionalLong,
@@ -233,23 +244,88 @@ export const updateVariableValueFieldsSchema = z.object({
   description: optionalLong,
 });
 
-export const createExperimentSchema = z.object({
-  opportunityId: z.string().min(1),
+const nullableNumber = z
+  .union([z.coerce.number(), z.null(), z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined ? undefined : v));
+const nullableInt = z
+  .union([z.coerce.number().int().min(0), z.null(), z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined ? undefined : v));
+const nullableOrdinal = z
+  .union([z.coerce.number().int().min(0).max(10), z.null(), z.literal("")])
+  .optional()
+  .transform((v) => (v === "" || v === undefined ? undefined : v));
+
+const experimentFields = {
   causalLinkId: optionalId,
   assumptionId: optionalId,
-  title: shortText,
-  hypothesis: z.string().trim().min(3).max(1000),
+  valueChainNodeId: optionalId,
+  experimentType: z.nativeEnum(ExperimentType).optional(),
+  hypothesis: z.string().trim().min(3).max(1000).optional(),
+  decisionQuestion: optionalLong,
   design: optionalLong,
   successMetric: optionalLong,
+  successThreshold: nullableNumber,
+  failureThreshold: nullableNumber,
+  unit: optionalLong,
+  population: optionalLong,
+  sampleSize: nullableInt,
+  duration: optionalLong,
+  expectedInformationGain: nullableOrdinal,
+  decisionImpact: nullableOrdinal,
+  effort: nullableOrdinal,
+  costEstimate: optionalLong,
+  timeEstimate: optionalLong,
+  owner: optionalLong,
+  notes: optionalLong,
+};
+
+export const createExperimentSchema = z.object({
+  opportunityId: z.string().min(1),
+  title: shortText,
+  ...experimentFields,
+  hypothesis: z.string().trim().min(3).max(1000),
 });
 
 export const updateExperimentSchema = z.object({
   experimentId: z.string().min(1),
+  title: shortText.optional(),
   status: z.nativeEnum(ExperimentStatus).optional(),
   result: optionalLong,
-  design: optionalLong,
-  successMetric: optionalLong,
+  ...experimentFields,
 });
+
+/**
+ * Recording a result. The outcome is decided by the thresholds when they
+ * exist; `outcome` is only honoured when no deterministic decision is
+ * possible (or to declare the run INVALID).
+ */
+export const completeExperimentSchema = z.object({
+  experimentId: z.string().min(1),
+  outcome: z.nativeEnum(ExperimentOutcome).optional(),
+  observedMetric: optionalLong,
+  observedValue: nullableNumber,
+  unit: optionalLong,
+  sampleSize: nullableInt,
+  measurementPeriod: optionalLong,
+  resultSummary: z.string().trim().min(3).max(4000),
+  limitations: optionalLong,
+  confounders: optionalLong,
+  anomalies: optionalLong,
+  enteredBy: optionalLong,
+  /** Evidence signals for the resulting EXPERIMENT evidence item. */
+  strengthScore: score10.default(6),
+  relevanceScore: score10.default(8),
+  isDirectCustomer: z.coerce.boolean().default(false),
+  hasEconomicImpact: z.coerce.boolean().default(false),
+  hasPurchaseIntent: z.coerce.boolean().default(false),
+  /** Additional claims the result speaks to (besides the experiment's own target). */
+  claims: z.array(evidenceClaimInputSchema).max(40).default([]),
+  /** Ids of raw evidence items captured alongside (already in the workspace). */
+  rawEvidenceIds: z.array(z.string().min(1)).max(50).default([]),
+});
+export type CompleteExperimentInput = z.infer<typeof completeExperimentSchema>;
 
 export const updateVariableSchema = z.object({
   variableId: z.string().min(1),

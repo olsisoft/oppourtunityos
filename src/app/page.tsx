@@ -46,15 +46,16 @@ export default async function LandingPage() {
             Evidence-driven opportunity discovery
           </p>
           <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Stop asking AI for startup ideas.
+            Know what is worth building before you spend months building it.
           </h1>
           <p className="mt-4 max-w-2xl text-xl text-balance">
-            Find what is worth building — and know what still needs proving.
+            OpportunityOS turns market hypotheses into evidence-backed, falsifiable opportunities —
+            and shows exactly what still needs proving.
           </p>
           <p className="text-muted-foreground mt-4 max-w-2xl text-base leading-relaxed">
-            OpportunityOS maps markets, identifies valuable variables, analyzes pain and evidence,
-            traces the causal chain from mechanism to value, and shows where the proof currently
-            ends.
+            Stop asking AI for startup ideas. Map markets, identify valuable variables, analyze pain
+            and evidence, trace the causal chain from mechanism to value, test the weakest link and
+            watch your confidence change.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Button size="lg" asChild>

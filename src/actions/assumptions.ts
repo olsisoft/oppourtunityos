@@ -31,7 +31,8 @@ async function refreshAssumption(assumptionId: string) {
     where: { id: assumptionId },
     data: { status: derived.status, confidence: derived.confidence },
   });
-  if (updated.opportunityId) await recomputeOpportunity(updated.opportunityId);
+  if (updated.opportunityId)
+    await recomputeOpportunity(updated.opportunityId, { trigger: "ASSUMPTION_UPDATED" });
 }
 
 export async function createAssumptionAction(
@@ -63,7 +64,8 @@ export async function createAssumptionAction(
         provenance: "USER",
       },
     });
-    if (a.opportunityId) await recomputeOpportunity(a.opportunityId);
+    if (a.opportunityId)
+      await recomputeOpportunity(a.opportunityId, { trigger: "ASSUMPTION_UPDATED" });
     revalidatePath(`/app/w/${d.workspaceId}`, "layout");
     return { id: a.id };
   });
@@ -93,7 +95,8 @@ export async function updateAssumptionAction(input: unknown): Promise<ActionResu
           d.status && d.status !== "UNKNOWN" ? Math.max(existing.confidence, 50) : undefined,
       },
     });
-    if (existing.opportunityId) await recomputeOpportunity(existing.opportunityId);
+    if (existing.opportunityId)
+      await recomputeOpportunity(existing.opportunityId, { trigger: "ASSUMPTION_UPDATED" });
     revalidatePath(`/app/w/${existing.workspaceId}`, "layout");
     return undefined;
   });
@@ -106,7 +109,8 @@ export async function deleteAssumptionAction(assumptionId: string): Promise<Acti
     if (!existing) throw new Error("Assumption not found");
     await assertWorkspaceAccess(userId, existing.workspaceId);
     await prisma.assumption.delete({ where: { id: assumptionId } });
-    if (existing.opportunityId) await recomputeOpportunity(existing.opportunityId);
+    if (existing.opportunityId)
+      await recomputeOpportunity(existing.opportunityId, { trigger: "ASSUMPTION_UPDATED" });
     revalidatePath(`/app/w/${existing.workspaceId}`, "layout");
     return undefined;
   });

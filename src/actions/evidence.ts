@@ -18,9 +18,14 @@ import {
 } from "@/services/scoring/recompute";
 import { safeAction, zodFieldErrors, type ActionResult } from "./shared";
 
-async function recomputeAfterEvidence(painId?: string | null, opportunityId?: string | null) {
-  if (opportunityId) await recomputeOpportunity(opportunityId);
-  if (painId) await recomputeOpportunitiesForPain(painId);
+async function recomputeAfterEvidence(
+  painId?: string | null,
+  opportunityId?: string | null,
+  evidenceId?: string | null,
+) {
+  const ctx = { trigger: "EVIDENCE_ADDED" as const, evidenceId: evidenceId ?? null };
+  if (opportunityId) await recomputeOpportunity(opportunityId, ctx);
+  if (painId) await recomputeOpportunitiesForPain(painId, ctx);
 }
 
 export async function createEvidenceAction(input: unknown): Promise<ActionResult<{ id: string }>> {
@@ -117,8 +122,12 @@ export async function createEvidenceAction(input: unknown): Promise<ActionResult
       });
       linkedClaims++;
     }
-    await recomputeAfterEvidence(d.painId, d.opportunityId);
-    if (linkedClaims > 0) await recomputeOpportunitiesForEvidence(evidence.id);
+    await recomputeAfterEvidence(d.painId, d.opportunityId, evidence.id);
+    if (linkedClaims > 0)
+      await recomputeOpportunitiesForEvidence(evidence.id, {
+        trigger: "EVIDENCE_ADDED",
+        evidenceId: evidence.id,
+      });
     logger.info("evidence.created", {
       userId,
       workspaceId: d.workspaceId,

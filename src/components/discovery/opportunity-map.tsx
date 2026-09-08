@@ -20,7 +20,7 @@ import type {
 import { DIRECTION_LABELS } from "@/domain/enums";
 import { cn, truncate } from "@/lib/utils";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
-import { fieldStatus } from "@/services/value/variable-semantics";
+import { compactLabel, fieldStatus } from "@/services/value/variable-semantics";
 
 export type MapSelection =
   | { kind: "market"; item: GraphMarket }
@@ -105,7 +105,9 @@ function stateLine(variable: GraphVariable): string {
   const des = desired
     ? `desired ${desired} (${fieldStatus(variable, "desiredState").toLowerCase().replace("_", " ")})`
     : "desired UNKNOWN";
-  return `importance ${variable.importanceScore}/10 · ${cur} · ${des}`;
+  const type = variable.variableType?.trim() ? `type ${variable.variableType}` : "type UNKNOWN";
+  const parent = variable.parent ? ` · parent ${variable.parent.name}` : "";
+  return `${DIRECTION_LABELS[variable.desiredDirection]} · ${type} · importance ${variable.importanceScore}/10 · ${cur} · ${des}${parent}`;
 }
 
 function VariableNode({
@@ -126,7 +128,7 @@ function VariableNode({
         <Node
           className="flex-1"
           label="Valuable variable"
-          title={`${DIRECTION_LABELS[variable.desiredDirection]} × ${variable.name}${variable.target ? ` × ${variable.target}` : ""}`}
+          title={compactLabel(variable.desiredDirection, variable.name)}
           subtitle={stateLine(variable)}
           provenance={variable.provenance}
           onClick={() => onSelect({ kind: "variable", item: variable })}

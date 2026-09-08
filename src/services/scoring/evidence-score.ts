@@ -56,6 +56,9 @@ export const EVIDENCE_COMPONENT_LABELS: Record<EvidenceComponentKey, string> = {
 export const TYPE_DIRECTNESS: Record<EvidenceType, number> = {
   INTERVIEW: 1.0,
   CUSTOMER_QUOTE: 1.0,
+  /// An experiment result observed by the user; direct-customer credit is
+  /// granted only when the result flags real customers, never by type.
+  EXPERIMENT: 0.9,
   SURVEY: 0.9,
   REVIEW: 0.7,
   COMPETITOR_REVIEW: 0.7,

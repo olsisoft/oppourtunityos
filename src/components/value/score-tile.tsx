@@ -3,14 +3,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 /**
- * A score with its explanation on hover. `null` renders INCOMPLETE — a
- * missing input is shown as missing, never as a number.
+ * A score with its explanation on hover. `null` renders INCOMPLETE together
+ * with its completeness (e.g. 4/5) and what is missing — a missing input is
+ * shown as missing, never as a number.
  */
 export function ScoreTile({
   label,
   question,
   value,
   lines,
+  completeness,
+  missing,
   size = "md",
   className,
 }: {
@@ -18,6 +21,10 @@ export function ScoreTile({
   question: string;
   value: number | null;
   lines: string[];
+  /** e.g. "4/5" — shown next to INCOMPLETE. */
+  completeness?: string | null;
+  /** e.g. "Population affected" — shown under INCOMPLETE. */
+  missing?: string | null;
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
@@ -29,14 +36,26 @@ export function ScoreTile({
             {label}
           </p>
           {value === null ? (
-            <p
-              className={cn(
-                "text-tone-warning font-mono font-semibold tracking-wide",
-                size === "lg" ? "text-xl" : size === "md" ? "text-sm" : "text-xs",
+            <>
+              <p
+                className={cn(
+                  "text-tone-warning font-mono font-semibold tracking-wide",
+                  size === "lg" ? "text-xl" : size === "md" ? "text-sm" : "text-xs",
+                )}
+              >
+                INCOMPLETE
+                {completeness ? (
+                  <span className="text-muted-foreground font-normal"> · {completeness}</span>
+                ) : null}
+              </p>
+              {missing && (
+                <p
+                  className={cn("text-muted-foreground", size === "lg" ? "text-xs" : "text-[10px]")}
+                >
+                  Missing: {missing}
+                </p>
               )}
-            >
-              INCOMPLETE
-            </p>
+            </>
           ) : (
             <p
               className={cn(
@@ -54,7 +73,7 @@ export function ScoreTile({
       <TooltipContent className="max-w-sm">
         <p className="mb-1 font-medium">{question}</p>
         <ul className="space-y-0.5">
-          {lines.slice(0, 10).map((l, i) => (
+          {lines.slice(0, 12).map((l, i) => (
             <li key={i}>{l}</li>
           ))}
         </ul>

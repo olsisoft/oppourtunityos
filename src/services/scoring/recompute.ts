@@ -9,10 +9,21 @@
  *   Evidence Confidence    ← evidence about the problem (pain / economic pain)
  *   Value Strength         ← five value dimensions (null = INCOMPLETE)
  *   Causal Confidence      ← evidence on the mechanism → value causal links
+ *
+ * Every recompute that changes something records a KnowledgeChange: the
+ * audit trail of how the workspace came to believe what it believes.
  */
 import { prisma } from "@/db/prisma";
 import { logger } from "@/lib/logger";
-import type { ClaimType, Evidence, EvidenceLinkDirection, Prisma } from "@/generated/prisma/client";
+import { VALUE_CHAIN_LEVEL_LABELS } from "@/domain/enums";
+import type {
+  ClaimType,
+  Evidence,
+  EvidenceLinkDirection,
+  KnowledgeTrigger,
+  Prisma,
+} from "@/generated/prisma/client";
+import type { EpistemicStatus, ValueChainLevel } from "@/generated/prisma/enums";
 import { computeOpportunityScore } from "./opportunity-score";
 import { computeEvidenceScore, type EvidenceSignal } from "./evidence-score";
 import { computeVerdict } from "./verdict";
@@ -26,14 +37,27 @@ import {
   type ClaimAssumptionInput,
   type ClaimEvidenceInput,
 } from "@/services/value/epistemic";
-import { computeCausalConfidence } from "@/services/value/causal-confidence";
+import {
+  computeCausalConfidence,
+  type CausalConfidenceResult,
+} from "@/services/value/causal-confidence";
+import {
+  diffKnowledge,
+  type KnowledgeClaim,
+  type KnowledgeDiff,
+  type KnowledgeSnapshot,
+} from "@/services/value/knowledge-change";
 import {
   computeProofFrontier,
+  PROOF_RUNG_LABELS,
   rungForLevel,
   type FrontierLinkInput,
+  type FrontierPosition,
   type FrontierRungInput,
+  type ProofFrontierResult,
+  type ProofRung,
 } from "@/services/value/proof-frontier";
-import { computeValueStrength } from "@/services/value/value-strength";
+import { computeValueStrength, type ValueStrengthResult } from "@/services/value/value-strength";
 import { extendVerdict } from "@/services/value/verdict-extension";
 import { computeValueActions } from "@/services/value/next-value-action";
 
@@ -84,6 +108,8 @@ const PROBLEM_CLAIM_TYPES: ReadonlySet<ClaimType> = new Set<ClaimType>([
   "TRIGGER",
 ]);
 
+const PROBLEM_RUNGS: ProofRung[] = ["VARIABLE_IMPORTANCE", "PAIN", "ECONOMIC_PAIN"];
+
 function toClaimInput(e: Evidence, direction: EvidenceLinkDirection): ClaimEvidenceInput {
   return { signal: toEvidenceSignal(e), direction };
 }
@@ -101,7 +127,21 @@ function serialize(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-export async function recomputeOpportunity(opportunityId: string) {
+function linkKey(from: ValueChainLevel, to: ValueChainLevel): string {
+  return `link:${from}->${to}`;
+}
+
+function linkLabel(from: ValueChainLevel, to: ValueChainLevel): string {
+  return `${VALUE_CHAIN_LEVEL_LABELS[from]} → ${VALUE_CHAIN_LEVEL_LABELS[to]}`;
+}
+
+export interface RecomputeContext {
+  trigger?: KnowledgeTrigger;
+  experimentId?: string | null;
+  evidenceId?: string | null;
+}
+
+export async function recomputeOpportunity(opportunityId: string, ctx: RecomputeContext = {}) {
   const opportunity = await prisma.opportunity.findUnique({
     where: { id: opportunityId },
     include: {
@@ -124,9 +164,63 @@ export async function recomputeOpportunity(opportunityId: string) {
         },
       },
       claimLinks: { include: { evidence: true } },
+      experiments: {
+        select: {
+          id: true,
+          status: true,
+          assumptionId: true,
+          causalLinkId: true,
+          valueChainNodeId: true,
+          decisionImpact: true,
+          expectedInformationGain: true,
+          effort: true,
+          timeEstimate: true,
+          costEstimate: true,
+        },
+      },
+      valuePaths: true,
     },
   });
   if (!opportunity) return null;
+
+  // ---- Snapshot of what was believed before this recompute --------------------
+  const storedFrontier = opportunity.proofFrontier as unknown as ProofFrontierResult | null;
+  const storedValue = opportunity.valueStrengthBreakdown as unknown as ValueStrengthResult | null;
+  const storedCausal = opportunity.causalBreakdown as unknown as CausalConfidenceResult | null;
+  const neverComputed = opportunity.scoreBreakdown === null;
+  const before: KnowledgeSnapshot = {
+    frontier: (opportunity.proofFrontierRung as FrontierPosition | null) ?? "NONE",
+    evidenceConfidence: opportunity.evidenceScore,
+    valueStrength: opportunity.valueStrength,
+    valueCompleteness:
+      storedValue?.completeness ?? (opportunity.valueStrength === null ? "?/5" : "5/5"),
+    causalConfidence: opportunity.causalConfidence,
+    causalCompleteness:
+      storedCausal?.completeness ?? (opportunity.causalConfidence === null ? "?/5" : "4/4"),
+    verdict: opportunity.verdict,
+    claims: [
+      ...(storedFrontier?.rungs ?? [])
+        .filter((r) => PROBLEM_RUNGS.includes(r.rung) && r.present)
+        .map<KnowledgeClaim>((r) => ({
+          key: `rung:${r.rung}`,
+          label: PROOF_RUNG_LABELS[r.rung],
+          status: r.status,
+          confidence: r.confidence,
+        })),
+      ...opportunity.valueChainNodes.map<KnowledgeClaim>((n) => ({
+        key: `node:${n.level}`,
+        label: VALUE_CHAIN_LEVEL_LABELS[n.level],
+        status: n.status,
+        confidence: n.confidence,
+      })),
+      ...opportunity.causalLinks.map<KnowledgeClaim>((l) => ({
+        key: linkKey(l.fromNode.level, l.toNode.level),
+        label: linkLabel(l.fromNode.level, l.toNode.level),
+        status: l.status,
+        confidence: l.confidence,
+      })),
+    ],
+  };
 
   // ---- Evidence Confidence (problem evidence) --------------------------------
   const problemEvidence = await loadOpportunityEvidence(opportunity.id, opportunity.painId);
@@ -257,13 +351,25 @@ export async function recomputeOpportunity(opportunityId: string) {
   );
 
   // ---- Value Strength -------------------------------------------------------------
-  const valueStrength = computeValueStrength({
-    importance: opportunity.vsImportance,
-    magnitude: opportunity.vsMagnitude,
-    frequency: opportunity.vsFrequency,
-    population: opportunity.vsPopulation,
-    attributability: opportunity.vsAttributability,
-  });
+  const mechanismStatement =
+    opportunity.mechanism ??
+    opportunity.valueChainNodes.find((n) => n.level === "MECHANISM")?.statement ??
+    null;
+  const valueStrength = computeValueStrength(
+    {
+      importance: opportunity.vsImportance,
+      magnitude: opportunity.vsMagnitude,
+      frequency: opportunity.vsFrequency,
+      population: opportunity.vsPopulation,
+      attributability: opportunity.vsAttributability,
+    },
+    {
+      variableName: opportunity.variable?.name ?? null,
+      icpName: opportunity.icp?.name ?? null,
+      mechanism: mechanismStatement,
+      provenance: (opportunity.valueDimensionProvenance as Record<string, string> | null) ?? {},
+    },
+  );
 
   // ---- Verdict (base rules + documented extensions) --------------------------------
   const base = computeVerdict(opp.score, ev.score);
@@ -302,8 +408,6 @@ export async function recomputeOpportunity(opportunityId: string) {
   });
 
   // ---- Next value action ---------------------------------------------------------------
-  const linkLabel = (l: (typeof opportunity.causalLinks)[number]) =>
-    `${l.fromNode.level} → ${l.toNode.level}`;
   const valueActions = computeValueActions({
     frontier,
     causal,
@@ -319,7 +423,7 @@ export async function recomputeOpportunity(opportunityId: string) {
       linkedTo: a.causalLinkId
         ? (() => {
             const l = opportunity.causalLinks.find((x) => x.id === a.causalLinkId);
-            return l ? linkLabel(l) : null;
+            return l ? linkLabel(l.fromNode.level, l.toNode.level) : null;
           })()
         : a.valueChainNodeId
           ? (opportunity.valueChainNodes.find((n) => n.id === a.valueChainNodeId)?.level ?? null)
@@ -341,11 +445,102 @@ export async function recomputeOpportunity(opportunityId: string) {
     icpName: opportunity.icp?.name ?? null,
     variableName: opportunity.variable?.name ?? null,
     painDescription: opportunity.pain?.description ?? opportunity.problemStatement ?? null,
-    mechanism:
-      opportunity.mechanism ??
-      opportunity.valueChainNodes.find((n) => n.level === "MECHANISM")?.statement ??
-      null,
+    mechanism: mechanismStatement,
+    experiments: opportunity.experiments,
   });
+
+  // ---- Snapshot after, diff and audit trail ----------------------------------------------
+  const problemClaim = (rung: ProofRung, a: ClaimAssessment): KnowledgeClaim => ({
+    key: `rung:${rung}`,
+    label: PROOF_RUNG_LABELS[rung],
+    status: a.status,
+    confidence: a.confidence,
+  });
+  const after: KnowledgeSnapshot = {
+    frontier: frontier.frontier,
+    evidenceConfidence: ev.score,
+    valueStrength: valueStrength.score,
+    valueCompleteness: valueStrength.completeness,
+    causalConfidence: causal.score,
+    causalCompleteness: causal.completeness,
+    verdict: verdict.verdict,
+    claims: [
+      ...(opportunity.variable ? [problemClaim("VARIABLE_IMPORTANCE", variableImportance)] : []),
+      ...(opportunity.pain || opportunity.problemStatement
+        ? [problemClaim("PAIN", pain), problemClaim("ECONOMIC_PAIN", economicPain)]
+        : []),
+      ...opportunity.valueChainNodes.map<KnowledgeClaim>((n) => {
+        const a = nodeAssessments.get(n.id)!;
+        return {
+          key: `node:${n.level}`,
+          label: VALUE_CHAIN_LEVEL_LABELS[n.level],
+          status: a.status,
+          confidence: a.confidence,
+        };
+      }),
+      ...opportunity.causalLinks.map<KnowledgeClaim>((l) => {
+        const a = linkAssessments.get(l.id)!;
+        return {
+          key: linkKey(l.fromNode.level, l.toNode.level),
+          label: linkLabel(l.fromNode.level, l.toNode.level),
+          status: a.status,
+          confidence: a.confidence,
+        };
+      }),
+    ],
+  };
+  const diff: KnowledgeDiff | null = neverComputed ? null : diffKnowledge(before, after);
+
+  let knowledgeChangeId: string | null = null;
+  if (diff?.changed) {
+    const change = await prisma.knowledgeChange.create({
+      data: {
+        opportunityId,
+        experimentId: ctx.experimentId ?? null,
+        evidenceId: ctx.evidenceId ?? null,
+        trigger: ctx.trigger ?? "RECOMPUTE",
+        previousFrontier: before.frontier,
+        newFrontier: after.frontier,
+        previousEvidenceConfidence: before.evidenceConfidence,
+        newEvidenceConfidence: after.evidenceConfidence,
+        previousValueStrength: before.valueStrength,
+        newValueStrength: after.valueStrength,
+        previousCausalConfidence: before.causalConfidence,
+        newCausalConfidence: after.causalConfidence,
+        previousVerdict: before.verdict,
+        newVerdict: after.verdict,
+        claimsStrengthened: serialize(diff.strengthened),
+        claimsWeakened: serialize(diff.weakened),
+        claimsContradicted: serialize(diff.contradicted),
+        summary: diff.summary,
+      },
+    });
+    knowledgeChangeId = change.id;
+  }
+
+  // ---- Primary value path (one default path per opportunity) --------------------------
+  const ladderStatus: EpistemicStatus =
+    opportunity.valueChainNodes.length === 0
+      ? "UNKNOWN"
+      : (opportunity.valueChainNodes
+          .map((n) => ({ n, a: nodeAssessments.get(n.id)! }))
+          .find((x) => x.n.level === frontier.frontier)?.a.status ?? "HYPOTHESIS");
+  const pathData = {
+    primaryVariableId: opportunity.variableId,
+    parentEconomicVariableId: opportunity.variable?.parentVariableId ?? null,
+    nodeIds: opportunity.valueChainNodes.map((n) => n.id),
+    causalLinkIds: opportunity.causalLinks.map((l) => l.id),
+    proofFrontier: frontier.frontier,
+    status: ladderStatus,
+  };
+  const primaryPath = opportunity.valuePaths.find((p) => p.isPrimary) ?? opportunity.valuePaths[0];
+  if (primaryPath) {
+    await prisma.valuePath.update({ where: { id: primaryPath.id }, data: pathData });
+  } else if (opportunity.valueChainNodes.length > 0) {
+    await prisma.valuePath.create({
+      data: { opportunityId, name: "Primary value path", isPrimary: true, ...pathData },
+    });
+  }
 
   if (opportunity.verdict !== verdict.verdict) {
     logger.info("scoring.verdict_transition", {
@@ -365,9 +560,10 @@ export async function recomputeOpportunity(opportunityId: string) {
     causalConfidence: causal.score,
     frontier: frontier.frontier,
     verdict: verdict.verdict,
+    changed: diff?.changed ?? false,
   });
 
-  return prisma.opportunity.update({
+  const updated = await prisma.opportunity.update({
     where: { id: opportunityId },
     data: {
       opportunityScore: opp.score,
@@ -387,6 +583,13 @@ export async function recomputeOpportunity(opportunityId: string) {
       valueActions: serialize(valueActions),
     },
   });
+  return Object.assign(updated, {
+    knowledgeDiff: diff,
+    knowledgeChangeId,
+    knowledgeBefore: before,
+    knowledgeAfter: after,
+    nextAction: valueActions[0] ?? null,
+  });
 }
 
 export async function recomputeWorkspaceOpportunities(workspaceId: string) {
@@ -398,15 +601,18 @@ export async function recomputeWorkspaceOpportunities(workspaceId: string) {
 }
 
 /** Recompute every opportunity that shares a pain (evidence changed on that pain). */
-export async function recomputeOpportunitiesForPain(painId: string) {
+export async function recomputeOpportunitiesForPain(painId: string, ctx: RecomputeContext = {}) {
   const ids = await prisma.opportunity.findMany({ where: { painId }, select: { id: true } });
   for (const { id } of ids) {
-    await recomputeOpportunity(id);
+    await recomputeOpportunity(id, ctx);
   }
 }
 
 /** Recompute every opportunity touched by a piece of evidence (direct, pain or claim links). */
-export async function recomputeOpportunitiesForEvidence(evidenceId: string) {
+export async function recomputeOpportunitiesForEvidence(
+  evidenceId: string,
+  ctx: RecomputeContext = {},
+) {
   const evidence = await prisma.evidence.findUnique({
     where: { id: evidenceId },
     include: { claimLinks: { select: { opportunityId: true } } },
@@ -422,5 +628,6 @@ export async function recomputeOpportunitiesForEvidence(evidenceId: string) {
     });
     for (const o of viaPain) ids.add(o.id);
   }
-  for (const id of ids) await recomputeOpportunity(id);
+  const context: RecomputeContext = { trigger: "EVIDENCE_LINKED", evidenceId, ...ctx };
+  for (const id of ids) await recomputeOpportunity(id, context);
 }

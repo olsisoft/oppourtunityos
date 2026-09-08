@@ -26,6 +26,8 @@ type AssumptionDraft = DiscoveryExtraction["assumptions"][number];
 interface VariableTemplate {
   name: string;
   category: VariableDraft["category"];
+  /** What is directly moved (open taxonomy); distinct from the economic category. */
+  type?: string;
   direction: VariableDraft["desiredDirection"];
   importance: number;
   target: string;
@@ -39,6 +41,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
     variables: [
       {
         name: "Missed calls",
+        type: "Loss",
         category: "REVENUE",
         direction: "DECREASE",
         importance: 8,
@@ -48,6 +51,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Booking conversion",
+        type: "Conversion",
         category: "CONVERSION",
         direction: "INCREASE",
         importance: 8,
@@ -57,6 +61,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Front desk labor cost",
+        type: "Cost",
         category: "COST",
         direction: "DECREASE",
         importance: 7,
@@ -66,6 +71,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Response time",
+        type: "Processing time",
         category: "TIME",
         direction: "ACCELERATE",
         importance: 6,
@@ -75,6 +81,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "No-show rate",
+        type: "No-show rate",
         category: "CAPACITY",
         direction: "DECREASE",
         importance: 7,
@@ -89,6 +96,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
     variables: [
       {
         name: "No-show rate",
+        type: "No-show rate",
         category: "CAPACITY",
         direction: "DECREASE",
         importance: 8,
@@ -98,6 +106,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Idle chair capacity",
+        type: "Idle capacity",
         category: "UTILIZATION",
         direction: "DECREASE",
         importance: 7,
@@ -107,6 +116,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Employee revenue leakage",
+        type: "Leakage",
         category: "REVENUE",
         direction: "DECREASE",
         importance: 8,
@@ -116,6 +126,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Customer retention",
+        type: "Retention",
         category: "RETENTION",
         direction: "INCREASE",
         importance: 7,
@@ -125,6 +136,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Inventory shrinkage",
+        type: "Shrinkage",
         category: "INVENTORY",
         direction: "DECREASE",
         importance: 5,
@@ -139,6 +151,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
     variables: [
       {
         name: "Labor cost",
+        type: "Cost",
         category: "COST",
         direction: "DECREASE",
         importance: 9,
@@ -148,6 +161,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Food waste",
+        type: "Waste",
         category: "COST",
         direction: "DECREASE",
         importance: 8,
@@ -157,6 +171,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Table utilization",
+        type: "Utilization",
         category: "UTILIZATION",
         direction: "INCREASE",
         importance: 7,
@@ -166,6 +181,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "No-shows",
+        type: "No-show rate",
         category: "CAPACITY",
         direction: "DECREASE",
         importance: 7,
@@ -175,6 +191,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Repeat visits",
+        type: "Retention",
         category: "RETENTION",
         direction: "INCREASE",
         importance: 6,
@@ -189,6 +206,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
     variables: [
       {
         name: "Fuel cost per delivery",
+        type: "Cost",
         category: "COST",
         direction: "DECREASE",
         importance: 8,
@@ -198,6 +216,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Idle vehicle time",
+        type: "Idle capacity",
         category: "UTILIZATION",
         direction: "DECREASE",
         importance: 7,
@@ -207,6 +226,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Late deliveries",
+        type: "Delay",
         category: "RELIABILITY",
         direction: "DECREASE",
         importance: 8,
@@ -216,6 +236,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Driver churn",
+        type: "Churn",
         category: "RETENTION",
         direction: "DECREASE",
         importance: 6,
@@ -225,6 +246,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Damage claims",
+        type: "Loss",
         category: "RISK",
         direction: "DECREASE",
         importance: 5,
@@ -239,6 +261,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
     variables: [
       {
         name: "Incident resolution time",
+        type: "Processing time",
         category: "TIME",
         direction: "ACCELERATE",
         importance: 9,
@@ -248,6 +271,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Alert fatigue",
+        type: "Volume",
         category: "PRODUCTIVITY",
         direction: "DECREASE",
         importance: 7,
@@ -257,6 +281,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Audit preparation time",
+        type: "Manual effort",
         category: "COMPLIANCE",
         direction: "DECREASE",
         importance: 7,
@@ -266,6 +291,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Breach risk exposure",
+        type: "Exposure",
         category: "RISK",
         direction: "DECREASE",
         importance: 8,
@@ -275,6 +301,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
       },
       {
         name: "Analyst turnover",
+        type: "Churn",
         category: "RETENTION",
         direction: "DECREASE",
         importance: 5,
@@ -289,6 +316,7 @@ const VARIABLE_LIBRARY: Array<{ match: RegExp; variables: VariableTemplate[] }> 
 const DEFAULT_VARIABLES: VariableTemplate[] = [
   {
     name: "Revenue leakage",
+    type: "Leakage",
     category: "REVENUE",
     direction: "DECREASE",
     importance: 8,
@@ -298,6 +326,7 @@ const DEFAULT_VARIABLES: VariableTemplate[] = [
   },
   {
     name: "Labor cost",
+    type: "Cost",
     category: "COST",
     direction: "DECREASE",
     importance: 7,
@@ -307,6 +336,7 @@ const DEFAULT_VARIABLES: VariableTemplate[] = [
   },
   {
     name: "Customer retention",
+    type: "Retention",
     category: "RETENTION",
     direction: "INCREASE",
     importance: 7,
@@ -316,6 +346,7 @@ const DEFAULT_VARIABLES: VariableTemplate[] = [
   },
   {
     name: "Time to resolution",
+    type: "Cycle time",
     category: "TIME",
     direction: "ACCELERATE",
     importance: 6,
@@ -325,6 +356,7 @@ const DEFAULT_VARIABLES: VariableTemplate[] = [
   },
   {
     name: "Error rate",
+    type: "Error",
     category: "QUALITY",
     direction: "DECREASE",
     importance: 5,
@@ -422,6 +454,7 @@ function variableDraft(icpName: string, v: VariableTemplate, description: string
     name: v.name,
     description,
     category: v.category,
+    variableType: v.type ?? null,
     desiredDirection: v.direction,
     importanceScore: v.importance,
     target: v.target,

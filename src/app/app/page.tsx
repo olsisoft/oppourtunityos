@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SCORE_QUESTIONS, frontierText } from "@/components/value/scorecard";
-import { EVIDENCE_GAP_LABELS, getDashboardData } from "@/db/dashboard";
+import { EVIDENCE_GAP_LABELS, STALLED_AFTER_DAYS, getDashboardData } from "@/db/dashboard";
+import { formatDate } from "@/lib/utils";
 import {
   ASSUMPTION_KIND_LABELS,
   STAGE_LABELS,
@@ -202,6 +203,94 @@ export default async function DashboardPage({
                       <span className="text-right font-mono tabular-nums">{data.byVerdict[v]}</span>
                     </div>
                   ))}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Recent learning</CardTitle>
+                  <CardDescription>
+                    What the last evidence and experiment results changed: claims, scores, the Proof
+                    Frontier, the verdict.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.recentLearning.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      Nothing has changed yet. Record an experiment result or link evidence to a
+                      claim.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.recentLearning.map((c) => (
+                        <li key={c.id} className="text-sm">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Link
+                              href={`/app/w/${c.opportunity.workspaceId}/opportunities/${c.opportunity.id}`}
+                              className="font-medium hover:underline"
+                            >
+                              {c.opportunity.title}
+                            </Link>
+                            {c.movement !== "NONE" && (
+                              <Badge variant={c.movement === "FORWARD" ? "positive" : "negative"}>
+                                Proof Frontier moved: {frontierText(c.previousFrontier)} →{" "}
+                                {frontierText(c.newFrontier)}
+                              </Badge>
+                            )}
+                            {c.previousVerdict !== c.newVerdict && (
+                              <Badge variant="outline">
+                                Verdict {c.previousVerdict} → {c.newVerdict}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-muted-foreground text-xs">
+                            {c.summary} · Reason: {c.reason} · {formatDate(c.createdAt)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Opportunities with stalled learning</CardTitle>
+                  <CardDescription>
+                    No experiment completed in {STALLED_AFTER_DAYS} days while critical assumptions
+                    remain UNKNOWN.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {data.stalled.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No live opportunity is stalled.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {data.stalled.map(
+                        ({ opportunity: o, untestedCritical, daysSince, planned }) => (
+                          <li key={o.id} className="text-sm">
+                            <Link
+                              href={`/app/w/${o.workspaceId}/opportunities/${o.id}`}
+                              className="font-medium hover:underline"
+                            >
+                              {o.title}
+                            </Link>
+                            <p className="text-muted-foreground text-xs">
+                              {daysSince === null
+                                ? "No experiment completed yet"
+                                : `No experiment completed in ${daysSince} days`}{" "}
+                              · {untestedCritical} critical assumption
+                              {untestedCritical === 1 ? "" : "s"} remain
+                              {untestedCritical === 1 ? "s" : ""} UNKNOWN
+                              {planned ? ` · ${planned} planned` : ""}
+                            </p>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
                 </CardContent>
               </Card>
             </div>

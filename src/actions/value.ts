@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/db/prisma";
 import { assertWorkspaceAccess } from "@/db/workspaces";
 import {
+  completeExperimentSchema,
   createExperimentSchema,
   linkEvidenceClaimSchema,
   updateExperimentSchema,
@@ -21,6 +22,14 @@ import {
   recomputeWorkspaceOpportunities,
 } from "@/services/scoring/recompute";
 import { CAUSAL_DISTANCE_BY_LEVEL } from "@/services/value/epistemic";
+import {
+  classifyOutcome,
+  outcomeToDirection,
+  outcomeToSentiment,
+} from "@/services/value/experiment-outcome";
+import type { KnowledgeDiff, KnowledgeSnapshot } from "@/services/value/knowledge-change";
+import type { ValueAction } from "@/services/value/next-value-action";
+import { cleanText } from "@/lib/sanitize";
 import {
   VARIABLE_FIELDS,
   withFieldProvenance,
@@ -342,6 +351,68 @@ export async function updateVariableValueFieldsAction(input: unknown): Promise<A
 }
 
 // ---- Experiments -------------------------------------------------------------------------
+//
+// ASSUMPTION → EXPERIMENT → RESULT → EVIDENCE → CLAIM UPDATE → CAUSAL UPDATE →
+// PROOF FRONTIER MOVEMENT → SCORE / VERDICT UPDATE → NEXT BEST ACTION.
+// The outcome is decided by thresholds when they exist, never by the model.
+// The result becomes an Evidence item (type EXPERIMENT) that preserves the
+// methodology and limitations; the deterministic engine decides what it proves.
+
+type ExperimentFields = Omit<
+  ReturnType<typeof createExperimentSchema.parse>,
+  "opportunityId" | "title" | "hypothesis"
+>;
+
+async function verifyExperimentTargets(opportunityId: string, d: ExperimentFields) {
+  if (d.causalLinkId) {
+    const link = await prisma.causalLink.findFirst({
+      where: { id: d.causalLinkId, opportunityId },
+      select: { id: true },
+    });
+    if (!link) throw new Error("Causal link not found on this opportunity");
+  }
+  if (d.assumptionId) {
+    const a = await prisma.assumption.findFirst({
+      where: { id: d.assumptionId, opportunityId },
+      select: { id: true },
+    });
+    if (!a) throw new Error("Assumption not found on this opportunity");
+  }
+  if (d.valueChainNodeId) {
+    const n = await prisma.valueChainNode.findFirst({
+      where: { id: d.valueChainNodeId, opportunityId },
+      select: { id: true },
+    });
+    if (!n) throw new Error("Value chain level not found on this opportunity");
+  }
+}
+
+function experimentData(d: ExperimentFields) {
+  const text = (v: string | undefined) => (v === undefined ? undefined : (v ?? null));
+  const num = (v: number | null | undefined) => (v === undefined ? undefined : v);
+  return {
+    causalLinkId: d.causalLinkId === undefined ? undefined : (d.causalLinkId ?? null),
+    assumptionId: d.assumptionId === undefined ? undefined : (d.assumptionId ?? null),
+    valueChainNodeId: d.valueChainNodeId === undefined ? undefined : (d.valueChainNodeId ?? null),
+    experimentType: d.experimentType,
+    decisionQuestion: text(d.decisionQuestion),
+    design: text(d.design),
+    successMetric: text(d.successMetric),
+    successThreshold: num(d.successThreshold),
+    failureThreshold: num(d.failureThreshold),
+    unit: text(d.unit),
+    population: text(d.population),
+    sampleSize: num(d.sampleSize),
+    duration: text(d.duration),
+    expectedInformationGain: num(d.expectedInformationGain),
+    decisionImpact: num(d.decisionImpact),
+    effort: num(d.effort),
+    costEstimate: text(d.costEstimate),
+    timeEstimate: text(d.timeEstimate),
+    owner: text(d.owner),
+    notes: text(d.notes),
+  };
+}
 
 export async function createExperimentAction(
   input: unknown,
@@ -357,17 +428,18 @@ export async function createExperimentAction(
   return safeAction("experiment.create", async () => {
     const userId = await requireUserId();
     const o = await ownedOpportunity(userId, d.opportunityId);
+    await verifyExperimentTargets(o.id, d);
     const exp = await prisma.experiment.create({
       data: {
         opportunityId: o.id,
-        causalLinkId: d.causalLinkId ?? null,
-        assumptionId: d.assumptionId ?? null,
         title: d.title,
         hypothesis: d.hypothesis,
-        design: d.design ?? null,
-        successMetric: d.successMetric ?? null,
+        ...experimentData(d),
       },
     });
+    // A planned experiment changes the next-best-action ranking (effort / time / cost).
+    await recomputeOpportunity(o.id);
+    logger.info("experiment.created", { userId, opportunityId: o.id, experimentId: exp.id });
     revalidate(o.workspaceId);
     return { id: exp.id };
   });
@@ -384,31 +456,321 @@ export async function updateExperimentAction(input: unknown): Promise<ActionResu
   const d = parsed.data;
   return safeAction("experiment.update", async () => {
     const userId = await requireUserId();
-    const exp = await prisma.experiment.findUnique({ where: { id: d.experimentId } });
+    const exp = await prisma.experiment.findUnique({
+      where: { id: d.experimentId },
+      include: { opportunity: { select: { id: true, workspaceId: true } } },
+    });
     if (!exp) throw new Error("Experiment not found");
-    const o = await ownedOpportunity(userId, exp.opportunityId);
+    await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
+    await verifyExperimentTargets(exp.opportunityId, d);
+    const startedAt =
+      d.status === "RUNNING" && !exp.startedAt ? new Date() : (exp.startedAt ?? undefined);
     await prisma.experiment.update({
       where: { id: exp.id },
       data: {
+        title: d.title,
+        hypothesis: d.hypothesis,
         status: d.status,
-        result: d.result,
-        design: d.design,
-        successMetric: d.successMetric,
+        result: d.result === undefined ? undefined : (d.result ?? null),
+        startedAt: startedAt ?? undefined,
+        ...experimentData(d),
       },
     });
-    revalidate(o.workspaceId);
+    await recomputeOpportunity(exp.opportunityId);
+    revalidate(exp.opportunity.workspaceId);
     return undefined;
+  });
+}
+
+export interface ExperimentCompletion {
+  experimentId: string;
+  resultId: string;
+  evidenceId: string | null;
+  outcome: "SUPPORTED" | "CONTRADICTED" | "INCONCLUSIVE" | "INVALID";
+  outcomeSource: "THRESHOLD" | "USER";
+  outcomeExplanation: string;
+  knowledgeChangeId: string | null;
+  diff: KnowledgeDiff | null;
+  before: KnowledgeSnapshot | null;
+  after: KnowledgeSnapshot | null;
+  nextAction: ValueAction | null;
+}
+
+/**
+ * Record an experiment result and close the learning loop:
+ * result → evidence (type EXPERIMENT) → claim links → recompute → KnowledgeChange.
+ */
+export async function completeExperimentAction(
+  input: unknown,
+): Promise<ActionResult<ExperimentCompletion>> {
+  const parsed = completeExperimentSchema.safeParse(input);
+  if (!parsed.success)
+    return {
+      ok: false,
+      error: "Check the fields.",
+      fieldErrors: zodFieldErrors(parsed.error.issues),
+    };
+  const d = parsed.data;
+  return safeAction("experiment.complete", async () => {
+    const userId = await requireUserId();
+    const exp = await prisma.experiment.findUnique({
+      where: { id: d.experimentId },
+      include: {
+        opportunity: { select: { id: true, workspaceId: true, painId: true } },
+        resultRecord: true,
+      },
+    });
+    if (!exp) throw new Error("Experiment not found");
+    if (exp.resultRecord) throw new Error("This experiment already has a result");
+    await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
+    const workspaceId = exp.opportunity.workspaceId;
+
+    // 1. Outcome: thresholds decide when configured; otherwise the user's explicit
+    //    classification; otherwise INCONCLUSIVE. Never the model.
+    const decided = classifyOutcome({
+      observedValue: d.observedValue ?? null,
+      successThreshold: exp.successThreshold,
+      failureThreshold: exp.failureThreshold,
+    });
+    const outcome =
+      d.outcome === "INVALID"
+        ? "INVALID"
+        : decided
+          ? decided.outcome
+          : (d.outcome ?? "INCONCLUSIVE");
+    const outcomeSource = d.outcome === "INVALID" ? "USER" : decided ? "THRESHOLD" : "USER";
+    const outcomeExplanation =
+      d.outcome === "INVALID"
+        ? "Declared INVALID by you: the run cannot be trusted and produces no evidence."
+        : decided
+          ? decided.explanation
+          : d.outcome
+            ? "No deterministic threshold could decide; classified explicitly by you."
+            : "No thresholds and no explicit classification: the result stays INCONCLUSIVE.";
+
+    // 2. Raw evidence referenced must belong to the workspace.
+    const rawEvidence = d.rawEvidenceIds.length
+      ? await prisma.evidence.findMany({
+          where: { id: { in: d.rawEvidenceIds }, workspaceId },
+          select: { id: true },
+        })
+      : [];
+
+    const result = await prisma.experimentResult.create({
+      data: {
+        experimentId: exp.id,
+        outcome,
+        outcomeSource,
+        observedMetric: d.observedMetric ?? exp.successMetric ?? null,
+        observedValue: d.observedValue ?? null,
+        unit: d.unit ?? exp.unit ?? null,
+        sampleSize: d.sampleSize ?? exp.sampleSize ?? null,
+        measurementPeriod: d.measurementPeriod ?? null,
+        resultSummary: cleanText(d.resultSummary, 4000),
+        limitations: d.limitations ?? null,
+        confounders: d.confounders ?? null,
+        anomalies: d.anomalies ?? null,
+        rawEvidenceIds: rawEvidence.map((e) => e.id),
+        enteredBy: d.enteredBy ?? null,
+      },
+    });
+
+    // 3. The result becomes Evidence — except an INVALID run, which never does.
+    let evidenceId: string | null = null;
+    const direction = outcomeToDirection(outcome);
+    if (direction) {
+      const methodology = [
+        exp.design ? `Design: ${exp.design}` : null,
+        exp.population ? `Population: ${exp.population}` : null,
+        d.measurementPeriod ? `Period: ${d.measurementPeriod}` : null,
+        exp.successThreshold !== null || exp.failureThreshold !== null
+          ? `Thresholds: success ${exp.successThreshold ?? "—"}, failure ${exp.failureThreshold ?? "—"}${exp.unit ? ` ${exp.unit}` : ""}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const observed =
+        d.observedValue !== null && d.observedValue !== undefined
+          ? `${d.observedMetric ?? exp.successMetric ?? "Observed"}: ${d.observedValue}${(d.unit ?? exp.unit) ? ` ${d.unit ?? exp.unit}` : ""}`
+          : (d.observedMetric ?? null);
+      const excerpt = [
+        `EXPERIMENT RESULT (${outcome}, ${outcomeSource === "THRESHOLD" ? "decided by thresholds" : "classified by the user"}).`,
+        observed,
+        d.resultSummary,
+        d.limitations ? `Limitations: ${d.limitations}` : null,
+        d.confounders ? `Confounders: ${d.confounders}` : null,
+        d.anomalies ? `Anomalies: ${d.anomalies}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const evidence = await prisma.evidence.create({
+        data: {
+          workspaceId,
+          opportunityId: exp.opportunityId,
+          painId: null,
+          type: "EXPERIMENT",
+          origin: "EXPERIMENT_RESULT",
+          sourceTitle: cleanText(`Experiment: ${exp.title}`, 200),
+          sourceExcerpt: cleanText(excerpt, 4000),
+          sourceDate: new Date(),
+          sourceAuthor: d.enteredBy ?? null,
+          relevanceScore: d.relevanceScore,
+          strengthScore: d.strengthScore,
+          sentiment: outcomeToSentiment(outcome),
+          isDirectCustomer: d.isDirectCustomer,
+          hasExplicitPain: false,
+          hasEconomicImpact: d.hasEconomicImpact,
+          hasWorkaround: false,
+          hasPurchaseIntent: d.hasPurchaseIntent,
+          experimentId: exp.id,
+          experimentResultId: result.id,
+          methodology: methodology || null,
+          sampleSize: d.sampleSize ?? exp.sampleSize ?? null,
+          observedMetric: observed,
+          limitations: d.limitations ?? null,
+        },
+      });
+      evidenceId = evidence.id;
+
+      // 4. Link the evidence to the claims the experiment tested (+ extra claims).
+      const claimRows: Array<{
+        claimType: "CAUSAL_LINK" | "VALUE_CHAIN_NODE" | (typeof d.claims)[number]["claimType"];
+        valueChainNodeId?: string | null;
+        causalLinkId?: string | null;
+        direction: typeof direction;
+      }> = [];
+      if (exp.causalLinkId)
+        claimRows.push({ claimType: "CAUSAL_LINK", causalLinkId: exp.causalLinkId, direction });
+      if (exp.valueChainNodeId)
+        claimRows.push({
+          claimType: "VALUE_CHAIN_NODE",
+          valueChainNodeId: exp.valueChainNodeId,
+          direction,
+        });
+      for (const c of d.claims) {
+        claimRows.push({
+          claimType: c.claimType,
+          valueChainNodeId: c.valueChainNodeId ?? null,
+          causalLinkId: c.causalLinkId ?? null,
+          direction: c.direction,
+        });
+      }
+      for (const row of claimRows) {
+        if (row.valueChainNodeId) {
+          const n = await prisma.valueChainNode.findFirst({
+            where: { id: row.valueChainNodeId, opportunityId: exp.opportunityId },
+            select: { id: true },
+          });
+          if (!n) continue;
+        }
+        if (row.causalLinkId) {
+          const l = await prisma.causalLink.findFirst({
+            where: { id: row.causalLinkId, opportunityId: exp.opportunityId },
+            select: { id: true },
+          });
+          if (!l) continue;
+        }
+        await prisma.evidenceClaimLink.create({
+          data: {
+            evidenceId: evidence.id,
+            opportunityId: exp.opportunityId,
+            claimType: row.claimType,
+            valueChainNodeId: row.valueChainNodeId ?? null,
+            causalLinkId: row.causalLinkId ?? null,
+            direction: row.direction,
+            note: `From experiment "${exp.title}"`,
+          },
+        });
+      }
+      if (exp.assumptionId) {
+        await prisma.assumptionEvidence.upsert({
+          where: {
+            assumptionId_evidenceId: { assumptionId: exp.assumptionId, evidenceId: evidence.id },
+          },
+          create: { assumptionId: exp.assumptionId, evidenceId: evidence.id, direction },
+          update: { direction },
+        });
+        await refreshAssumptionFromLinks(exp.assumptionId);
+      }
+    }
+
+    await prisma.experiment.update({
+      where: { id: exp.id },
+      data: {
+        status: outcome === "INVALID" ? "INVALID" : "COMPLETED",
+        completedAt: new Date(),
+        result: cleanText(d.resultSummary, 4000),
+      },
+    });
+
+    // 5–7. Recompute claims, links, scores, frontier and verdict; record what changed.
+    const recomputed = await recomputeOpportunity(exp.opportunityId, {
+      trigger: "EXPERIMENT_RESULT",
+      experimentId: exp.id,
+      evidenceId,
+    });
+    logger.info("experiment.completed", {
+      userId,
+      opportunityId: exp.opportunityId,
+      experimentId: exp.id,
+      outcome,
+      outcomeSource,
+      evidenceId,
+      frontier: recomputed?.proofFrontierRung ?? null,
+    });
+    revalidate(workspaceId);
+    revalidatePath("/app");
+    return {
+      experimentId: exp.id,
+      resultId: result.id,
+      evidenceId,
+      outcome,
+      outcomeSource,
+      outcomeExplanation,
+      knowledgeChangeId: recomputed?.knowledgeChangeId ?? null,
+      diff: recomputed?.knowledgeDiff ?? null,
+      before: recomputed?.knowledgeBefore ?? null,
+      after: recomputed?.knowledgeAfter ?? null,
+      nextAction: recomputed?.nextAction ?? null,
+    };
+  });
+}
+
+/** Re-derive an assumption's status from its evidence links (mirrors actions/assumptions). */
+async function refreshAssumptionFromLinks(assumptionId: string) {
+  const { deriveAssumptionStatus } = await import("@/services/scoring/assumption-status");
+  const { signalWeight } = await import("@/services/scoring/evidence-score");
+  const { toEvidenceSignal } = await import("@/services/scoring/recompute");
+  const links = await prisma.assumptionEvidence.findMany({
+    where: { assumptionId },
+    include: { evidence: true },
+  });
+  const derived = deriveAssumptionStatus(
+    links.map((l) => ({
+      direction: l.direction,
+      weight: signalWeight(toEvidenceSignal(l.evidence)),
+    })),
+  );
+  await prisma.assumption.update({
+    where: { id: assumptionId },
+    data: { status: derived.status, confidence: derived.confidence },
   });
 }
 
 export async function deleteExperimentAction(experimentId: string): Promise<ActionResult> {
   return safeAction("experiment.delete", async () => {
     const userId = await requireUserId();
-    const exp = await prisma.experiment.findUnique({ where: { id: experimentId } });
+    const exp = await prisma.experiment.findUnique({
+      where: { id: experimentId },
+      include: { opportunity: { select: { id: true, workspaceId: true } } },
+    });
     if (!exp) throw new Error("Experiment not found");
-    const o = await ownedOpportunity(userId, exp.opportunityId);
+    await assertWorkspaceAccess(userId, exp.opportunity.workspaceId);
+    // Evidence produced by the experiment is kept (it is external material now);
+    // its experiment reference is nulled by the schema.
     await prisma.experiment.delete({ where: { id: experimentId } });
-    revalidate(o.workspaceId);
+    await recomputeOpportunity(exp.opportunityId);
+    revalidate(exp.opportunity.workspaceId);
     return undefined;
   });
 }

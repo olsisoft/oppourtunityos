@@ -66,7 +66,9 @@ export interface OpportunityReport {
   variable: { name: string; direction: string; category: string; provenance: string } | null;
   /** B. Valuable variable, field by field with its own status. */
   variableDetail: {
+    variableType: ReportField;
     target: ReportField;
+    scope: ReportField;
     currentState: ReportField;
     desiredState: ReportField;
     unit: ReportField;
@@ -88,13 +90,17 @@ export interface OpportunityReport {
   ladder: ReportLadderNode[];
   causalLinks: ReportCausalLink[];
   /** J. Proof frontier. */
-  frontier: { position: FrontierPosition; label: string; text: string };
+  frontier: { position: FrontierPosition; label: string; text: string; whyStops: string };
   /** K. Scorecard. null = INCOMPLETE. */
   scorecard: {
     opportunityPotential: number;
     evidenceConfidence: number;
     valueStrength: number | null;
+    valueCompleteness: string | null;
+    valueMissing: string[];
     causalConfidence: number | null;
+    causalCompleteness: string | null;
+    causalBlocking: string | null;
   };
   opportunityScore: number;
   evidenceScore: number;
@@ -143,6 +149,15 @@ export function buildOpportunityReport(
   const killWarnings = (o.killWarnings as unknown as KillWarning[] | null) ?? [];
   const v = o.variable;
   const frontierPosition = (o.proofFrontierRung as FrontierPosition | null) ?? "NONE";
+  const storedFrontier = o.proofFrontier as unknown as { whyStops?: string } | null;
+  const valueBreakdown = o.valueStrengthBreakdown as unknown as {
+    completeness?: string;
+    missing?: string[];
+  } | null;
+  const causalBreakdown = o.causalBreakdown as unknown as {
+    completeness?: string;
+    blocking?: { label: string } | null;
+  } | null;
   const riskiest =
     [...o.assumptions]
       .filter((a) => a.status !== "SUPPORTED")
@@ -176,7 +191,9 @@ export function buildOpportunityReport(
       : null,
     variableDetail: v
       ? {
+          variableType: field(v, "variableType", v.variableType),
           target: field(v, "target", v.target),
+          scope: field(v, "scope", v.scope),
           currentState: field(v, "currentState", v.currentState ?? o.pain?.currentState),
           desiredState: field(v, "desiredState", v.desiredState ?? o.pain?.desiredState),
           unit: field(v, "unit", v.unit),
@@ -219,12 +236,17 @@ export function buildOpportunityReport(
       position: frontierPosition,
       label: PROOF_RUNG_LABELS[frontierPosition],
       text: frontierSentence(frontierPosition),
+      whyStops: storedFrontier?.whyStops ?? "Not computed yet.",
     },
     scorecard: {
       opportunityPotential: o.opportunityScore,
       evidenceConfidence: o.evidenceScore,
       valueStrength: o.valueStrength,
+      valueCompleteness: valueBreakdown?.completeness ?? null,
+      valueMissing: valueBreakdown?.missing ?? [],
       causalConfidence: o.causalConfidence,
+      causalCompleteness: causalBreakdown?.completeness ?? null,
+      causalBlocking: causalBreakdown?.blocking?.label ?? null,
     },
     opportunityScore: o.opportunityScore,
     evidenceScore: o.evidenceScore,
@@ -281,7 +303,11 @@ export function reportToMarkdown(r: OpportunityReport): string {
         ? [
             `- Variable: ${r.variable.name} _(${r.variable.provenance})_`,
             `- Direction: ${r.variable.direction}`,
+            vd
+              ? `- Type (what is moved): ${vd.variableType.value} _(${vd.variableType.status})_`
+              : null,
             vd ? `- Target: ${vd.target.value} _(${vd.target.status})_` : null,
+            vd ? `- Scope: ${vd.scope.value} _(${vd.scope.status})_` : null,
             vd ? `- Current state: ${vd.currentState.value} _(${vd.currentState.status})_` : null,
             vd ? `- Desired state: ${vd.desiredState.value} _(${vd.desiredState.status})_` : null,
             vd ? `- Unit: ${vd.unit.value} _(${vd.unit.status})_` : null,
@@ -326,9 +352,19 @@ export function reportToMarkdown(r: OpportunityReport): string {
         : ""
     }`,
   );
-  lines.push(`## J. Proof frontier\n${r.frontier.text}`);
   lines.push(
-    `## K. Scorecard\n- Opportunity Potential: **${score(r.scorecard.opportunityPotential)}** — is the problem structurally attractive?\n- Evidence Confidence: **${score(r.scorecard.evidenceConfidence)}** (${r.confidence.toLowerCase()} confidence) — is the problem real?\n- Value Strength: **${score(r.scorecard.valueStrength)}** — if the variable moves, how much value?\n- Causal Confidence: **${score(r.scorecard.causalConfidence)}** — can the mechanism move it?\n- Verdict: **${r.verdictLabel.toUpperCase()}**`,
+    `## J. Proof frontier\n${r.frontier.text}\n\nWhy the frontier stops here: ${r.frontier.whyStops}`,
+  );
+  const vs =
+    r.scorecard.valueStrength === null
+      ? `INCOMPLETE · ${r.scorecard.valueCompleteness ?? "?"}${r.scorecard.valueMissing.length ? ` (missing: ${r.scorecard.valueMissing.join(", ")})` : ""}`
+      : `${r.scorecard.valueStrength}/100`;
+  const cc =
+    r.scorecard.causalConfidence === null
+      ? `INCOMPLETE · ${r.scorecard.causalCompleteness ?? "?"} links validated${r.scorecard.causalBlocking ? ` (blocked by ${r.scorecard.causalBlocking})` : ""}`
+      : `${r.scorecard.causalConfidence}/100`;
+  lines.push(
+    `## K. Scorecard\n- Opportunity Potential: **${score(r.scorecard.opportunityPotential)}** — is the problem structurally attractive?\n- Evidence Confidence: **${score(r.scorecard.evidenceConfidence)}** (${r.confidence.toLowerCase()} confidence) — is the problem real?\n- Value Strength: **${vs}** — if the variable moves, how much value?\n- Causal Confidence: **${cc}** — can the mechanism move it?\n- Verdict: **${r.verdictLabel.toUpperCase()}**`,
   );
   if (r.verdictReasons.length) lines.push(r.verdictReasons.map((x) => `  - ${x}`).join("\n"));
   lines.push(

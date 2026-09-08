@@ -1,28 +1,30 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowRight, FlaskConical, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowRight, FlaskConical } from "lucide-react";
 
-import { createExperimentAction } from "@/actions/value";
+import { ExperimentPlanDialog } from "@/components/value/experiment-plan-dialog";
+import { prefillFromAction } from "@/services/value/experiment-prefill";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { OpportunityWithRelations } from "@/db/workspaces";
+import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
 import type { ValueAction } from "@/services/value/next-value-action";
 
 export function NextValueActionCard({
   action,
   frontierLabel,
-  opportunityId,
+  opportunity,
+  insights,
   compact = false,
 }: {
   action: ValueAction | null;
   frontierLabel: string;
-  opportunityId: string;
+  opportunity: OpportunityWithRelations;
+  insights: OpportunityInsights;
   compact?: boolean;
 }) {
-  const router = useRouter();
-  const [planning, setPlanning] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
 
   if (!action) {
     return (
@@ -34,26 +36,7 @@ export function NextValueActionCard({
       </div>
     );
   }
-
-  const plan = async () => {
-    if (!action.experiment) return;
-    setPlanning(true);
-    const r = await createExperimentAction({
-      opportunityId,
-      causalLinkId: action.causalLinkId,
-      assumptionId: action.assumptionId,
-      title: action.what.slice(0, 180),
-      hypothesis: action.what,
-      design: action.experiment,
-      successMetric: action.evidenceToMove,
-    });
-    setPlanning(false);
-    if (!r.ok) toast.error(r.error);
-    else {
-      toast.success("Experiment planned");
-      router.refresh();
-    }
-  };
+  const s = action.scoring;
 
   return (
     <div className="bg-foreground text-background rounded-lg p-4">
@@ -64,6 +47,7 @@ export function NextValueActionCard({
         <ArrowRight className="mt-0.5 size-4 shrink-0" /> {action.what}
       </p>
       <dl className={compact ? "mt-2 space-y-1 text-xs" : "mt-3 grid gap-2 text-xs sm:grid-cols-2"}>
+        <Row label="Why this test now?" value={action.whyNow} className="sm:col-span-2" />
         <Row label="Why this matters" value={action.why} />
         <Row label="Affects" value={action.affects} />
         <Row label="If false" value={action.ifFalse} />
@@ -72,6 +56,14 @@ export function NextValueActionCard({
           <Row label="Recommended experiment" value={action.experiment} className="sm:col-span-2" />
         )}
       </dl>
+      <p className="text-background/60 mt-2 font-mono text-[10px]">
+        priority {action.priorityScore}/100 · impact {s.decisionImpact} · uncertainty{" "}
+        {s.uncertaintyReduction} · frontier {s.frontierMovement} · criticality {s.criticality} ÷
+        effort {s.effort} · time {s.time} · cost {s.cost}
+        {s.assumed.length
+          ? ` (${s.assumed.join(", ")} assumed — plan the experiment to refine)`
+          : ""}
+      </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="border-background/30 text-background">
           Current Proof Frontier: {frontierLabel}
@@ -79,13 +71,19 @@ export function NextValueActionCard({
         <Badge variant="outline" className="border-background/30 text-background">
           {action.type.replace(/_/g, " ").toLowerCase()}
         </Badge>
-        {action.experiment && (
-          <Button size="sm" variant="secondary" onClick={plan} disabled={planning}>
-            {planning ? <Loader2 className="animate-spin" /> : <FlaskConical />} Plan this
-            experiment
-          </Button>
-        )}
+        <Button size="sm" variant="secondary" onClick={() => setPlanOpen(true)}>
+          <FlaskConical /> Plan this experiment
+        </Button>
       </div>
+      {planOpen && (
+        <ExperimentPlanDialog
+          open={planOpen}
+          onOpenChange={setPlanOpen}
+          opportunity={opportunity}
+          insights={insights}
+          prefill={prefillFromAction(action, opportunity.title)}
+        />
+      )}
     </div>
   );
 }

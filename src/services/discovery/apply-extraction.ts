@@ -236,6 +236,7 @@ export async function applyExtraction(
       const base = {
         name,
         category: draft.category,
+        variableType: cleanOptionalText(draft.variableType, 80),
         desiredDirection: draft.desiredDirection,
         importanceScore: cleanScore(draft.importanceScore),
       };

@@ -14,6 +14,7 @@ import { Scorecard, frontierText } from "@/components/value/scorecard";
 import { VariableValueForm } from "@/components/value/variable-value-form";
 import type { WorkspaceGraph } from "@/db/workspaces";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
+import { compactLabel } from "@/services/value/variable-semantics";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,11 +27,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ALTERNATIVE_CATEGORY_LABELS,
-  DIRECTION_LABELS,
-  EVIDENCE_TYPE_LABELS,
-} from "@/domain/enums";
+import { ALTERNATIVE_CATEGORY_LABELS, EVIDENCE_TYPE_LABELS } from "@/domain/enums";
 
 export function NodeDetailSheet({
   selection,
@@ -127,9 +124,7 @@ function Body({
               <span className="text-muted-foreground text-xs uppercase">Valuable variable</span>
               <ProvenanceBadge provenance={v.provenance} />
             </div>
-            <SheetTitle>
-              {DIRECTION_LABELS[v.desiredDirection]} × {v.name}
-            </SheetTitle>
+            <SheetTitle>{compactLabel(v.desiredDirection, v.name)}</SheetTitle>
             <SheetDescription>
               {v.pains.length} pain{v.pains.length === 1 ? "" : "s"} attached. Each field carries
               its own status; leave a field empty when it is UNKNOWN rather than guessing.

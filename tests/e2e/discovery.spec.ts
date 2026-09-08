@@ -20,14 +20,15 @@ async function login(page: Page) {
 test("landing page states the product philosophy", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Stop asking AI for startup ideas." }),
+    page.getByRole("heading", {
+      name: "Know what is worth building before you spend months building it.",
+    }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Find what is worth building — and know what still needs proving."),
-  ).toBeVisible();
+  await expect(page.getByText(/Stop asking AI for startup ideas\./).first()).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "The AI doesn't decide what's true. Evidence does." }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "From assumption to decision" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Find an opportunity/ }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Validate an idea" }).first()).toBeVisible();
 });
@@ -92,6 +93,45 @@ test("demo workspace shows scored opportunities, evidence and a report", async (
   await expect(page.getByText("Riskiest assumption")).toBeVisible();
   await expect(page.getByText("Why this Value Strength")).toBeVisible();
   await expect(page.getByText("Why this Causal Confidence")).toBeVisible();
+  await expect(page.getByText("Learning history")).toBeVisible();
+  await expect(page.getByText(/Why the frontier stops here/).first()).toBeVisible();
+});
+
+test("the learning loop: plan an experiment, record a result, see the frontier move", async ({
+  page,
+}) => {
+  await login(page);
+  await page
+    .getByRole("link", { name: /Beauty Salons \(demo\)/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/app\/w\//);
+  await page.getByRole("tab", { name: /Radar/ }).click();
+  await page.getByRole("link", { name: "Employee revenue leakage detection" }).click();
+  await page.waitForURL(/\/opportunities\//);
+
+  // The seeded feasibility test is PLANNED with deterministic thresholds.
+  const card = page.locator("li", { hasText: "Concierge reconciliation" }).first();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Record result" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(/Decided by the thresholds/)).toBeVisible();
+  await dialog.getByLabel("Observed value").fill("97");
+  await expect(dialog.getByText("Supported", { exact: true }).first()).toBeVisible();
+  await dialog
+    .getByLabel(/Result summary/)
+    .fill("Exports from 5 salons matched 97% of appointments to payments (e2e run).");
+  await dialog.getByRole("button", { name: "Record result" }).click();
+
+  // The knowledge update is shown: before → after.
+  await expect(page.getByText("What the last test changed")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Proof frontier/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  // The result is now evidence and appears in the learning history.
+  await expect(page.getByText(/Experiment: Concierge reconciliation/).first()).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("a new workspace runs the 'I already have an idea' flow and updates the map", async ({

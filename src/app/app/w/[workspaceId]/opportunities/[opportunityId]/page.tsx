@@ -22,7 +22,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FieldStatusBadge } from "@/components/value/epistemic-badge";
 import { ExperimentsList } from "@/components/value/experiments-list";
+import { LearningHistory } from "@/components/value/learning-history";
 import { NextValueActionCard } from "@/components/value/next-value-action";
+import { prefillFromAction } from "@/services/value/experiment-prefill";
 import { ReportLadder } from "@/components/value/report-ladder";
 import { Scorecard } from "@/components/value/scorecard";
 import { ValueStrengthEditor } from "@/components/value/value-strength-editor";
@@ -32,7 +34,13 @@ import { ForbiddenError, requireUser } from "@/lib/session";
 import type { InterviewGuide } from "@/services/ai/schemas";
 import { buildOpportunityReport, reportToMarkdown } from "@/services/report/opportunity-report";
 import { deriveOpportunityInsights } from "@/services/scoring/opportunity-insights";
-import { fieldStatus } from "@/services/value/variable-semantics";
+import {
+  compactLabel,
+  directionGlyph,
+  fieldStatus,
+  polarityOf,
+} from "@/services/value/variable-semantics";
+import { VARIABLE_POLARITY_LABELS } from "@/domain/enums";
 
 export default async function OpportunityReportPage({
   params,
@@ -123,12 +131,27 @@ export default async function OpportunityReportPage({
                 {/* B. Valuable variable */}
                 <Section title="B · Valuable variable" provenance={report.variable?.provenance}>
                   {report.variable && v ? (
-                    <p className="font-medium">
-                      {report.variable.direction} × {report.variable.name}
-                      {v.target ? (
-                        <span className="text-muted-foreground font-normal"> × {v.target}</span>
-                      ) : null}
-                    </p>
+                    <>
+                      <p className="font-medium">{compactLabel(v.desiredDirection, v.name)}</p>
+                      <p className="text-muted-foreground text-xs">
+                        Action: {report.variable.direction} · Type:{" "}
+                        {v.variableType?.trim() ? v.variableType : "UNKNOWN"}
+                        {polarityOf(v.variableType, v.variablePolarity)
+                          ? ` (${VARIABLE_POLARITY_LABELS[polarityOf(v.variableType, v.variablePolarity)!].toLowerCase()})`
+                          : ""}
+                      </p>
+                      {v.parent && (
+                        <p className="mt-1 text-xs">
+                          <span className="text-muted-foreground">Parent economic variable: </span>
+                          {directionGlyph(v.parentDirection ?? v.parent.desiredDirection)}{" "}
+                          {v.parent.name}
+                          <FieldStatusBadge
+                            status={fieldStatus(v, "parentVariableId")}
+                            className="ml-1.5"
+                          />
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <Unknown />
                   )}
@@ -136,9 +159,19 @@ export default async function OpportunityReportPage({
                 {v && report.variableDetail && (
                   <div className="grid gap-3 rounded-md border p-3 sm:col-span-2 sm:grid-cols-3">
                     <VariableField
+                      label="Type"
+                      f={report.variableDetail.variableType}
+                      status={fieldStatus(v, "variableType")}
+                    />
+                    <VariableField
                       label="Target"
                       f={report.variableDetail.target}
                       status={fieldStatus(v, "target")}
+                    />
+                    <VariableField
+                      label="Scope"
+                      f={report.variableDetail.scope}
+                      status={fieldStatus(v, "scope")}
                     />
                     <VariableField
                       label="Current state"
@@ -260,12 +293,18 @@ export default async function OpportunityReportPage({
                     J · Proof frontier
                   </p>
                   <p className="mt-1">{report.frontier.text}</p>
-                  {insights.frontier?.blockedAt && (
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      Blocked at {insights.frontier.blockedAt.label}:{" "}
-                      {insights.frontier.blockedAt.reasons.join(" ")}
-                    </p>
-                  )}
+                  <p className="mt-1 text-xs">
+                    <span className="text-muted-foreground">Why the frontier stops here: </span>
+                    {report.frontier.whyStops}
+                  </p>
+                  {insights.frontier?.blockedAt &&
+                    (insights.frontier.blockedAt.blockers?.length ?? 0) > 1 && (
+                      <ul className="text-muted-foreground mt-1 list-disc pl-4 text-xs">
+                        {insights.frontier.blockedAt.blockers.slice(1).map((b) => (
+                          <li key={b.message}>{b.message}</li>
+                        ))}
+                      </ul>
+                    )}
                 </div>
               </CardContent>
             </Card>
@@ -309,12 +348,35 @@ export default async function OpportunityReportPage({
               <CardHeader>
                 <CardTitle>Experiments</CardTitle>
                 <CardDescription>
-                  Each experiment tests one causal link or one collapse-level assumption. Results
-                  become evidence only when you capture them as evidence.
+                  Assumption → experiment → result → evidence → knowledge update → frontier movement
+                  → verdict. Record a result and see exactly what it changed.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ExperimentsList experiments={o.experiments} />
+                <ExperimentsList
+                  experiments={o.experiments}
+                  opportunity={o}
+                  insights={insights}
+                  graph={graph}
+                  prefill={
+                    insights.primaryValueAction
+                      ? prefillFromAction(insights.primaryValueAction, o.title)
+                      : undefined
+                  }
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Learning history</CardTitle>
+                <CardDescription>
+                  How we came to believe what we believe: every change of a claim, a score, the
+                  Proof Frontier or the verdict, with what caused it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <LearningHistory changes={o.knowledgeChanges} />
               </CardContent>
             </Card>
 
@@ -343,7 +405,8 @@ export default async function OpportunityReportPage({
               <NextValueActionCard
                 action={insights.primaryValueAction}
                 frontierLabel={report.frontier.label}
-                opportunityId={o.id}
+                opportunity={o}
+                insights={insights}
               />
             )}
             {insights.valueActions.length > 1 && (
@@ -357,7 +420,7 @@ export default async function OpportunityReportPage({
                     {insights.valueActions.slice(1, 4).map((a) => (
                       <li key={`${a.type}-${a.priority}-${a.what}`} className="flex gap-2">
                         <span className="text-muted-foreground font-mono text-xs">
-                          {a.priority}
+                          {a.priority} · {a.priorityScore}
                         </span>
                         <span>{a.what}</span>
                       </li>
@@ -408,7 +471,14 @@ export default async function OpportunityReportPage({
                 <CardTitle>Why this Causal Confidence</CardTitle>
                 <CardDescription>
                   The weakest critical causal link decides. A link with no evidence makes the score
-                  INCOMPLETE.
+                  INCOMPLETE
+                  {insights.causal
+                    ? ` · ${insights.causal.completeness} chain links validated`
+                    : ""}
+                  {insights.causal?.blocking
+                    ? ` · blocked by ${insights.causal.blocking.label}`
+                    : ""}
+                  .
                 </CardDescription>
               </CardHeader>
               <CardContent>

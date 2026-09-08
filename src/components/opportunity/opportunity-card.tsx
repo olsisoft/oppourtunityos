@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Scorecard, frontierText } from "@/components/value/scorecard";
 import type { OpportunityWithRelations } from "@/db/workspaces";
-import { ASSUMPTION_KIND_LABELS, ASSUMPTION_STATUS_LABELS, DIRECTION_LABELS } from "@/domain/enums";
+import { ASSUMPTION_KIND_LABELS, ASSUMPTION_STATUS_LABELS } from "@/domain/enums";
+import { compactLabel } from "@/services/value/variable-semantics";
 import type { OpportunityInsights } from "@/services/scoring/opportunity-insights";
 
 export function OpportunityCard({
@@ -51,7 +52,7 @@ export function OpportunityCard({
           label="Valuable variable"
           value={
             o.variable
-              ? `${DIRECTION_LABELS[o.variable.desiredDirection]} × ${o.variable.name}${o.variable.target ? ` × ${o.variable.target}` : ""}`
+              ? `${compactLabel(o.variable.desiredDirection, o.variable.name)}${o.variable.variableType ? ` · ${o.variable.variableType}` : ""}`
               : null
           }
         />

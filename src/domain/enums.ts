@@ -10,7 +10,11 @@ import {
   Confidence,
   Criticality,
   EpistemicStatus,
+  ExperimentOutcome,
   ExperimentStatus,
+  ExperimentType,
+  KnowledgeTrigger,
+  OutcomeSource,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
@@ -21,6 +25,7 @@ import {
   Provenance,
   ValueChainLevel,
   VariableCategory,
+  VariablePolarity,
   Verdict,
 } from "@/generated/prisma/enums";
 
@@ -32,7 +37,11 @@ export {
   Confidence,
   Criticality,
   EpistemicStatus,
+  ExperimentOutcome,
   ExperimentStatus,
+  ExperimentType,
+  KnowledgeTrigger,
+  OutcomeSource,
   DesiredDirection,
   DiscoveryStage,
   EntryMode,
@@ -43,6 +52,7 @@ export {
   Provenance,
   ValueChainLevel,
   VariableCategory,
+  VariablePolarity,
   Verdict,
 };
 
@@ -147,6 +157,7 @@ export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   CUSTOMER_QUOTE: "Customer quote",
   MARKET_REPORT: "Market report",
   MANUAL_NOTE: "Manual note",
+  EXPERIMENT: "Experiment result",
   OTHER: "Other",
 };
 
@@ -155,6 +166,7 @@ export const EVIDENCE_ORIGIN_LABELS: Record<EvidenceOrigin, string> = {
   INTERVIEW: "Interview notes",
   RESEARCH_PROVIDER: "Research provider",
   DEMO: "Demo data",
+  EXPERIMENT_RESULT: "Experiment result",
 };
 
 export const SENTIMENT_LABELS: Record<EvidenceSentiment, string> = {
@@ -295,7 +307,60 @@ export const EXPERIMENT_STATUS_LABELS: Record<ExperimentStatus, string> = {
   PLANNED: "Planned",
   RUNNING: "Running",
   COMPLETED: "Completed",
-  ABANDONED: "Abandoned",
+  ABANDONED: "Cancelled",
+  CANCELLED: "Cancelled",
+  INVALID: "Invalid",
+};
+
+export const EXPERIMENT_TYPE_LABELS: Record<ExperimentType, string> = {
+  CUSTOMER_INTERVIEW: "Customer interview",
+  PRICING_TEST: "Pricing test",
+  LANDING_PAGE_TEST: "Landing page test",
+  CONCIERGE_TEST: "Concierge test",
+  PROTOTYPE_TEST: "Prototype test",
+  DATA_FEASIBILITY_TEST: "Data feasibility test",
+  AB_TEST: "A/B test",
+  MANUAL_WORKFLOW_TEST: "Manual workflow test",
+  COHORT_OBSERVATION: "Cohort observation",
+  TECHNICAL_SPIKE: "Technical spike",
+  RETROSPECTIVE_DATA_ANALYSIS: "Retrospective data analysis",
+  OTHER: "Other",
+};
+
+export const EXPERIMENT_OUTCOME_LABELS: Record<ExperimentOutcome, string> = {
+  SUPPORTED: "Supported",
+  CONTRADICTED: "Contradicted",
+  INCONCLUSIVE: "Inconclusive",
+  INVALID: "Invalid",
+};
+
+export const EXPERIMENT_OUTCOME_TONE: Record<
+  ExperimentOutcome,
+  "positive" | "negative" | "muted" | "warning"
+> = {
+  SUPPORTED: "positive",
+  CONTRADICTED: "negative",
+  INCONCLUSIVE: "muted",
+  INVALID: "warning",
+};
+
+export const OUTCOME_SOURCE_LABELS: Record<OutcomeSource, string> = {
+  THRESHOLD: "decided by the configured thresholds",
+  USER: "classified by you (no deterministic threshold)",
+};
+
+export const KNOWLEDGE_TRIGGER_LABELS: Record<KnowledgeTrigger, string> = {
+  EXPERIMENT_RESULT: "Experiment result",
+  EVIDENCE_ADDED: "Evidence added",
+  EVIDENCE_LINKED: "Evidence linked to a claim",
+  ASSUMPTION_UPDATED: "Assumption updated",
+  RECOMPUTE: "Recompute",
+};
+
+export const VARIABLE_POLARITY_LABELS: Record<VariablePolarity, string> = {
+  POSITIVE: "More is better",
+  NEGATIVE: "Less is better",
+  NEUTRAL: "Context-dependent",
 };
 
 export const ALTERNATIVE_CATEGORY_LABELS: Record<AlternativeCategory, string> = {

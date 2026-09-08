@@ -91,13 +91,17 @@ async function seedBeautySalons(userId: string) {
       {
         name: "No-show rate",
         category: "CAPACITY",
+        variableType: "No-show rate",
         desiredDirection: "DECREASE",
         importanceScore: 9,
         description: "Share of booked appointments not honoured or cancelled same day.",
       },
       {
+        // The direct variable is LEAKAGE (a loss); the economic category is a cost
+        // to the owner. "Reduce × Leakage" is coherent; the parent (net revenue) benefits.
         name: "Employee revenue leakage",
-        category: "REVENUE",
+        category: "COST",
+        variableType: "Leakage",
         desiredDirection: "DECREASE",
         importanceScore: 9,
         description: "Revenue lost through unrecorded services, discounts and cash handling.",
@@ -105,13 +109,15 @@ async function seedBeautySalons(userId: string) {
       {
         name: "Idle chair capacity",
         category: "CAPACITY",
-        desiredDirection: "INCREASE",
+        variableType: "Idle capacity",
+        desiredDirection: "DECREASE",
         importanceScore: 8,
         description: "Chair-hours available but not sold.",
       },
       {
         name: "Customer retention",
         category: "RETENTION",
+        variableType: "Retention",
         desiredDirection: "INCREASE",
         importanceScore: 7,
         description: "Share of clients returning within 90 days.",
@@ -119,6 +125,7 @@ async function seedBeautySalons(userId: string) {
       {
         name: "Inventory shrinkage",
         category: "INVENTORY",
+        variableType: "Shrinkage",
         desiredDirection: "DECREASE",
         importanceScore: 6,
         description: "Retail and backbar product that disappears without a sale.",
@@ -142,12 +149,19 @@ async function seedBeautySalons(userId: string) {
   // field carries its own provenance; a field nobody stated stays null (UNKNOWN).
   const H: Provenance = "AI_HYPOTHESIS";
   const I: Provenance = "INTERVIEW";
-  const baseFieldProvenance = { name: H, category: H, desiredDirection: H, importanceScore: H };
+  const baseFieldProvenance = {
+    name: H,
+    category: H,
+    variableType: H,
+    desiredDirection: H,
+    importanceScore: H,
+  };
   const chairHour = await prisma.variable.create({
     data: {
       icpId: icp.id,
       name: "Revenue per available chair-hour",
       category: "REVENUE",
+      variableType: "Revenue",
       desiredDirection: "INCREASE",
       importanceScore: 9,
       description:
@@ -164,6 +178,7 @@ async function seedBeautySalons(userId: string) {
       icpId: icp.id,
       name: "Net revenue reaching the owner",
       category: "REVENUE",
+      variableType: "Revenue",
       desiredDirection: "PROTECT",
       importanceScore: 9,
       description:
@@ -172,6 +187,31 @@ async function seedBeautySalons(userId: string) {
       whoValuesIt: "Owner-operator",
       provenance: H,
       fieldProvenance: { ...baseFieldProvenance, unit: H, whoValuesIt: H },
+    },
+  });
+  // Parent operational variable between the no-show rate and the economic parent.
+  const chairUtil = await prisma.variable.create({
+    data: {
+      icpId: icp.id,
+      name: "Chair utilization",
+      category: "UTILIZATION",
+      variableType: "Utilization",
+      desiredDirection: "INCREASE",
+      importanceScore: 8,
+      description:
+        "Parent operational variable: share of paid chair-hours actually sold. No-shows and idle capacity both lower it; it feeds revenue per available chair-hour.",
+      unit: "% of paid chair-hours sold",
+      whoValuesIt: "Owner-operator",
+      parentVariableId: chairHour.id,
+      parentDirection: "INCREASE",
+      provenance: H,
+      fieldProvenance: {
+        ...baseFieldProvenance,
+        unit: H,
+        whoValuesIt: H,
+        parentVariableId: H,
+        parentDirection: H,
+      },
     },
   });
   await prisma.variable.update({
@@ -184,16 +224,20 @@ async function seedBeautySalons(userId: string) {
       whoValuesIt: "Owner-operator (revenue) and stylists (commission)",
       whyItMatters:
         "Each no-show is an unsold peak chair-hour; one owner quantified it at about €1,200 a month for 8 chairs.",
-      parentVariableId: chairHour.id,
+      scope: "peak-hour bookings at single-location salons",
+      parentVariableId: chairUtil.id,
+      parentDirection: "INCREASE",
       fieldProvenance: {
         ...baseFieldProvenance,
         target: H,
+        scope: H,
         currentState: I,
         desiredState: H,
         unit: H,
         whoValuesIt: I,
         whyItMatters: I,
         parentVariableId: H,
+        parentDirection: H,
       },
     },
   });
@@ -208,9 +252,13 @@ async function seedBeautySalons(userId: string) {
       whyItMatters:
         "Discovered months late, usually after a stylist leaves: €9,000 over six months in one demo interview.",
       parentVariableId: netRevenue.id,
+      parentDirection: "INCREASE",
+      scope: "services, discounts and cash handled by employees",
       fieldProvenance: {
         ...baseFieldProvenance,
         target: H,
+        scope: H,
+        parentDirection: H,
         currentState: I,
         desiredState: H,
         unit: H,
@@ -228,7 +276,8 @@ async function seedBeautySalons(userId: string) {
       desiredState: "> 80% occupancy",
       unit: "% occupancy, mid-week afternoons",
       whoValuesIt: "Owner-operator",
-      parentVariableId: chairHour.id,
+      parentVariableId: chairUtil.id,
+      parentDirection: "INCREASE",
       fieldProvenance: {
         ...baseFieldProvenance,
         target: H,
@@ -237,6 +286,7 @@ async function seedBeautySalons(userId: string) {
         unit: H,
         whoValuesIt: H,
         parentVariableId: H,
+        parentDirection: H,
       },
     },
   });
@@ -254,8 +304,14 @@ async function seedBeautySalons(userId: string) {
     data: {
       target: "retail and backbar product that disappears without a sale or service record",
       parentVariableId: netRevenue.id,
+      parentDirection: "INCREASE",
       // current state: UNKNOWN — "a few hundred euros a month" is a guess, not a measurement.
-      fieldProvenance: { ...baseFieldProvenance, target: H, parentVariableId: H },
+      fieldProvenance: {
+        ...baseFieldProvenance,
+        target: H,
+        parentVariableId: H,
+        parentDirection: H,
+      },
     },
   });
 
@@ -1138,6 +1194,20 @@ async function seedBeautySalons(userId: string) {
     ],
   );
 
+  // First deterministic pass: ladders stated, nothing linked to them yet.
+  // The later pass records what the linked evidence changed — the learning
+  // history is derived from the seed's own evidence, never written by hand.
+  const allOpps = [
+    leakageOpp,
+    noShowOpp,
+    idleOpp,
+    shrinkageOpp,
+    pricingOpp,
+    loyaltyOpp,
+    websiteOpp,
+  ];
+  for (const o of allOpps) await recomputeOpportunity(o.id);
+
   // ---- evidence → claims. Only what the excerpt actually shows. The engine
   // decides the status; the frontier is derived, never declared.
   const claim = async (
@@ -1414,11 +1484,26 @@ async function seedBeautySalons(userId: string) {
       causalLinkId: leakageLadder.link("MECHANISM", "CAPABILITY"),
       assumptionId: a7.id,
       title: "Concierge reconciliation for five salons",
+      experimentType: "DATA_FEASIBILITY_TEST",
       hypothesis:
         "Exports from the two most common POS and booking tools are enough to match at least 95% of appointments to payments.",
+      decisionQuestion:
+        "Can we build the reconciliation mechanism on the data salons actually have?",
       design:
         "Obtain one month of POS and booking exports from five salons; match them by hand; count unmatched appointments and discrepancies found per salon.",
-      successMetric: "Match rate ≥ 95% and at least one discrepancy surfaced per salon.",
+      successMetric: "Share of appointments matched to a payment",
+      successThreshold: 95,
+      failureThreshold: 80,
+      unit: "% of appointments matched",
+      population: "5 salons, 8–12 chairs, using the two most common POS / booking tools",
+      sampleSize: 5,
+      duration: "2 days",
+      expectedInformationGain: 8,
+      decisionImpact: 9,
+      effort: 4,
+      costEstimate: "€0 (own time)",
+      timeEstimate: "2 days",
+      owner: "Founder",
       status: "PLANNED",
     },
   });
@@ -1441,17 +1526,13 @@ async function seedBeautySalons(userId: string) {
     });
   }
 
-  // Compute scores deterministically.
-  for (const o of [
-    leakageOpp,
-    noShowOpp,
-    idleOpp,
-    shrinkageOpp,
-    pricingOpp,
-    loyaltyOpp,
-    websiteOpp,
-  ]) {
-    const r = await recomputeOpportunity(o.id);
+  // Compute scores deterministically. The second pass records what the linked
+  // evidence changed (learning history).
+  for (const o of allOpps) {
+    const r = await recomputeOpportunity(o.id, {
+      trigger: "EVIDENCE_LINKED",
+      evidenceId: o.id === leakageOpp.id ? e6.id : null,
+    });
     console.log(
       `  ${o.title}: potential ${r?.opportunityScore} · evidence ${r?.evidenceScore} · value ${r?.valueStrength ?? "INCOMPLETE"} · causal ${r?.causalConfidence ?? "INCOMPLETE"} · frontier ${r?.proofFrontierRung ?? "NONE"} · ${r?.verdict}`,
     );
@@ -1559,6 +1640,7 @@ async function seedDentalIdea(userId: string) {
       {
         icpId: icp.id,
         name: "Missed calls",
+        variableType: "Loss",
         category: "REVENUE",
         desiredDirection: "DECREASE",
         importanceScore: 8,
@@ -1568,6 +1650,7 @@ async function seedDentalIdea(userId: string) {
       {
         icpId: icp.id,
         name: "Booking conversion",
+        variableType: "Conversion",
         category: "CONVERSION",
         desiredDirection: "INCREASE",
         importanceScore: 8,
@@ -1576,6 +1659,7 @@ async function seedDentalIdea(userId: string) {
       {
         icpId: icp.id,
         name: "Front desk labor cost",
+        variableType: "Cost",
         category: "COST",
         desiredDirection: "DECREASE",
         importanceScore: 7,
